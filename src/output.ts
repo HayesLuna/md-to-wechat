@@ -61,6 +61,19 @@ function inlineStyles(root:HTMLElement,s:Settings) {
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
+ // WeChat's older overlap checker miscounts mixed direct text + inline marks.
+ // Keep rich text inline, but give direct text its own leaf span in mixed blocks.
+ // Traverse DOM nodes (not Markdown) so nested lists and code stay intact.
+ for(const block of root.querySelectorAll<HTMLElement>('p,li,h1,h2,h3,h4,h5,h6,blockquote')) {
+  if(!block.children.length)continue;
+  for(const node of Array.from(block.childNodes)) {
+   if(node.nodeType!==Node.TEXT_NODE||!node.textContent?.trim())continue;
+   const leaf=document.createElement('span');
+   leaf.style.fontSize=block.style.fontSize;leaf.style.lineHeight=block.style.lineHeight;leaf.style.display='inline';
+   node.replaceWith(leaf);leaf.appendChild(node);
+  }
+ }
+
 }
 export function readableText(root:Node):string {
  function walk(node:Node,depth=0):string {

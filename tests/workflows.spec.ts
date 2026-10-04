@@ -192,3 +192,26 @@ test('WeChat typography uses explicit pixel line heights in lists and inline mar
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.writing-pane')).toBeHidden();await expect(page.locator('.preview-paper li strong').first()).toHaveCSS('display','inline');
  await page.screenshot({path:'/tmp/mojian-wechat-lineheight.png'});
 });
+
+test('mixed rich text avoids legacy WeChat fragment-count overlap warnings',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);
+ const raw='**写下你的想法**，不用急着排版。\n\n3. 用标题、列表和引用，让内容更有层次。\n   - 保持简洁，也保留 *恰当的强调*。\n   - 试试 [Markdown 指南](https://www.markdownguide.org/)，或写一段 `行内代码`。\n\n- **第一段**，这是多段列表项。\n\n  第二段 *强调*，保持独立段落。\n\n  > **引用**与正文。';
+ await setDoc(page,raw);await prepared(page);await page.getByRole('button',{name:'公众号预览',exact:true}).click();await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+ const result=await page.evaluate(async()=>{
+  const items=await navigator.clipboard.read();const html=await(await items[0].getType('text/html')).text();const text=await(await items[0].getType('text/plain')).text();
+  // Reproduce the direct-text fallback and Range fragment counting in official
+  // 0.2.16 (96eca1a), not a claim to replace the full official verifier.
+  const legacy=(html:string,width:number)=>{const root=document.createElement('div');root.style.width=width+'px';root.innerHTML=html;document.body.append(root);
+   const warnings=Array.from(root.querySelectorAll<HTMLElement>('p,li,h1,h2,h3,h4,h5,h6,div,section,td,a')).filter(el=>{
+    if(!Array.from(el.childNodes).some(n=>n.nodeType===Node.TEXT_NODE&&n.textContent?.trim()))return false;
+    const range=document.createRange();range.selectNodeContents(el);const count=Array.from(range.getClientRects()).filter(r=>r.height>0).length;
+    return count>=2&&range.getBoundingClientRect().height/count<parseFloat(getComputedStyle(el).fontSize)*.95;
+   }).map(el=>el.textContent);root.remove();return warnings;
+  };
+  const baseline='<ol><li style="font-size:16px;line-height:29.6px"><strong>写下你的想法</strong>，不用急着排版。</li></ol>';
+  return {html,text,baseline:legacy(baseline,677),warnings:[320,375,677].map(width=>legacy(html,width))};
+ });
+ expect(result.baseline.length).toBeGreaterThan(0);expect(result.warnings).toEqual([[],[],[]]);expect(result.text).toContain('写下你的想法，不用急着排版。');expect(result.text).toContain('3. 用标题、列表和引用');expect(result.text).toContain('保持简洁，也保留 恰当的强调。');expect(result.text).toContain('Markdown 指南，或写一段 行内代码');expect(await markdown(page)).toBe(raw);
+ await expect(page.locator('.preview-paper ol')).toHaveAttribute('start','3');await expect(page.locator('.preview-paper ol ul li')).toHaveCount(2);await expect(page.locator('.preview-paper li>p')).toHaveCount(2);await expect(page.locator('.preview-paper strong').first()).toHaveCSS('display','inline');
+ await page.setViewportSize({width:390,height:844});await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=380);await page.screenshot({path:'/tmp/mojian-wechat-compatible-mobile.png'});
+});
