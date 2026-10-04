@@ -78,6 +78,10 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
   }
  }
 
+ // The quote padding already provides bottom space; avoid stacking its last
+ // child's normal paragraph/list/quote margin onto that padding.
+ for(const quote of root.querySelectorAll('blockquote')){const last=quote.lastElementChild as HTMLElement|null;if(last)last.style.marginBottom='0';}
+
 }
 export function readableText(root:Node,codeSources:CodeSource[]=[]):string {
  function walk(node:Node,depth=0):string {
