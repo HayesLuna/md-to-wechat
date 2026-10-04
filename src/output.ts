@@ -59,16 +59,17 @@ function inlineStyles(root:HTMLElement,s:Settings) {
   el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
   if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.display='inline';
  }
- // WeChat flags <pre> even for code. Use a static, wrapping code container
- // in both preview and clipboard; raw text and highlight spans remain intact.
+ // Static WeChat code card: non-empty dot spans survive paste normalization.
+ // Keep code in its own horizontal scroll area, with original text unchanged.
+ // Decorative dots use the documented per-node dark-mode contrast exemption.
  for(const pre of root.querySelectorAll<HTMLElement>('pre')) {
-  const block=document.createElement('section');block.setAttribute('data-code-block','');block.setAttribute('style',pre.getAttribute('style')||'');
-  block.style.whiteSpace='pre-wrap';block.style.overflowWrap='anywhere';block.style.maxWidth='100%';block.style.boxSizing='border-box';
-  const code=pre.querySelector<HTMLElement>('code');if(code){code.style.whiteSpace='pre-wrap';code.style.overflowWrap='anywhere';}
-  block.style.borderRadius='10px';block.style.border=`1px solid ${dark?'#3d4046':'#e1e3e6'}`;
-  const chrome=document.createElement('div');chrome.setAttribute('data-code-chrome','');chrome.setAttribute('aria-hidden','true');chrome.setAttribute('style','display:block;white-space:normal;line-height:12px;margin:0 0 14px;');
-  for(const color of ['#ff5f57','#febc2e','#28c840']){const dot=document.createElement('span');dot.setAttribute('style',`display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;`);chrome.append(dot);}
-  block.append(chrome,...Array.from(pre.childNodes));pre.replaceWith(block);
+  const block=document.createElement('section');block.setAttribute('data-code-block','');
+  block.setAttribute('style',`margin:10px 0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;border-radius:8px;border:1px solid ${dark?'#30363d':'#dbe3ef'};background:${dark?'#0d1117':'#f8fafc'};color:${dark?'#c9d1d9':'#111827'};font-family:Menlo,Consolas,Monaco,monospace;font-size:14px;line-height:24.5px;overflow:hidden;`);
+  const chrome=document.createElement('div');chrome.setAttribute('data-code-chrome','');chrome.setAttribute('aria-hidden','true');chrome.setAttribute('style','display:block;padding:10px 14px 6px;white-space:normal;font-size:16px;line-height:16px;');
+  for(const color of ['#ff5f57','#febc2e','#28c840']){const dot=document.createElement('span');dot.textContent='●';dot.setAttribute('data-ignore-dm','low-contrast');dot.setAttribute('style',`display:inline-block;color:${color};font-family:Arial,sans-serif;font-size:16px;line-height:16px;margin-right:6px;`);chrome.append(dot);}
+  const scroll=document.createElement('section');scroll.setAttribute('data-code-scroll','');scroll.setAttribute('data-ignore-width','');scroll.setAttribute('style','display:block;max-width:100%;min-width:0;overflow-x:auto;padding:0 14px 14px;box-sizing:border-box;font-size:14px;line-height:24.5px;');
+  const code=pre.querySelector<HTMLElement>('code');if(code){code.setAttribute('style','display:block;white-space:pre;overflow-wrap:normal;word-break:normal;font-family:Menlo,Consolas,Monaco,monospace;font-size:14px;line-height:24.5px;tab-size:4;background:transparent;padding:0;color:inherit;');for(const token of code.querySelectorAll<HTMLElement>('span')){token.style.fontSize='14px';token.style.lineHeight='24.5px';}scroll.append(code);}
+  block.append(chrome,scroll);pre.replaceWith(block);
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
@@ -92,7 +93,8 @@ export function readableText(root:Node):string {
   if(!(node instanceof Element))return Array.from(node.childNodes,n=>walk(n,depth)).join('');
   const tag=node.tagName;
   if(tag==='BR')return '\n';
-  if(tag==='PRE'||node.hasAttribute('data-code-block'))return '\n'+(node.textContent||'')+'\n\n';
+  if(node.hasAttribute('data-code-block'))return '\n'+(node.querySelector('code')?.textContent||'')+'\n\n';
+  if(tag==='PRE')return '\n'+(node.textContent||'')+'\n\n';
   if(tag==='IMG')return '[图片：'+(node.getAttribute('alt')||'图片')+']\n';
   if(tag==='TR')return Array.from(node.children,n=>walk(n,depth).replace(/^\n+|\n+$/g,'')).join('\t')+'\n';
   if(tag==='UL'||tag==='OL') {
