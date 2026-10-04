@@ -57,7 +57,7 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
   const line=lineValue.endsWith('px')?parseFloat(lineValue):lineValue&&lineValue!=='inherit'&&lineValue!=='normal'?size*parseFloat(lineValue):parentLine;
   el.style.fontSize=Number(size.toFixed(2))+'px';
   el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
-  if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.display='inline';
+  if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.setProperty('display','inline','important');
  }
  // Generated from Markdown token source, never from rendered editor DOM.
  for(const pre of root.querySelectorAll<HTMLElement>('pre[data-code-index]')) {
@@ -65,6 +65,19 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
+ // Paste importers can normalize bare link/code text differently from adjacent
+ // styled spans. Give their text the same inline leaf structure; keep safe hrefs
+ // and never touch block code cards or introduce line breaks.
+ for(const mark of root.querySelectorAll<HTMLElement>('a,code')) {
+  if(mark.closest('[data-code-block]'))continue;
+  for(const node of Array.from(mark.childNodes)) {
+   if(node.nodeType!==Node.TEXT_NODE)continue;
+   const leaf=document.createElement('span');
+   leaf.style.fontSize=mark.style.fontSize;leaf.style.lineHeight=mark.style.lineHeight;
+   leaf.style.setProperty('display','inline','important');
+   node.replaceWith(leaf);leaf.appendChild(node);
+  }
+ }
  // WeChat's older overlap checker miscounts mixed direct text + inline marks.
  // Keep rich text inline, but give direct text its own leaf span in mixed blocks.
  // Traverse DOM nodes (not Markdown) so nested lists and code stay intact.
@@ -73,7 +86,7 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
   for(const node of Array.from(block.childNodes)) {
    if(node.nodeType!==Node.TEXT_NODE||!node.textContent?.trim())continue;
    const leaf=document.createElement('span');
-   leaf.style.fontSize=block.style.fontSize;leaf.style.lineHeight=block.style.lineHeight;leaf.style.display='inline';
+   leaf.style.fontSize=block.style.fontSize;leaf.style.lineHeight=block.style.lineHeight;leaf.style.setProperty('display','inline','important');
    node.replaceWith(leaf);leaf.appendChild(node);
   }
  }
