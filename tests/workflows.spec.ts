@@ -171,3 +171,24 @@ for(const viewport of [{width:1440,height:1000},{width:390,height:844}]) {
   expect(await page.evaluate(()=>document.body.style.overflow)).toBe('');
  });
 }
+
+test('WeChat typography uses explicit pixel line heights in lists and inline marks',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);
+ const raw='# 标题\n\n1. **写下你的想法**，不用急着排版。\n2. 用标题、列表和引用，让内容更有层次。\n   - 保持简洁，也保留 *恰当的强调*。\n   - 试试 [Markdown 指南](https://www.markdownguide.org/)，或写一段 `行内代码`。\n\n- 第一段\n\n  第二段\n\n  > 引用\n\n| A | B |\n| --- | --- |\n| 中文 | **粗体** |\n\n```java\n/* 多行\n注释 */\n\t  code\n\n  end\n```';
+ await setDoc(page,raw);await prepared(page);await page.getByRole('button',{name:'公众号预览',exact:true}).click();
+ await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+ const result=await page.evaluate(async()=>{
+  const items=await navigator.clipboard.read();const html=await(await items[0].getType('text/html')).text();const root=document.createElement('div');root.innerHTML=html;
+  const textElements=Array.from(root.querySelectorAll<HTMLElement>('section,p,h1,ul,ol,li,strong,em,a,code,span,pre,table,th,td,blockquote'));
+  const invalid=textElements.filter(e=>!e.style.fontSize.endsWith('px')||!e.style.lineHeight.endsWith('px')||parseFloat(e.style.lineHeight)<parseFloat(e.style.fontSize)).map(e=>e.outerHTML);
+  return {types:items[0].types,html,invalid,marks:Array.from(root.querySelectorAll<HTMLElement>('li strong,li em,li a,li code')).map(e=>({tag:e.tagName,display:e.style.display,line:e.style.lineHeight})),paragraphs:root.querySelectorAll('li>p').length,code:root.querySelector('pre')?.textContent};
+ });
+ expect(result.types).toEqual(expect.arrayContaining(['text/html','text/plain']));expect(result.invalid).toEqual([]);expect(result.marks.map(e=>e.tag)).toEqual(expect.arrayContaining(['STRONG','EM','A','CODE']));expect(result.marks.every(e=>e.display==='inline')).toBe(true);expect(result.paragraphs).toBeGreaterThan(1);expect(result.code).toContain('\t  code\n\n  end');expect(await markdown(page)).toBe(raw);
+ // Same HTML in preview and clipboard for articles without local assets or diagrams.
+ expect(await page.locator('.preview-paper').innerHTML()).toBe(result.html);
+ await page.getByLabel('正文字号',{exact:true}).focus();await page.keyboard.press('End');
+ await page.getByLabel('行距',{exact:true}).focus();await page.keyboard.press('Home');await prepared(page);
+ await expect(page.locator('.preview-paper li').first()).toHaveCSS('font-size','20px');await expect(page.locator('.preview-paper li').first()).toHaveCSS('line-height','30px');
+ await page.setViewportSize({width:390,height:844});await expect(page.locator('.writing-pane')).toBeHidden();await expect(page.locator('.preview-paper li strong').first()).toHaveCSS('display','inline');
+ await page.screenshot({path:'/tmp/mojian-wechat-lineheight.png'});
+});

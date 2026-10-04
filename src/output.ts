@@ -17,11 +17,11 @@ export function headings(markdown:string) {
 }
 function inlineStyles(root:HTMLElement,s:Settings) {
  const color=/^#[0-9a-f]{6}$/i.test(s.color)?s.color:'#a6493d';const dark=s.codeTheme==='dark';
- root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${s.lineHeight};color:#303030;word-wrap:break-word;`);
+ root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${Number((s.fontSize*s.lineHeight).toFixed(2))}px;color:#303030;word-wrap:break-word;`);
  const rules:Record<string,string>={
  p:'margin:0 0 20px;line-height:inherit;',h1:`font-size:26px;line-height:1.45;font-weight:700;margin:8px 0 24px;color:${s.theme==='simple'?'#242424':color};`,
  h2:`font-size:22px;line-height:1.5;font-weight:700;margin:30px 0 18px;color:${color};${s.theme==='default'?`border-bottom:1px solid #dedede;padding-bottom:8px;`:''}`,
- h3:`font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,h4:'font-size:17px;font-weight:700;margin:22px 0 12px;',h5:'font-size:16px;font-weight:700;margin:20px 0 12px;',h6:'font-size:16px;font-weight:700;margin:20px 0 12px;',
+ h3:`font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,h4:'font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;',h5:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',h6:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',
  blockquote:`margin:20px 0;padding:14px 18px;border-left:3px solid ${color};background:#f6f6f5;color:#686868;`,
  ul:'padding-left:24px;margin:14px 0 20px;',ol:'padding-left:26px;margin:14px 0 20px;',li:'margin:6px 0;line-height:inherit;',strong:'font-weight:700;',em:'font-style:italic;',s:'text-decoration:line-through;',a:`color:${color};text-decoration:underline;`,hr:'border:0;border-top:1px solid #ddd;margin:30px 0;',
  table:'border-collapse:collapse;width:100%;font-size:14px;margin:20px 0;table-layout:auto;',th:'border:1px solid #ddd;background:#f2f2f2;font-weight:600;padding:9px 12px;',td:'border:1px solid #ddd;padding:9px 12px;',
@@ -42,6 +42,22 @@ function inlineStyles(root:HTMLElement,s:Settings) {
    el.setAttribute('style',`color:${palette[index]};${index===5?'font-style:italic;':''}`);
   }
   el.removeAttribute('class');
+ }
+ // Resolve typography before export: WeChat can normalize unitless/inherited
+ // line-height differently during paste. Every text element carries pixel values,
+ // including inline marks and highlight tokens, without changing source Markdown.
+ for(const el of root.querySelectorAll<HTMLElement>('*')) {
+  if(el.namespaceURI!=='http://www.w3.org/1999/xhtml'||el.matches('img,hr'))continue;
+  const parent=el.parentElement!;
+  const parentSize=parseFloat(parent.style.fontSize)||s.fontSize;
+  const parentLine=parseFloat(parent.style.lineHeight)||s.fontSize*s.lineHeight;
+  const sizeValue=el.style.fontSize;
+  const size=sizeValue.endsWith('px')?parseFloat(sizeValue):sizeValue.endsWith('em')?parentSize*parseFloat(sizeValue):parentSize;
+  const lineValue=el.style.lineHeight;
+  const line=lineValue.endsWith('px')?parseFloat(lineValue):lineValue&&lineValue!=='inherit'&&lineValue!=='normal'?size*parseFloat(lineValue):parentLine;
+  el.style.fontSize=Number(size.toFixed(2))+'px';
+  el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
+  if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.display='inline';
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
