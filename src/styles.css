@@ -14,3 +14,6 @@
 .app.fullscreen .outline-panel{top:60px;left:16px;max-height:calc(100dvh - 80px)}
 .app.fullscreen .more-menu{top:110px}
 @media(max-width:800px){.app.fullscreen .more-menu{top:94px}.app.fullscreen .outline-panel{top:54px;max-height:calc(100dvh - 70px)}}
+
+.code-node{border-radius:10px}.code-header{height:40px;justify-content:flex-start;gap:12px}.code-header>div{margin-left:auto}.code-traffic-lights{display:inline-flex;gap:6px;flex-shrink:0}.code-traffic-lights i{display:block;width:9px;height:9px;border-radius:50%;background:#ff5f57}.code-traffic-lights i:nth-child(2){background:#febc2e}.code-traffic-lights i:nth-child(3){background:#28c840}
+@media(max-width:800px){.code-header{gap:8px}.code-header input{width:70px}}

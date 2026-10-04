@@ -59,6 +59,17 @@ function inlineStyles(root:HTMLElement,s:Settings) {
   el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
   if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.display='inline';
  }
+ // WeChat flags <pre> even for code. Use a static, wrapping code container
+ // in both preview and clipboard; raw text and highlight spans remain intact.
+ for(const pre of root.querySelectorAll<HTMLElement>('pre')) {
+  const block=document.createElement('section');block.setAttribute('data-code-block','');block.setAttribute('style',pre.getAttribute('style')||'');
+  block.style.whiteSpace='pre-wrap';block.style.overflowWrap='anywhere';block.style.maxWidth='100%';block.style.boxSizing='border-box';
+  const code=pre.querySelector<HTMLElement>('code');if(code){code.style.whiteSpace='pre-wrap';code.style.overflowWrap='anywhere';}
+  block.style.borderRadius='10px';block.style.border=`1px solid ${dark?'#3d4046':'#e1e3e6'}`;
+  const chrome=document.createElement('div');chrome.setAttribute('data-code-chrome','');chrome.setAttribute('aria-hidden','true');chrome.setAttribute('style','display:block;white-space:normal;line-height:12px;margin:0 0 14px;');
+  for(const color of ['#ff5f57','#febc2e','#28c840']){const dot=document.createElement('span');dot.setAttribute('style',`display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;`);chrome.append(dot);}
+  block.append(chrome,...Array.from(pre.childNodes));pre.replaceWith(block);
+ }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
  // WeChat's older overlap checker miscounts mixed direct text + inline marks.
@@ -81,7 +92,7 @@ export function readableText(root:Node):string {
   if(!(node instanceof Element))return Array.from(node.childNodes,n=>walk(n,depth)).join('');
   const tag=node.tagName;
   if(tag==='BR')return '\n';
-  if(tag==='PRE')return '\n'+(node.textContent||'')+'\n\n';
+  if(tag==='PRE'||node.hasAttribute('data-code-block'))return '\n'+(node.textContent||'')+'\n\n';
   if(tag==='IMG')return '[图片：'+(node.getAttribute('alt')||'图片')+']\n';
   if(tag==='TR')return Array.from(node.children,n=>walk(n,depth).replace(/^\n+|\n+$/g,'')).join('\t')+'\n';
   if(tag==='UL'||tag==='OL') {
@@ -137,7 +148,7 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
  }));
  inlineStyles(root,s);inlineStyles(clipboard,s);
  // SVG is only in the browser preview. The clipboard holds static explanatory text instead.
- const html=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style']});
+ const html=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
  const clean=document.createElement('div');clean.innerHTML=html;
  return {html,previewHTML:root.outerHTML,text:readableText(clean),assets,errors,key:outputKey(markdown,s)};
 }

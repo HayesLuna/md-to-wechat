@@ -180,8 +180,8 @@ test('WeChat typography uses explicit pixel line heights in lists and inline mar
  const result=await page.evaluate(async()=>{
   const items=await navigator.clipboard.read();const html=await(await items[0].getType('text/html')).text();const root=document.createElement('div');root.innerHTML=html;
   const textElements=Array.from(root.querySelectorAll<HTMLElement>('section,p,h1,ul,ol,li,strong,em,a,code,span,pre,table,th,td,blockquote'));
-  const invalid=textElements.filter(e=>!e.style.fontSize.endsWith('px')||!e.style.lineHeight.endsWith('px')||parseFloat(e.style.lineHeight)<parseFloat(e.style.fontSize)).map(e=>e.outerHTML);
-  return {types:items[0].types,html,invalid,marks:Array.from(root.querySelectorAll<HTMLElement>('li strong,li em,li a,li code')).map(e=>({tag:e.tagName,display:e.style.display,line:e.style.lineHeight})),paragraphs:root.querySelectorAll('li>p').length,code:root.querySelector('pre')?.textContent};
+  const invalid=textElements.filter(e=>e.textContent?.trim()&&(!e.style.fontSize.endsWith('px')||!e.style.lineHeight.endsWith('px')||parseFloat(e.style.lineHeight)<parseFloat(e.style.fontSize))).map(e=>e.outerHTML);
+  return {types:items[0].types,html,invalid,marks:Array.from(root.querySelectorAll<HTMLElement>('li strong,li em,li a,li code')).map(e=>({tag:e.tagName,display:e.style.display,line:e.style.lineHeight})),paragraphs:root.querySelectorAll('li>p').length,code:root.querySelector('[data-code-block]')?.textContent};
  });
  expect(result.types).toEqual(expect.arrayContaining(['text/html','text/plain']));expect(result.invalid).toEqual([]);expect(result.marks.map(e=>e.tag)).toEqual(expect.arrayContaining(['STRONG','EM','A','CODE']));expect(result.marks.every(e=>e.display==='inline')).toBe(true);expect(result.paragraphs).toBeGreaterThan(1);expect(result.code).toContain('\t  code\n\n  end');expect(await markdown(page)).toBe(raw);
  // Same HTML in preview and clipboard for articles without local assets or diagrams.
@@ -214,4 +214,20 @@ test('mixed rich text avoids legacy WeChat fragment-count overlap warnings',asyn
  expect(result.baseline.length).toBeGreaterThan(0);expect(result.warnings).toEqual([[],[],[]]);expect(result.text).toContain('写下你的想法，不用急着排版。');expect(result.text).toContain('3. 用标题、列表和引用');expect(result.text).toContain('保持简洁，也保留 恰当的强调。');expect(result.text).toContain('Markdown 指南，或写一段 行内代码');expect(await markdown(page)).toBe(raw);
  await expect(page.locator('.preview-paper ol')).toHaveAttribute('start','3');await expect(page.locator('.preview-paper ol ul li')).toHaveCount(2);await expect(page.locator('.preview-paper li>p')).toHaveCount(2);await expect(page.locator('.preview-paper strong').first()).toHaveCSS('display','inline');
  await page.setViewportSize({width:390,height:844});await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=380);await page.screenshot({path:'/tmp/mojian-wechat-compatible-mobile.png'});
+});
+
+test('macOS code decoration and wrapping WeChat output preserve source and clipboard whitespace',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);
+ const code='/* 多行注释\n   第二行 */\n\t  const value = "'+('long_token_'.repeat(30))+'";\n\n    console.log(value);';
+ const raw='# 代码示例\n\n```javascript\n'+code+'\n```\n\n```unknown\n  plain    text\n\n\tend\n```';await setDoc(page,raw);await prepared(page);
+ await expect(page.locator('.code-traffic-lights i')).toHaveCount(6);await page.getByRole('button',{name:'复制代码',exact:true}).first().click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(code);
+ await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.preview-paper [data-code-chrome] span')).toHaveCount(6);
+ for(const theme of ['浅色','深色']){
+  await page.getByRole('button',{name:theme,exact:true}).click();await prepared(page);await expect(page.locator('.preview-paper')).not.toHaveClass(/preparing/);await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+  const clip=await page.evaluate(async()=>{const items=await navigator.clipboard.read();const html=await(await items[0].getType('text/html')).text();const root=document.createElement('div');root.innerHTML=html;return {html,text:await(await items[0].getType('text/plain')).text(),pre:root.querySelectorAll('pre').length,code:root.querySelector('[data-code-block] code')?.textContent,colors:Array.from(root.querySelectorAll<HTMLElement>('[data-code-chrome] span')).slice(0,3).map(e=>e.style.background),highlight:root.querySelector('[data-code-block] code span')?.getAttribute('style')};});
+  expect(clip.pre).toBe(0);expect(clip.code).toBe(code+'\n');expect(clip.text).toContain(code);expect(clip.text).toContain('  plain    text\n\n\tend');expect(clip.colors).toEqual(['rgb(255, 95, 87)','rgb(254, 188, 46)','rgb(40, 200, 64)']);expect(clip.highlight).toContain('color:');expect(clip.html).not.toContain('<svg');expect(clip.html).not.toContain('<button');expect(clip.html).not.toContain('复制代码');expect(await page.locator('.preview-paper').innerHTML()).toBe(clip.html);
+ }
+ await page.screenshot({path:'/tmp/mojian-macos-code-desktop.png'});
+ for(const width of [390,320]){await page.setViewportSize({width,height:844});const blocks=page.locator('.preview-paper [data-code-block]');await expect(blocks).toHaveCount(2);expect(await blocks.first().evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);await expect(blocks.first().locator('code')).toHaveCSS('white-space','pre-wrap');expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);}
+ await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=330);await page.screenshot({path:'/tmp/mojian-macos-code-mobile.png'});expect(await markdown(page)).toBe(raw);
 });

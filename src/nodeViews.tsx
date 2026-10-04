@@ -41,6 +41,7 @@ export function CodeView({node,updateAttributes,editor,getPos}:NodeViewProps) {
  const asyncAction=(action:()=>Promise<unknown>)=>action().catch(e=>signal(e.message));
  return <NodeViewWrapper className={`code-node ${folded?'folded':''}`}>
   <div className="code-header" contentEditable={false}>
+   <span className="code-traffic-lights" aria-hidden="true"><i/><i/><i/></span>
    <input aria-label="代码语言" value={node.attrs.language||''} placeholder="纯代码" spellCheck={false} onChange={e=>updateAttributes({language:e.target.value.trim()||null})}/>
    <div><button aria-label="复制代码" title="复制代码" onClick={()=>asyncAction(async()=>{await copyText(source);signal('已复制原始代码');})}><Copy size={14}/><span>复制</span></button><button aria-label={folded?'展开代码':'折叠代码'} title={folded?'展开代码':'折叠代码'} onClick={()=>setFolded(f=>!f)}>{folded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}</button><button title="退出代码块" onClick={exit}><ArrowDownToLine size={15}/></button>{!source&&<button title="删除空代码块" onClick={()=>editor.chain().focus().toggleCodeBlock().run()}><Trash2 size={15}/></button>}</div>
   </div>
