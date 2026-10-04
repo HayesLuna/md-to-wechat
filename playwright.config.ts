@@ -1,0 +1,3 @@
+import { defineConfig } from '@playwright/test';
+import chromium from '@sparticuz/chromium';
+export default defineConfig({testDir:'./tests',fullyParallel:false,workers:1,timeout:30000,retries:0,reporter:'list',outputDir:'/tmp/mojian-test-results',use:{baseURL:'http://localhost:5173',viewport:{width:1440,height:1000},launchOptions:{executablePath:await chromium.executablePath(),args:chromium.args.filter(a=>!['--single-process','--disable-web-security','--allow-running-insecure-content','--disable-site-isolation-trials'].includes(a)&&!a.startsWith('--disable-features=')),env:{...process.env,XDG_CACHE_HOME:'/tmp/mojian-cache'}},trace:'retain-on-failure'},webServer:{command:'npm run dev',url:'http://localhost:5173',reuseExistingServer:true,timeout:30000}});

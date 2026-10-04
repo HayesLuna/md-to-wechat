@@ -1,0 +1,143 @@
+import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
+async function ready(page:Page) {await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);}
+async function setDoc(page:Page,text:string) {await page.evaluate(text=>(window as any).__mojian.setMarkdown(text),text);}
+async function markdown(page:Page) {return page.evaluate(()=>(window as any).__mojian.getMarkdown());}
+async function cursor(page:Page,text:string,offset=1) {await page.evaluate(({text,offset})=>{const e=(window as any).__mojian.editor;let p=1;e.state.doc.descendants((n:any,pos:number)=>{if(n.isText&&n.text.includes(text))p=pos+offset;});e.commands.setTextSelection(p);e.commands.focus();},{text,offset});}
+async function selection(page:Page) {return page.evaluate(()=>{const s=(window as any).__mojian.editor.state.selection;return {type:s.toJSON().type,from:s.from,to:s.to,node:s.node?.type.name,text:s.forEachCell?(()=>{const texts:string[]=[];s.forEachCell((n:any)=>texts.push(n.textContent));return texts.join('|');})():(window as any).__mojian.editor.state.doc.textBetween(s.from,s.to,'|')};});}
+async function prepared(page:Page) {await page.waitForFunction(()=>{const m=(window as any).__mojian;const o=m.getOutput();return o&&o.key===JSON.stringify([m.getMarkdown(),m.getSettings()]);});}
+
+test('Chinese line shortcuts, composition guard, undo and literal symbols',async({page})=>{
+ await ready(page);await setDoc(page,'正常的》与···java不应变化\n\n');
+ await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.focus('end');e.commands.insertContent('》');});await page.keyboard.press('Space');
+ await expect(page.locator('.article-editor blockquote')).toHaveCount(1);
+ await page.keyboard.insertText('引用中文');await expect.poll(()=>markdown(page)).toContain('引用中文');
+ expect(await markdown(page)).toContain('正常的》与···java不应变化');
+ await setDoc(page,'···java');await cursor(page,'···java',7);await page.keyboard.press('Enter');await expect.poll(()=>markdown(page)).toContain('```java');
+ await page.keyboard.press('Control+z');await expect.poll(()=>markdown(page)).toContain('···java');
+ await setDoc(page,'···mermaid');await cursor(page,'···mermaid',10);
+ await page.locator('.article-editor').dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true});expect(await markdown(page)).toBe('···mermaid');
+ await page.keyboard.press('Enter');await expect.poll(()=>markdown(page)).toContain('```mermaid');
+});
+
+test('progressive select lists, nested lists, code and normal text; movement resets',async({page})=>{
+ await ready(page);await setDoc(page,'- 外层\n  - 内层\n    - 子项\n  - 同层\n- 第二项\n\n普通正文\n\n```java\nline one\n\tline two\n```');
+ await cursor(page,'内层');await page.keyboard.press('Control+a');let s=await selection(page);expect(s.node).toBe('listItem');expect(s.text).toContain('子项');
+ await page.keyboard.press('Control+a');s=await selection(page);expect(s.node).toBe('bulletList');expect(s.text).toContain('同层');expect(s.text).not.toContain('第二项');
+ await page.keyboard.press('Control+a');s=await selection(page);expect(s.node).toBe('bulletList');expect(s.text).toContain('第二项');
+ await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');
+ await cursor(page,'内层');await page.keyboard.press('Control+a');expect((await selection(page)).node).toBe('listItem');
+ await cursor(page,'line one');await page.keyboard.press('Control+a');s=await selection(page);expect(s.type).toBe('text');expect(s.text).toBe('line one\n\tline two');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');
+ await cursor(page,'普通正文');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');
+});
+
+test('table progressive selection, two-stage deletion, undo, header and last column protection',async({page})=>{
+ await ready(page);await setDoc(page,'| 表头A | 表头B |\n| --- | --- |\n| 行一 | 单元格 |\n| 行二 | 单元格二 |\n\n之后');await cursor(page,'行一');
+ await page.keyboard.press('Control+a');let s=await selection(page);expect(s.type).toBe('cell');expect(s.text).not.toContain('行二');
+ await page.keyboard.press('Control+a');s=await selection(page);expect(s.type).toBe('cell');expect(s.text).toContain('行二');
+ await page.keyboard.press('Backspace');expect(await page.locator('.article-editor table').count()).toBe(1);expect(await page.locator('.article-editor table').innerText()).not.toContain('表头');
+ await page.keyboard.press('Backspace');expect(await page.locator('.article-editor table').count()).toBe(0);
+ await page.keyboard.press('Control+z');await expect(page.locator('.article-editor table')).toHaveCount(1);await page.keyboard.press('Control+z');await expect(page.locator('.article-editor th').first()).toContainText('表头A');
+ await cursor(page,'表头A');await page.getByRole('button',{name:'删除当前行',exact:true}).click();await expect(page.locator('.toast')).toContainText('表头行需要保留');expect(await page.locator('.article-editor tr').count()).toBe(3);
+ await cursor(page,'行一');await page.getByRole('button',{name:'下方添加行',exact:true}).click();expect(await page.locator('.article-editor tr').count()).toBe(4);
+ await page.getByRole('button',{name:'右侧添加列',exact:true}).click();expect(await page.locator('.article-editor th').count()).toBe(3);
+ await page.getByRole('button',{name:'删除当前列',exact:true}).click();await page.getByRole('button',{name:'删除当前列',exact:true}).click();await page.getByRole('button',{name:'删除当前列',exact:true}).click();await expect(page.locator('.toast')).toContainText('最后一列');expect(await page.locator('.article-editor th').count()).toBe(1);
+});
+
+test('partial table selection does not remove skeleton and movement cancels pending removal',async({page})=>{
+ await ready(page);await setDoc(page,'| H1 | H2 |\n| --- | --- |\n| text | other |');await cursor(page,'text');await page.keyboard.press('Control+a');await page.keyboard.press('Backspace');expect(await page.locator('.article-editor table').count()).toBe(1);await expect(page.locator('.article-editor th').first()).toHaveText('H1');
+ await cursor(page,'H1');await page.keyboard.press('Control+a');await page.keyboard.press('Control+a');await page.keyboard.press('Backspace');await page.keyboard.press('ArrowRight');await page.keyboard.press('Backspace');expect(await page.locator('.article-editor table').count()).toBe(1);
+});
+
+test('link uses original selection, cancel preserves content and modal select-all stays local',async({page})=>{
+ await ready(page);await setDoc(page,'原有文字 后面的文字');await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:5});e.commands.focus();});
+ await page.getByRole('button',{name:'插入链接',exact:true}).click();const input=page.getByRole('textbox',{name:'链接地址'});await input.fill('javascript:alert(1)');await input.press('Control+a');expect(await input.evaluate((e:HTMLInputElement)=>e.selectionEnd!-e.selectionStart!)).toBe('javascript:alert(1)'.length);
+ await page.getByRole('button',{name:'插入链接',exact:true}).last().click();await expect(page.locator('.form-error')).toContainText('禁止危险协议');await input.fill('https://example.com');await page.getByRole('button',{name:'插入链接',exact:true}).last().click();await expect(page.locator('.article-editor a')).toHaveText('原有文字');
+ const before=await markdown(page);await page.getByRole('button',{name:'插入链接',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();expect(await markdown(page)).toBe(before);
+});
+
+test('source remains raw, refresh persists settings and Markdown structure',async({page})=>{
+ await ready(page);const raw='# 标题\n\n- **粗体**\n  - 子列表\n\n| A | B |\n| :--- | ---: |\n| `a\\|b` | 2 |\n\n```unknown\n\tblank  spaces\n\nlast\n```\n\n![图](https://example.com/a.png "width=43%")\n\n```mermaid\nflowchart LR\nA-->B\n```';
+ await setDoc(page,raw);await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();const area=page.getByRole('textbox',{name:'Markdown 源码正文'});await expect(area).toHaveValue(raw);await area.fill(raw+'\n\n[未完成');expect(await markdown(page)).toBe(raw+'\n\n[未完成');
+ await page.keyboard.press('Control+s');await expect(page.locator('.save-indicator')).toContainText('已保存');await page.reload();await page.waitForFunction(()=>!!(window as any).__mojian?.editor);expect(await markdown(page)).toBe(raw+'\n\n[未完成');
+ await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await expect(page.getByRole('textbox',{name:'Markdown 源码正文'})).toHaveValue(raw+'\n\n[未完成');await page.getByRole('button',{name:'所见即所得',exact:true}).click();await expect(page.locator('.article-editor table')).toHaveCount(1);expect(await page.locator('.image-box').getAttribute('style')).toContain('43%');
+});
+
+test('clipboard has actual HTML and plain formats, and refusal never falls back',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);await setDoc(page,'# 标题\n\n文字 & 中文\n\n3. **粗体**和[外链](https://example.com)\n   - 子列表\n\n| A | B |\n| --- | --- |\n| 字 | 2 |\n\n```java\n/* comment\n multiline */\n\t  a\n\n  b\n```');await prepared(page);
+ await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+ const clip=await page.evaluate(async()=>{const items=await navigator.clipboard.read();return {types:items[0].types,html:await(await items[0].getType('text/html')).text(),text:await(await items[0].getType('text/plain')).text()};});
+ expect(clip.types).toEqual(expect.arrayContaining(['text/html','text/plain']));expect(clip.html).toContain('font-family:');expect(clip.html).toContain('<table');expect(clip.html).not.toContain('<button');expect(clip.html).not.toContain('class="hljs');expect(clip.text).toContain('文字 & 中文');expect(clip.text).toContain('3. 粗体和外链');expect(clip.text).toContain('\t  a\n\n  b');expect(clip.text).toContain('A\tB');
+ await page.evaluate(()=>{(window as any).__fallback=0;Object.defineProperty(navigator.clipboard,'write',{configurable:true,value:()=>Promise.reject(new DOMException('Denied','NotAllowedError'))});Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:()=>{(window as any).__fallback++;return Promise.resolve();}});document.execCommand=()=>{(window as any).__fallback++;return true;};});
+ await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('复制失败');expect(await page.evaluate(()=>(window as any).__fallback)).toBe(0);expect(await markdown(page)).toContain('文字 & 中文');
+});
+
+test('outline duplicates and code exclusions, full screen and Esc layering; mobile is single pane',async({page})=>{
+ await ready(page);await setDoc(page,'# 重复\n\n'+Array(12).fill('段落\n\n').join('')+'## 重复\n\n```\n# 假标题\n```');await page.getByRole('button',{name:'大纲',exact:true}).click();expect(await page.locator('.outline-panel>div>button').count()).toBe(2);await page.locator('.outline-panel>div>button').nth(1).click();expect((await selection(page)).from).toBeGreaterThan(20);
+ await page.getByRole('button',{name:'全屏写作',exact:true}).click();await expect(page.locator('.app')).toHaveClass(/fullscreen/);await page.getByRole('button',{name:'插入链接',exact:true}).click();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.app')).toHaveClass(/fullscreen/);await page.keyboard.press('Escape');await expect(page.locator('.app')).not.toHaveClass(/fullscreen/);
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.writing-pane')).toBeHidden();await expect(page.locator('.preview-pane')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);await page.getByRole('button',{name:'关闭预览',exact:true}).click();await expect(page.locator('.writing-pane')).toBeVisible();await page.screenshot({path:'/tmp/mojian-mobile.png'});
+});
+
+test('context menu retargets outside selection and stays in viewport',async({page})=>{
+ await ready(page);await setDoc(page,'第一段\n\n第二段');await cursor(page,'第一段');const p=page.locator('.article-editor p').nth(1);await p.click({button:'right'});await expect(page.locator('.context-menu')).toBeVisible();expect((await selection(page)).from).toBeGreaterThan(4);const box=await page.locator('.context-menu').boundingBox();expect(box!.x+box!.width).toBeLessThanOrEqual(1440);await page.keyboard.press('Escape');await expect(page.locator('.context-menu')).toHaveCount(0);
+});
+
+test('code copy is raw, fold keeps Markdown and output; Mermaid errors recover to latest source',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);await setDoc(page,'```unknown\n\ta  b\n\n/* multiline\ncomment */\n```\n\n```mermaid\nflowchart LR\nA-->B\n```');await expect(page.locator('.diagram svg')).toBeVisible({timeout:15000});
+ const before=await markdown(page);await page.getByRole('button',{name:'复制代码',exact:true}).first().click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('\ta  b\n\n/* multiline\ncomment */');await page.getByRole('button',{name:'折叠代码',exact:true}).first().click();expect(await markdown(page)).toBe(before);await prepared(page);expect(await page.evaluate(()=>(window as any).__mojian.getOutput().text)).toContain('\ta  b\n\n/* multiline\ncomment */');
+ await setDoc(page,'```mermaid\ninvalid diagram !!!\n```');await expect(page.locator('.diagram-error')).toContainText('语法有误');expect(await markdown(page)).toContain('invalid diagram !!!');await setDoc(page,'```mermaid\nflowchart LR\n最新-->结果\n```');await expect(page.locator('.diagram svg')).toContainText('最新');await expect(page.locator('.diagram-error')).toHaveCount(0);
+ const dl=page.waitForEvent('download');await page.getByRole('button',{name:'PNG',exact:true}).click();const file=await dl;expect(file.suggestedFilename()).toMatch(/\.png$/);const pngStream=await file.createReadStream();const pngChunks:Buffer[]=[];for await(const chunk of pngStream!)pngChunks.push(chunk);const png=Buffer.concat(pngChunks);expect(png.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');expect(png.readUInt32BE(16)).toBeGreaterThan(50);expect(png.readUInt32BE(20)).toBeGreaterThan(20);
+});
+
+test('security cleaning strips executable HTML, dangerous links and output controls',async({page})=>{
+ await ready(page);await setDoc(page,'# 安全\n\n<script>window.pwned=true</script>\n\n[坏链接](javascript:alert(1))\n\n<img src=x onerror="window.pwned=true">\n\n```html\n<script>literal</script>\n```');await prepared(page);const result=await page.evaluate(()=>({html:(window as any).__mojian.getOutput().html,pwned:(window as any).pwned}));expect(result.pwned).toBeUndefined();expect(result.html).not.toContain('<script>');expect(result.html).not.toContain('href="javascript:');expect(result.html).not.toContain('<input');expect(result.html).toContain('&lt;script&gt;');
+});
+
+test('local image async bookmark maps with edits, percent survives roundtrip/reload and missing resources are explicit',async({page})=>{
+ await ready(page);await setDoc(page,'目标位置\n\n后文');await cursor(page,'目标位置',4);await page.getByRole('button',{name:'插入图片',exact:true}).click();
+ const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=100;c.height=50;c.getContext('2d')!.fillRect(0,0,100,50);return c.toDataURL().split(',')[1];});
+ await page.evaluate(()=>{const original=createImageBitmap;window.createImageBitmap=(...args:any[])=>new Promise(resolve=>setTimeout(()=>resolve((original as any)(...args)),300)) as any;});
+ await page.locator('input[type=file][accept^="image/"]').setInputFiles({name:'本地测试.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+ await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.insertContentAt(1,'前插');});
+ await expect(page.locator('.image-box img')).toBeVisible();let text=await markdown(page);expect(text.indexOf('前插')).toBeLessThan(text.indexOf('local-image:'));expect(text.indexOf('local-image:')).toBeLessThan(text.indexOf('后文'));expect(text).not.toContain('blob:');
+ await page.locator('.image-box img').click();await page.getByRole('spinbutton',{name:'图片宽度百分比'}).fill('45');await expect.poll(()=>markdown(page)).toContain('width=45%');
+ await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();expect(await markdown(page)).toContain('width=45%');await page.getByRole('button',{name:'所见即所得',exact:true}).click();expect(await page.locator('.image-box').getAttribute('style')).toContain('45%');await page.keyboard.press('Control+s');await expect(page.locator('.save-indicator')).toContainText('已保存');await page.reload();await page.waitForFunction(()=>!!(window as any).__mojian?.editor);await expect(page.locator('.image-box img')).toBeVisible();expect(await markdown(page)).toContain('width=45%');
+ await prepared(page);await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('本地测试.png');await page.getByRole('button',{name:'返回写作',exact:true}).click();
+ await setDoc(page,'![丢失资源](local-image:missing-resource "width=25%")');await expect(page.locator('.missing-image')).toContainText('本地图片缺失');await prepared(page);const out=await page.evaluate(()=>(window as any).__mojian.getOutput());expect(out.html).toContain('请在此处上传本地图片：丢失资源');expect(out.html).not.toContain('blob:');
+});
+
+test('import cancel, UTF-8 export, reimport dimensions and draft settings persistence',async({page})=>{
+ await ready(page);await setDoc(page,'# 当前正文\n\n![图](https://example.com/image.png "width=38%")\n\n```java\n\t x\n\n y\n```');
+ const before=await markdown(page);await page.locator('input[type=file][accept^=".md"]').setInputFiles({name:'import.md',mimeType:'text/markdown',buffer:Buffer.from('# 导入正文')});await page.getByRole('button',{name:'取消',exact:true}).click();expect(await markdown(page)).toBe(before);
+ const promise=page.waitForEvent('download');await page.getByRole('button',{name:'导出 Markdown',exact:true}).click();const d=await promise;const stream=await d.createReadStream();const chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(chunk);const content=Buffer.concat(chunks);expect(content.toString()).toBe(before);
+ await page.locator('input[type=file][accept^=".md"]').setInputFiles({name:'roundtrip.md',mimeType:'text/markdown',buffer:content});await page.getByRole('button',{name:'确认替换',exact:true}).click();expect(await markdown(page)).toBe(before);expect(await page.locator('.image-box').getAttribute('style')).toContain('38%');
+ await page.getByRole('button',{name:'公众号预览',exact:true}).click();await page.getByRole('button',{name:'雅致',exact:true}).click();await page.getByRole('slider',{name:'正文字号'}).fill('18');await page.keyboard.press('Control+s');await expect(page.locator('.save-indicator')).toContainText('已保存');await page.reload();await page.waitForFunction(()=>!!(window as any).__mojian?.editor);const settings=await page.evaluate(()=>(window as any).__mojian.getSettings());expect(settings.theme).toBe('elegant');expect(settings.fontSize).toBe(18);
+});
+
+test('rich clipboard unsupported has no writeText fallback and prepares fresh snapshots',async({page})=>{
+ await ready(page);await setDoc(page,'第一版');await prepared(page);await page.evaluate(()=>{(window as any).__fallback=0;Object.defineProperty(navigator.clipboard,'write',{configurable:true,value:undefined});Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:()=>{(window as any).__fallback++;return Promise.resolve();}});});await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('不支持富文本');expect(await page.evaluate(()=>(window as any).__fallback)).toBe(0);
+ await setDoc(page,'最新版本');await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('准备');await prepared(page);expect(await page.evaluate(()=>(window as any).__mojian.getOutput().text)).toContain('最新版本');
+});
+
+test('drag image resize is one undoable action, preserve context selection, normal Markdown input and save failure retains draft',async({page})=>{
+ await ready(page);await setDoc(page,'![公开图片](https://example.com/x.png "width=65%")\n\n测试正文');
+ await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setNodeSelection(0);e.commands.focus();});await expect(page.getByRole('button',{name:'拖拽调整图片宽度'})).toBeVisible();const handle=await page.getByRole('button',{name:'拖拽调整图片宽度'}).boundingBox();
+ await page.mouse.move(handle!.x+6,handle!.y+6);await page.mouse.down();await page.mouse.move(handle!.x-90,handle!.y+6,{steps:5});await page.mouse.up();expect(await markdown(page)).not.toContain('width=65%');await page.keyboard.press('Control+z');await expect.poll(()=>markdown(page)).toContain('width=65%');
+ await setDoc(page,'测试正文');await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:5});e.commands.focus();});await page.locator('.article-editor p').first().click({button:'right',position:{x:15,y:8}});expect((await selection(page)).text).toBe('测试正文');await page.keyboard.press('Escape');
+ await setDoc(page,'');await page.locator('.article-editor').click();await page.keyboard.type('## ');await page.keyboard.insertText('快捷标题');await expect(page.locator('.article-editor h2')).toHaveText('快捷标题');await page.keyboard.press('Enter');await page.keyboard.type('- ');await page.keyboard.insertText('列表项');await expect(page.locator('.article-editor ul li')).toContainText('列表项');
+ const text=await markdown(page);await page.evaluate(()=>{const original=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args:any[]){if(this.name==='draft')throw new DOMException('quota','QuotaExceededError');return (original as any).apply(this,args);};});await page.keyboard.press('Control+s');await expect(page.locator('.save-indicator')).toContainText('保存失败');expect(await markdown(page)).toBe(text);await expect(page.locator('.toast')).toContainText('正文仍在');
+});
+
+test('local placeholders are confirmed then written in both clipboard formats',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);await setDoc(page,'# 含图片\n\n![缺失但保留位置](local-image:missing "width=30%")\n\n```mermaid\nflowchart LR\nA-->B\n```');await prepared(page);await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('Mermaid 图形 1');await page.getByRole('button',{name:'确认复制正文与占位说明',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+ const clip=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];return {html:await(await item.getType('text/html')).text(),text:await(await item.getType('text/plain')).text(),types:item.types};});expect(clip.types).toEqual(expect.arrayContaining(['text/html','text/plain']));expect(clip.html).toContain('缺失但保留位置');expect(clip.text).toContain('请在此处插入 Mermaid 图形 1');expect(clip.html).not.toContain('blob:');expect(clip.html).not.toContain('data:');expect(clip.html).not.toContain('<svg');
+});
+
+test('public URL images load before insertion; failed URL and canceled loading leave draft unchanged',async({page})=>{
+ await ready(page);await setDoc(page,'公开图片测试');await cursor(page,'公开图片测试',6);await page.getByRole('button',{name:'插入图片',exact:true}).click();await page.getByRole('textbox',{name:'图片地址',exact:true}).fill('https://raw.githubusercontent.com/github/explore/main/topics/markdown/markdown.png');await page.getByRole('button',{name:'插入 URL 图片',exact:true}).click();await expect(page.locator('.image-box img')).toBeVisible();expect(await page.locator('.image-box img').evaluate((img:HTMLImageElement)=>img.naturalWidth)).toBeGreaterThan(0);
+ await page.locator('.image-box img').click({button:'right'});await expect(page.locator('.context-menu')).toContainText('删除选中图片');await page.keyboard.press('Escape');
+ const before=await markdown(page);await page.route('https://example.com/missing-image.png',r=>r.fulfill({status:404,body:'missing'}));await page.getByRole('button',{name:'插入图片',exact:true}).click();await page.getByRole('textbox',{name:'图片地址',exact:true}).fill('https://example.com/missing-image.png');await page.getByRole('button',{name:'插入 URL 图片',exact:true}).click();await expect(page.locator('.form-error')).toContainText('无法加载');expect(await markdown(page)).toBe(before);await page.getByRole('button',{name:'取消',exact:true}).click();
+ const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=20;c.height=20;return c.toDataURL().split(',')[1];});
+ await page.route('https://example.com/slow-image.png',async r=>{await new Promise(resolve=>setTimeout(resolve,500));await r.fulfill({status:200,contentType:'image/png',body:Buffer.from(png,'base64')});});
+ await page.getByRole('button',{name:'插入图片',exact:true}).click();await page.getByRole('textbox',{name:'图片地址',exact:true}).fill('https://example.com/slow-image.png');await page.getByRole('button',{name:'插入 URL 图片',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();await page.waitForTimeout(700);expect(await markdown(page)).toBe(before);
+});
