@@ -1,0 +1,85 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="90" y1="70" x2="420" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF9"/>
+      <stop offset="1" stop-color="#F6F0E8"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="170" y1="190" x2="370" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF9F0"/>
+      <stop offset="1" stop-color="#EEDFCB"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="305" y1="245" x2="377" y2="345" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9D8C3"/>
+      <stop offset="1" stop-color="#D9C1A5"/>
+    </linearGradient>
+    <filter id="shadow" x="40" y="40" width="432" height="432" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#1B1714" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <!-- app tile -->
+  <rect x="64" y="64" width="384" height="384" rx="100" fill="url(#bg)" filter="url(#shadow)"/>
+
+  <!-- ink ribbon -->
+  <path d="M167 164
+           C194 132 252 137 303 151
+           C350 164 385 187 398 222
+           C405 241 404 259 398 278
+           C389 248 372 229 346 219
+           C318 208 286 211 252 224
+           L196 245
+           C181 250 167 240 169 223
+           C171 206 166 198 151 194
+           C137 190 136 176 145 168
+           C151 163 159 161 167 164Z"
+        fill="#1F1D1B"/>
+
+  <!-- paper sheet -->
+  <path d="M170 247
+           C181 235 198 228 216 222
+           L318 188
+           C339 181 359 190 368 208
+           C377 227 376 252 371 273
+           L355 339
+           C351 354 338 364 323 362
+           L188 344
+           C167 341 154 321 160 301
+           L170 247Z"
+        fill="url(#paper)"/>
+
+  <!-- folded corner -->
+  <path d="M318 188
+           C340 181 359 190 368 208
+           C374 221 375 239 372 255
+           C360 247 347 242 333 243
+           C322 244 315 234 317 223
+           C319 210 320 199 318 188Z"
+        fill="url(#fold)"/>
+
+  <!-- writing lines -->
+  <path d="M205 260L290 237" stroke="#8A7B70" stroke-width="10" stroke-linecap="round"/>
+  <path d="M194 291L278 269" stroke="#9A8C80" stroke-width="10" stroke-linecap="round"/>
+  <path d="M186 321L252 304" stroke="#A89A8F" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- lower ink sweep -->
+  <path d="M155 316
+           C173 340 201 353 236 356
+           C274 360 313 351 346 361
+           C366 367 381 381 388 397
+           C367 390 349 389 332 392
+           C306 397 280 402 248 399
+           C206 395 172 377 153 351
+           C143 338 143 323 155 316Z"
+        fill="#24211F"/>
+
+  <!-- small ink droplet -->
+  <path d="M382 159
+           C382 159 364 183 364 197
+           C364 209 373 218 385 218
+           C397 218 406 209 406 197
+           C406 182 382 159 382 159Z"
+        fill="#2A2724"/>
+
+  <!-- warm accent -->
+  <circle cx="145" cy="280" r="10" fill="#D96B4A"/>
+</svg>
