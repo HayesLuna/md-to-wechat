@@ -141,3 +141,33 @@ test('public URL images load before insertion; failed URL and canceled loading l
  await page.route('https://example.com/slow-image.png',async r=>{await new Promise(resolve=>setTimeout(resolve,500));await r.fulfill({status:200,contentType:'image/png',body:Buffer.from(png,'base64')});});
  await page.getByRole('button',{name:'插入图片',exact:true}).click();await page.getByRole('textbox',{name:'图片地址',exact:true}).fill('https://example.com/slow-image.png');await page.getByRole('button',{name:'插入 URL 图片',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();await page.waitForTimeout(700);expect(await markdown(page)).toBe(before);
 });
+
+for(const viewport of [{width:1440,height:1000},{width:390,height:844}]) {
+ test(`fullscreen visibly expands writing and restores focus/scroll at ${viewport.width}px`,async({page})=>{
+  await page.setViewportSize(viewport);await ready(page);
+  await setDoc(page,'# 全屏写作\n\n'+Array(80).fill('长文段落用于检查滚动位置。\n\n').join(''));
+  await cursor(page,'长文段落');
+  await page.locator('.writing-scroll').evaluate(e=>e.scrollTop=500);
+  const scroll=await page.locator('.writing-scroll').evaluate(e=>e.scrollTop);
+  const selected=await selection(page);const before=await page.locator('.writing-pane').boundingBox();
+  const content=await markdown(page);
+  await page.screenshot({path:`/tmp/mojian-fullscreen-before-${viewport.width}.png`});
+  await page.getByRole('button',{name:'全屏写作',exact:true}).click();
+  await expect(page.locator('.app-header')).toBeHidden();await expect(page.locator('.app-footer')).toBeHidden();
+  const expanded=await page.locator('.writing-pane').boundingBox();expect(expanded!.y).toBe(0);expect(expanded!.height).toBe(viewport.height);expect(expanded!.height).toBeGreaterThan(before!.height+80);
+  const exit=page.getByRole('button',{name:'退出全屏',exact:true});await expect(exit).toBeVisible();await expect(exit).toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>document.body.style.overflow)).toBe('hidden');expect(await selection(page)).toEqual(selected);
+  await page.screenshot({path:`/tmp/mojian-fullscreen-after-${viewport.width}.png`});
+  await page.getByRole('button',{name:'插入链接',exact:true}).click();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(exit).toBeVisible();
+  await exit.click();await expect(page.locator('.app-header')).toBeVisible();await expect(page.locator('.app-footer')).toBeVisible();
+  await expect.poll(()=>page.locator('.writing-scroll').evaluate(e=>e.scrollTop)).toBe(scroll);
+  expect(await page.locator('.article-editor').evaluate(e=>e===document.activeElement)).toBe(true);expect(await selection(page)).toEqual(selected);expect(await markdown(page)).toBe(content);
+  await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();const source=page.getByRole('textbox',{name:'Markdown 源码正文'});
+  await source.evaluate((e:HTMLTextAreaElement)=>{e.setSelectionRange(20,30);e.scrollTop=300;});
+  const sourceScroll=await source.evaluate(e=>e.scrollTop);await page.getByRole('button',{name:'全屏写作',exact:true}).click();
+  await source.dispatchEvent('keydown',{key:'Escape',code:'Escape',isComposing:true});await expect(exit).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page.locator('.app-header')).toBeVisible();await expect(source).toBeFocused();
+  await expect.poll(()=>source.evaluate(e=>e.scrollTop)).toBe(sourceScroll);expect(await source.evaluate((e:HTMLTextAreaElement)=>[e.selectionStart,e.selectionEnd])).toEqual([20,30]);
+  expect(await page.evaluate(()=>document.body.style.overflow)).toBe('');
+ });
+}

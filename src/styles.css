@@ -5,3 +5,12 @@
 @media(max-width:380px){.brand-description{display:none}.header-actions button span{font-size:10px}.header-actions .import-export span{max-width:62px;overflow:hidden;white-space:nowrap}.editor-host{padding:22px 18px 70px}.article-editor h1{font-size:24px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 @media(max-width:800px){.toolbar>button:last-child{position:sticky;right:-7px;background:#fbfbfc;box-shadow:-6px 0 8px #fbfbfc;z-index:2}}
+
+/* Fullscreen writing must visibly expand the workbench even on a viewport-sized app. */
+.app.fullscreen .app-header,.app.fullscreen .app-footer{display:none}
+.app.fullscreen .workspace{padding:0;max-width:none;width:100%;margin:0}
+.app.fullscreen .writing-pane,.app.fullscreen .preview-pane{border-radius:0}
+.app.fullscreen .pane-actions .fullscreen-label{display:inline}
+.app.fullscreen .outline-panel{top:60px;left:16px;max-height:calc(100dvh - 80px)}
+.app.fullscreen .more-menu{top:110px}
+@media(max-width:800px){.app.fullscreen .more-menu{top:94px}.app.fullscreen .outline-panel{top:54px;max-height:calc(100dvh - 70px)}}
