@@ -1,9 +1,9 @@
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
-import hljs from 'highlight.js/lib/common';
 import { imageURL } from './storage';
 import { diagram } from './mermaid';
 import type { Settings } from './sample';
+import { codeCard, addCodeDecorations, type CodeSource } from './codeOutput';
 export type Asset = { kind:'image'|'diagram'; label:string; src?:string; source?:string; missing?:boolean };
 export type Output = { html:string; previewHTML:string; text:string; assets:Asset[]; errors:string[]; key:string };
 export const outputKey=(markdown:string,settings:Settings)=>JSON.stringify([markdown,settings]);
@@ -15,7 +15,7 @@ export function headings(markdown:string) {
  for(let i=0;i<tokens.length;i++)if(tokens[i].type==='heading_open')out.push({level:Number(tokens[i].tag.slice(1)),text:tokens[i+1].content,line:tokens[i].map?.[0]||0});
  return out;
 }
-function inlineStyles(root:HTMLElement,s:Settings) {
+function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  const color=/^#[0-9a-f]{6}$/i.test(s.color)?s.color:'#a6493d';const dark=s.codeTheme==='dark';
  root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${Number((s.fontSize*s.lineHeight).toFixed(2))}px;color:#303030;word-wrap:break-word;`);
  const rules:Record<string,string>={
@@ -59,17 +59,9 @@ function inlineStyles(root:HTMLElement,s:Settings) {
   el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
   if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.display='inline';
  }
- // Static WeChat code card: non-empty dot spans survive paste normalization.
- // Keep code in its own horizontal scroll area, with original text unchanged.
- // Decorative dots use the documented per-node dark-mode contrast exemption.
- for(const pre of root.querySelectorAll<HTMLElement>('pre')) {
-  const block=document.createElement('section');block.setAttribute('data-code-block','');
-  block.setAttribute('style',`margin:10px 0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;border-radius:8px;border:1px solid ${dark?'#30363d':'#dbe3ef'};background:${dark?'#0d1117':'#f8fafc'};color:${dark?'#c9d1d9':'#111827'};font-family:Menlo,Consolas,Monaco,monospace;font-size:14px;line-height:24.5px;overflow:hidden;`);
-  const chrome=document.createElement('div');chrome.setAttribute('data-code-chrome','');chrome.setAttribute('aria-hidden','true');chrome.setAttribute('style','display:block;padding:10px 14px 6px;white-space:normal;font-size:16px;line-height:16px;');
-  for(const color of ['#ff5f57','#febc2e','#28c840']){const dot=document.createElement('span');dot.textContent='●';dot.setAttribute('data-ignore-dm','low-contrast');dot.setAttribute('style',`display:inline-block;color:${color};font-family:Arial,sans-serif;font-size:16px;line-height:16px;margin-right:6px;`);chrome.append(dot);}
-  const scroll=document.createElement('section');scroll.setAttribute('data-code-scroll','');scroll.setAttribute('data-ignore-width','');scroll.setAttribute('style','display:block;max-width:100%;min-width:0;overflow-x:auto;padding:0 14px 14px;box-sizing:border-box;font-size:14px;line-height:24.5px;');
-  const code=pre.querySelector<HTMLElement>('code');if(code){code.setAttribute('style','display:block;white-space:pre;overflow-wrap:normal;word-break:normal;font-family:Menlo,Consolas,Monaco,monospace;font-size:14px;line-height:24.5px;tab-size:4;background:transparent;padding:0;color:inherit;');for(const token of code.querySelectorAll<HTMLElement>('span')){token.style.fontSize='14px';token.style.lineHeight='24.5px';}scroll.append(code);}
-  block.append(chrome,scroll);pre.replaceWith(block);
+ // Generated from Markdown token source, never from rendered editor DOM.
+ for(const pre of root.querySelectorAll<HTMLElement>('pre[data-code-index]')) {
+  const index=Number(pre.getAttribute('data-code-index'));pre.replaceWith(codeCard(codeSources[index],index,dark));
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
@@ -87,13 +79,13 @@ function inlineStyles(root:HTMLElement,s:Settings) {
  }
 
 }
-export function readableText(root:Node):string {
+export function readableText(root:Node,codeSources:CodeSource[]=[]):string {
  function walk(node:Node,depth=0):string {
   if(node.nodeType===Node.TEXT_NODE)return node.textContent||'';
   if(!(node instanceof Element))return Array.from(node.childNodes,n=>walk(n,depth)).join('');
   const tag=node.tagName;
   if(tag==='BR')return '\n';
-  if(node.hasAttribute('data-code-block'))return '\n'+(node.querySelector('code')?.textContent||'')+'\n\n';
+  if(node.hasAttribute('data-code-block'))return '\n'+(codeSources[Number(node.getAttribute('data-code-index'))]?.text||node.querySelector('code')?.textContent||'')+'\n\n';
   if(tag==='PRE')return '\n'+(node.textContent||'')+'\n\n';
   if(tag==='IMG')return '[图片：'+(node.getAttribute('alt')||'图片')+']\n';
   if(tag==='TR')return Array.from(node.children,n=>walk(n,depth).replace(/^\n+|\n+$/g,'')).join('\t')+'\n';
@@ -101,11 +93,12 @@ export function readableText(root:Node):string {
    const start=Number(node.getAttribute('start')||1);return '\n'+Array.from(node.children,(li,i)=>'  '.repeat(depth)+(tag==='OL'?`${start+i}. `:'• ')+Array.from(li.childNodes,n=>walk(n,depth+1)).join('').replace(/^\n+|\n+$/g,'')+'\n').join('')+'\n';
   }
   const content=Array.from(node.childNodes,n=>walk(n,depth)).join('');
-  return /^(P|H[1-6]|BLOCKQUOTE|TABLE|SECTION|DIV)$/.test(tag)?content+'\n\n':content;
+  return /^(P|H[1-6]|BLOCKQUOTE|TABLE)$/.test(tag)?content+'\n\n':content;
  }
- return walk(root).replace(/^\n+|\n+$/g,'');
+ return walk(root);
 }
 export async function renderArticle(markdown:string,s:Settings):Promise<Output> {
+ const codeSources:CodeSource[]=[];
  const assets:Asset[]=[]; const errors:string[]=[]; const sources:string[]=[];const images:{src:string;alt:string;width:number}[]=[];
  const md=new MarkdownIt({html:false,linkify:false,breaks:false});
  md.validateLink=url=>safeURL(url)||url.startsWith('local-image:');
@@ -116,9 +109,10 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
  md.renderer.rules.fence=(tokens,i)=>{
   const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0];
   if(lang==='mermaid'){sources.push(t.content);return `<section data-diagram-index="${sources.length-1}"></section>`;}
-  let code=escapeHTML(t.content);if(lang && hljs.getLanguage(lang))code=hljs.highlight(t.content,{language:lang,ignoreIllegals:true}).value;
-  return `<pre><code>${code}</code></pre>`;
+  const code=escapeHTML(t.content);
+  codeSources.push({text:t.content,language:lang});return `<pre data-code-index="${codeSources.length-1}"><code>${code}</code></pre>`;
  };
+ md.renderer.rules.code_block=md.renderer.rules.fence;
  // Task markers operate on list token content, never on the Markdown document.
  const original=md.renderer.rules.inline;
  md.renderer.rules.inline=(tokens,i,opts,env,self)=>{
@@ -148,11 +142,12 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   catch {errors.push(`Mermaid 图形 ${i+1} 语法错误，请修正源码。`);target.textContent=errors.at(-1)!;}
   target.removeAttribute('data-diagram-index');const p=document.createElement('p');p.textContent=`[请在此处插入 Mermaid 图形 ${i+1}，先下载 PNG 并上传到公众号]`;copy.replaceWith(p);
  }));
- inlineStyles(root,s);inlineStyles(clipboard,s);
- // SVG is only in the browser preview. The clipboard holds static explanatory text instead.
- const html=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
- const clean=document.createElement('div');clean.innerHTML=html;
- return {html,previewHTML:root.outerHTML,text:readableText(clean),assets,errors,key:outputKey(markdown,s)};
+ inlineStyles(root,s,codeSources);inlineStyles(clipboard,s,codeSources);addCodeDecorations(root);
+ // Strip every SVG from the sanitized output, then insert only our fixed local
+ // decoration. User/imported SVG and Mermaid SVG never enter clipboard HTML.
+ const sanitized=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
+ const clean=document.createElement('div');clean.innerHTML=sanitized;addCodeDecorations(clean);const html=clean.innerHTML;
+ return {html,previewHTML:root.outerHTML,text:readableText(clean,codeSources),assets,errors,key:outputKey(markdown,s)};
 }
 export async function copyRich(output:Output) {
  if(!window.isSecureContext)throw new Error('富文本复制需要 HTTPS 独立网页，请在安全页面中打开后重试。');
