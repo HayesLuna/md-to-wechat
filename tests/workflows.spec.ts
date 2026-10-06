@@ -267,3 +267,21 @@ test('mixed table cells and long identifiers stay readable in rich clipboard on 
  await page.setViewportSize({width:390,height:844});await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=e.scrollHeight);await page.screenshot({path:'/tmp/mojian-table-compatibility.png'});
  await import('node:fs/promises').then(fs=>fs.writeFile('/tmp/mojian-table-clipboard.html',clip.html));
 });
+
+test('toolbar italic preserves selected Chinese text, toggles and persists into preview and clipboard',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);await setDoc(page,'选中的中文 后面的文字');
+ await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:7});e.commands.focus();});
+ const before=await selection(page);await page.getByRole('button',{name:'斜体',exact:true}).click();
+ await expect(page.locator('.article-editor em')).toHaveText('选中的中文 ');await expect(page.locator('.article-editor em')).toHaveCSS('font-style','italic');await expect(page.locator('.article-editor em')).toHaveCSS('font-synthesis','style');expect((await selection(page)).from).toBe(before.from);expect((await selection(page)).to).toBe(before.to);expect(await markdown(page)).toContain('*选中的中文');
+ await page.getByRole('button',{name:'斜体',exact:true}).click();await expect(page.locator('.article-editor em')).toHaveCount(0);await page.keyboard.press('Control+z');await expect(page.locator('.article-editor em')).toHaveCount(1);
+ await prepared(page);await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.preview-paper em')).toHaveCSS('font-synthesis','style');await expect(page.locator('.preview-paper em')).toHaveCSS('font-style','italic');await page.getByRole('button',{name:'复制到公众号',exact:true}).click();
+ const copied=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];const host=document.createElement('div');host.innerHTML=await(await item.getType('text/html')).text();const em=host.querySelector('em')!;return {text:em.textContent,style:em.style.fontStyle,synthesis:em.style.fontSynthesis,types:item.types};});expect(copied.text).toBe('选中的中文');expect(copied.style).toBe('italic');expect(copied.synthesis).toBe('style');expect(copied.types).toEqual(expect.arrayContaining(['text/html','text/plain']));await page.screenshot({path:'/tmp/mojian-italic.png'});
+});
+
+test('Ctrl and Cmd clicking editor links open actual new tabs without changing draft or selection',async({page,context})=>{
+ await ready(page);const href='http://localhost:5173/?linked=1';await setDoc(page,`前面的正文 [打开页面](${href}) 后面的正文`);const raw=await markdown(page);const currentURL=page.url();
+ const anchor=page.locator('.article-editor a');await anchor.click();await expect(page.getByRole('button',{name:'编辑链接',exact:true})).toBeVisible();expect(context.pages()).toHaveLength(1);expect(page.url()).toBe(currentURL);
+ for(const modifier of ['Control','Meta'] as const){await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:4});e.commands.focus();});const before=await selection(page);const popupEvent=page.waitForEvent('popup');await anchor.click({modifiers:[modifier]});const popup=await popupEvent;await popup.waitForLoadState('domcontentloaded');expect(popup.url()).toBe(href);expect(await popup.evaluate(()=>window.opener)).toBeNull();expect(await popup.evaluate(()=>document.referrer)).toBe('');expect(page.url()).toBe(currentURL);expect(await markdown(page)).toBe(raw);expect(await selection(page)).toEqual(before);await popup.close();}
+ // The modifier handler also cancels native navigation for a dangerous href.
+ await anchor.evaluate(a=>a.setAttribute('href','javascript:window.__unsafeLink=true'));await anchor.click({modifiers:['Control']});expect(await page.evaluate(()=>(window as any).__unsafeLink)).toBeUndefined();expect(context.pages()).toHaveLength(1);expect(await markdown(page)).toBe(raw);
+});

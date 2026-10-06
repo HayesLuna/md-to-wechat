@@ -10,6 +10,11 @@ import { useEffect, useRef } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { SizedImage, SmartCode, EditingRules } from './editorExtensions';
 import { safeURL } from './output';
+function modifiedLink(event:MouseEvent,dom:HTMLElement) {
+ if(event.button!==0||(!event.ctrlKey&&!event.metaKey))return null;
+ const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
+ return link&&dom.contains(link)?link:null;
+}
 export function safeDocument(editor:Editor,markdown:string) {
  const json=editor.markdown!.parse(markdown);
  function clean(n:JSONContent) {
@@ -29,11 +34,16 @@ export function EditorPane({initial,onReady,onChange,onSelection,onContext,onPas
  const props=useRef({onChange,onSelection,onContext,onPasteImage});props.current={onChange,onSelection,onContext,onPasteImage};
  const editorRef=useRef<Editor|null>(null);
  const editor=useEditor({
-  extensions:[StarterKit.configure({codeBlock:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url)}}),Markdown.configure({markedOptions:{gfm:true,breaks:false}}),SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules],
+  extensions:[StarterKit.configure({codeBlock:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url),HTMLAttributes:{title:'Ctrl / Cmd＋点击，在新标签页打开'}}}),Markdown.configure({markedOptions:{gfm:true,breaks:false}}),SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules],
   content:initial,contentType:'markdown',immediatelyRender:false,
   editorProps:{attributes:{class:'article-editor',spellcheck:'false','aria-label':'所见即所得正文'},
    transformPastedHTML:html=>DOMPurify.sanitize(html,{FORBID_TAGS:['svg','script','style','iframe'],FORBID_ATTR:['style']}),
-   handleDOMEvents:{keydown:(_view,event)=>Boolean(event.isComposing||event.keyCode===229),contextmenu:(view,event)=>editorRef.current ? props.current.onContext(event,editorRef.current) : false},
+   handleDOMEvents:{
+    keydown:(_view,event)=>Boolean(event.isComposing||event.keyCode===229),
+    contextmenu:(_view,event)=>editorRef.current ? props.current.onContext(event,editorRef.current) : false,
+    mousedown:(view,event)=>{if(!modifiedLink(event,view.dom))return false;event.preventDefault();return true;},
+    click:(view,event)=>{const link=modifiedLink(event,view.dom);if(!link)return false;event.preventDefault();if(safeURL(link.getAttribute('href')||''))window.open(link.href,'_blank','noopener,noreferrer');return true;},
+   },
    handlePaste:(_view,event)=>{const file=Array.from(event.clipboardData?.files||[]).find(f=>f.type.startsWith('image/'));if(file){event.preventDefault();props.current.onPasteImage(file);return true;}return false;},
   },
   onUpdate:({editor})=>props.current.onChange(editor.getMarkdown()),
