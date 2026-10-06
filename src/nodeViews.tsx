@@ -4,28 +4,32 @@ import { Copy, ChevronDown, ChevronUp, Download, ArrowDownToLine, Trash2, ImageO
 import { imageURL } from './storage';
 import { copyText } from './output';
 import { diagram, downloadDiagram } from './mermaid';
-import { TextSelection } from '@tiptap/pm/state';
+import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
 function signal(message:string) {window.dispatchEvent(new CustomEvent('mojian-notice',{detail:message}));}
-export function ImageView({node,selected,updateAttributes,editor,getPos}:NodeViewProps) {
+export function ImageView({node,selected,editor,getPos}:NodeViewProps) {
  const [widthInput,setWidthInput]=useState(String(node.attrs.percent));
  useEffect(()=>setWidthInput(String(node.attrs.percent)),[node.attrs.percent]);
  const [url,setURL]=useState('');const [missing,setMissing]=useState(false);const box=useRef<HTMLDivElement>(null);const [dragWidth,setDragWidth]=useState<number|null>(null);
+ const setWidth=(percent:number)=>{const pos=getPos();if(pos===undefined)return;editor.commands.command(({tr})=>{const image=tr.doc.nodeAt(pos);if(!image)return false;tr.setNodeMarkup(pos,undefined,{...image.attrs,percent});tr.setSelection(NodeSelection.create(tr.doc,pos));return true;});};
  useEffect(()=>{let active=true;setURL('');setMissing(false);imageURL(node.attrs.src).then(u=>{if(active){setURL(u);setMissing(!u);}}).catch(()=>{if(active)setMissing(true);});return()=>{active=false;};},[node.attrs.src]);
  const resize=(event:React.PointerEvent<HTMLButtonElement>)=>{
-  event.preventDefault();editor.view.dispatch(closeHistory(editor.state.tr));const start=event.clientX;const base=box.current!.getBoundingClientRect().width;const parent=box.current!.parentElement!.getBoundingClientRect().width;let width=node.attrs.percent;
+  event.preventDefault();editor.view.dispatch(closeHistory(editor.state.tr));const start=event.clientX;const base=box.current!.getBoundingClientRect().width;const frame=box.current!.parentElement!;const style=getComputedStyle(frame);const parent=frame.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);let width=node.attrs.percent;
   event.currentTarget.setPointerCapture(event.pointerId);const button=event.currentTarget;
-  const move=(e:PointerEvent)=>{width=Math.round(Math.max(10,Math.min(100,(base+e.clientX-start)/parent*100)));setDragWidth(width);};
-  const up=()=>{button.removeEventListener('pointermove',move);button.removeEventListener('pointerup',up);button.removeEventListener('pointercancel',up);setDragWidth(null);updateAttributes({percent:width});editor.view.dispatch(closeHistory(editor.state.tr));editor.commands.focus();};
+  const move=(e:PointerEvent)=>{width=Math.round(Math.max(1,Math.min(200,(base+e.clientX-start)/parent*100)));setDragWidth(width);};
+  const up=()=>{button.removeEventListener('pointermove',move);button.removeEventListener('pointerup',up);button.removeEventListener('pointercancel',up);setDragWidth(null);setWidth(width);editor.view.dispatch(closeHistory(editor.state.tr));editor.commands.focus();};
   button.addEventListener('pointermove',move);button.addEventListener('pointerup',up);button.addEventListener('pointercancel',up);
  };
- return <NodeViewWrapper className={`image-node ${selected?'selected':''}`} onContextMenu={(e:React.MouseEvent<HTMLDivElement>)=>{if(window.matchMedia('(pointer: coarse)').matches)return;e.preventDefault();window.dispatchEvent(new CustomEvent('mojian-context',{detail:{event:e.nativeEvent,editor}}));}}>
-  <div ref={box} className="image-box" style={{width:`${dragWidth||node.attrs.percent}%`}} contentEditable={false}>
+ const selectImage=(event:React.MouseEvent)=>{event.preventDefault();const pos=getPos();if(pos!==undefined)editor.chain().focus().setNodeSelection(pos).run();};
+ return <NodeViewWrapper contentEditable={false} className={`image-node ${selected?'selected':''}`} onContextMenu={(e:React.MouseEvent<HTMLDivElement>)=>{if(window.matchMedia('(pointer: coarse)').matches)return;e.preventDefault();window.dispatchEvent(new CustomEvent('mojian-context',{detail:{event:e.nativeEvent,editor}}));}}>
+  <div className="image-scroll">
+  <div ref={box} className="image-box" style={{width:`${dragWidth??node.attrs.percent}%`}} contentEditable={false} onMouseDown={selectImage}>
    {url?<img src={url} alt={node.attrs.alt||'图片'} draggable={false} onError={()=>setMissing(true)}/>:<div className="missing-image"><ImageOff size={24}/>{missing?'本地图片缺失，请重新选择图片':'图片加载中…'}<small>{node.attrs.alt}</small></div>}
    {missing&&url&&<span className="image-failed">图片无法加载，请检查地址</span>}
    {selected&&<button className="resize-handle" aria-label="拖拽调整图片宽度" onPointerDown={resize}/>}
   </div>
-  {selected&&<div className="image-controls" contentEditable={false} onMouseDown={e=>e.stopPropagation()}><span>图片宽度</span><input aria-label="图片宽度百分比" type="number" min="10" max="100" value={widthInput} onChange={e=>{setWidthInput(e.target.value);const n=Number(e.target.value);if(Number.isInteger(n)&&n>=10&&n<=100)updateAttributes({percent:n});}} onBlur={()=>{const n=Number(widthInput);if(!Number.isInteger(n)||n<10||n>100){setWidthInput(String(node.attrs.percent));signal('图片宽度请输入 10%–100% 的整数。');}}}/>%<button title="删除图片" onClick={()=>{const pos=getPos();if(pos!==undefined)editor.chain().focus().deleteRange({from:pos,to:pos+node.nodeSize}).run();}}><Trash2 size={14}/></button>{node.attrs.src.startsWith('local-image:')&&<small>本地资源 · 公众号需重新上传</small>}</div>}
+  </div>
+  {selected&&<div className="image-controls" contentEditable={false} onMouseDown={e=>e.stopPropagation()}><span>图片宽度</span><input aria-label="图片宽度百分比" type="number" min="1" max="200" value={widthInput} onChange={e=>{setWidthInput(e.target.value);const n=Number(e.target.value);if(e.target.value!==''&&Number.isInteger(n)&&n>=1&&n<=200)setWidth(n);}} onBlur={()=>{const n=Number(widthInput);if(widthInput===''||!Number.isInteger(n)||n<1||n>200){setWidthInput(String(node.attrs.percent));signal('图片宽度请输入 1%–200% 的整数。');}}}/>%<button title="删除图片" onClick={()=>{const pos=getPos();if(pos!==undefined)editor.chain().focus().deleteRange({from:pos,to:pos+node.nodeSize}).run();}}><Trash2 size={14}/></button>{node.attrs.src.startsWith('local-image:')&&<small>本地资源 · 公众号需重新上传</small>}</div>}
  </NodeViewWrapper>;
 }
 export function CodeView({node,updateAttributes,editor,getPos}:NodeViewProps) {

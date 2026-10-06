@@ -29,3 +29,9 @@
 .context-overlay .context-tools{border:0;overflow:visible}
 .editor-host{padding-top:50px}
 @media(max-width:800px){.toolbar{height:44px}.editor-host{padding-top:50px}}
+
+.image-scroll{max-width:100%;overflow-x:auto;padding:6px;box-sizing:content-box;margin:-6px}
+.column-align{display:flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap;margin-right:6px}
+.column-align select{font-size:11px;padding:3px;border:1px solid var(--border);background:white;border-radius:3px;color:inherit}
+.article-editor ul[data-type=taskList] li>label{display:flex;align-items:center;justify-content:center;height:1.85em;height:1lh;margin:0}
+.article-editor ul[data-type=taskList] input[type=checkbox]{display:block;margin:0}

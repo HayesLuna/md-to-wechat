@@ -9,7 +9,7 @@ export type Output = { html:string; previewHTML:string; text:string; assets:Asse
 export const outputKey=(markdown:string,settings:Settings)=>JSON.stringify([markdown,settings]);
 export function safeURL(url:string) { try{const parsed=new URL(url);return ['https:','http:','mailto:','tel:'].includes(parsed.protocol);}catch{return false;} }
 export function escapeHTML(value:string) { const div=document.createElement('div');div.textContent=value;return div.innerHTML; }
-export function widthFromTitle(title:string) { const m=/^width=(\d{1,3})%$/.exec(title||'');return m?Math.min(100,Math.max(10,Number(m[1]))):100; }
+export function widthFromTitle(title:string) { const m=/^width=(\d{1,3})%$/.exec(title||'');return m?Math.min(200,Math.max(1,Number(m[1]))):100; }
 export function headings(markdown:string) {
  const md=new MarkdownIt({html:false});const tokens=md.parse(markdown,{});const out:{level:number;text:string;line:number}[]=[];
  for(let i=0;i<tokens.length;i++)if(tokens[i].type==='heading_open')out.push({level:Number(tokens[i].tag.slice(1)),text:tokens[i+1].content,line:tokens[i].map?.[0]||0});
@@ -91,6 +91,14 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
   }
  }
 
+ // Enlarged images scroll locally instead of widening or clipping the article.
+ for(const image of root.querySelectorAll<HTMLImageElement>('img')) {
+  if(parseFloat(image.style.width)<=100)continue;
+  image.style.maxWidth='none';image.setAttribute('data-ignore-width','');
+  const frame=document.createElement('span');frame.setAttribute('data-image-scroll','');frame.setAttribute('data-ignore-width','');
+  frame.setAttribute('style','display:block;width:100%;max-width:100%;overflow-x:auto;box-sizing:border-box;-webkit-overflow-scrolling:touch;');
+  image.replaceWith(frame);frame.append(image);
+ }
  // Keep a real table layout in both preview and pasted HTML. Many columns may
  // deliberately scroll, but the article itself must stay within its viewport.
  for(const table of root.querySelectorAll<HTMLTableElement>('table')) {
