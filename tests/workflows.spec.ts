@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 async function ready(page:Page) {await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);}
 async function setDoc(page:Page,text:string) {await page.evaluate(text=>(window as any).__mojian.setMarkdown(text),text);}
 async function markdown(page:Page) {return page.evaluate(()=>(window as any).__mojian.getMarkdown());}
-async function cursor(page:Page,text:string,offset=1) {await page.evaluate(({text,offset})=>{const e=(window as any).__mojian.editor;let p=1;e.state.doc.descendants((n:any,pos:number)=>{if(n.isText&&n.text.includes(text))p=pos+offset;});e.commands.setTextSelection(p);e.commands.focus();},{text,offset});}
+async function cursor(page:Page,text:string,offset=1) {await page.evaluate(({text,offset})=>{const e=(window as any).__mojian.editor;let p=1;e.state.doc.descendants((n:any,pos:number)=>{if(n.isText&&n.text.includes(text))p=pos+offset;});e.commands.setTextSelection(p);e.commands.focus();},{text,offset});await expect(page.locator('.article-editor')).toBeFocused();}
 async function selection(page:Page) {return page.evaluate(()=>{const s=(window as any).__mojian.editor.state.selection;return {type:s.toJSON().type,from:s.from,to:s.to,node:s.node?.type.name,text:s.forEachCell?(()=>{const texts:string[]=[];s.forEachCell((n:any)=>texts.push(n.textContent));return texts.join('|');})():(window as any).__mojian.editor.state.doc.textBetween(s.from,s.to,'|')};});}
 async function prepared(page:Page) {await page.waitForFunction(()=>{const m=(window as any).__mojian;const o=m.getOutput();return o&&o.key===JSON.stringify([m.getMarkdown(),m.getSettings()]);});}
 
@@ -302,4 +302,20 @@ test('link selection controls never shift text during boundary drag selection',a
   await page.mouse.up();expect(await markdown(page)).toBe(raw);
  }
  await page.screenshot({path:'/tmp/mojian-link-selection-stable.png'});
+});
+
+test('separate link and table action row overlays without moving text or formatting toolbar',async({page})=>{
+ await ready(page);const raw='普通前行\n\n| 表头 | 列二 |\n| --- | --- |\n| [表格链接](https://example.com/) | 单元格正文 |\n\n普通后行';await setDoc(page,raw);
+ const positions=await page.evaluate(()=>{const e=(window as any).__mojian.editor;let link=1,cell=1;e.state.doc.descendants((n:any,pos:number)=>{if(n.isText&&n.marks.some((m:any)=>m.type.name==='link'))link=pos;if(n.isText&&n.text==='单元格正文')cell=pos;});return {link,cell};});
+ for(const width of [1440,390]){
+  await page.setViewportSize({width,height:900});await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection(1);e.commands.focus();});
+  const measure=()=>page.evaluate(()=>{const scroll=document.querySelector('.writing-scroll')!;const p=document.querySelector('.article-editor p')!;const table=document.querySelector('.article-editor table')!;const toolbar=document.querySelector('.toolbar')!;return {scrollTop:scroll.scrollTop,scrollY:scroll.getBoundingClientRect().top,textY:p.getBoundingClientRect().top,tableY:table.getBoundingClientRect().top,toolbarHeight:toolbar.getBoundingClientRect().height};});const baseline=await measure();
+  for(const pos of [positions.cell,positions.link+1,1,positions.link+1,positions.cell,1]){
+   await page.evaluate(pos=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection(pos);e.commands.focus();},pos);expect(await measure()).toEqual(baseline);
+   if(pos!==1){await expect(page.locator('.context-overlay [aria-label="表格操作"]')).toBeVisible();expect(await page.locator('.toolbar .context-tools').count()).toBe(0);const row=(await page.locator('.context-overlay').boundingBox())!;expect(row.y+row.height).toBeLessThanOrEqual(baseline.textY);}
+   if(pos===positions.link+1)await expect(page.locator('.context-overlay [aria-label="链接操作"]')).toBeVisible();
+  }
+  await page.evaluate(pos=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection(pos);e.commands.focus();},positions.link+1);await page.screenshot({path:`/tmp/mojian-context-overlay-${width}.png`});
+ }
+ expect(await markdown(page)).toBe(raw);
 });

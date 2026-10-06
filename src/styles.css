@@ -21,7 +21,11 @@
 /* Chinese system fonts often need synthesized italic glyphs. */
 .article-editor{font-synthesis:style}
 
-/* Keep contextual link controls in the existing row so drag selection never moves the article. */
+/* Context actions overlay the writing area without changing its dimensions. */
 .toolbar{height:52px}
-.toolbar .link-tools{padding:0 6px 0 0;border:0;background:transparent;overflow:visible}
-@media(max-width:800px){.toolbar{height:44px}}
+.writing-body{position:relative;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden}
+.context-overlay{position:absolute;top:0;left:0;right:0;z-index:30;display:flex;overflow-x:auto;scrollbar-width:thin;background:#faf5f4;border-bottom:1px solid #eee2df}
+.context-overlay:empty{display:none}
+.context-overlay .context-tools{border:0;overflow:visible}
+.editor-host{padding-top:50px}
+@media(max-width:800px){.toolbar{height:44px}.editor-host{padding-top:50px}}
