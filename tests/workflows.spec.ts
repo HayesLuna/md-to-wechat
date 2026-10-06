@@ -285,3 +285,21 @@ test('Ctrl and Cmd clicking editor links open actual new tabs without changing d
  // The modifier handler also cancels native navigation for a dangerous href.
  await anchor.evaluate(a=>a.setAttribute('href','javascript:window.__unsafeLink=true'));await anchor.click({modifiers:['Control']});expect(await page.evaluate(()=>(window as any).__unsafeLink)).toBeUndefined();expect(context.pages()).toHaveLength(1);expect(await markdown(page)).toBe(raw);
 });
+
+test('link selection controls never shift text during boundary drag selection',async({page})=>{
+ await ready(page);const raw='普通前行\n\n[这是链接中的文字](https://example.com/)\n\n普通后行';await setDoc(page,raw);
+ const positions=await page.evaluate(()=>{const e=(window as any).__mojian.editor;let link=1;e.state.doc.descendants((n:any,pos:number)=>{if(n.isText&&n.marks.some((m:any)=>m.type.name==='link'))link=pos;});return {link};});
+ const layout=()=>page.locator('.article-editor p').evaluateAll(elements=>elements.map(el=>({top:el.getBoundingClientRect().top,height:el.getBoundingClientRect().height})));
+ for(const width of [1440,390]){
+  await page.setViewportSize({width,height:900});await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection(1);e.commands.focus();});const baseline=await layout();
+  for(let i=0;i<4;i++){
+   await page.evaluate(pos=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:pos+1,to:pos+4});e.commands.focus();},positions.link);await expect(page.getByRole('button',{name:'编辑链接',exact:true})).toBeVisible();expect(await layout()).toEqual(baseline);
+   await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection(1);e.commands.focus();});await expect(page.getByRole('button',{name:'编辑链接',exact:true})).toHaveCount(0);expect(await layout()).toEqual(baseline);
+  }
+  const anchor=(await page.locator('.article-editor a').boundingBox())!;
+  await page.mouse.move(anchor.x+5,anchor.y+anchor.height/2);await page.mouse.down();
+  for(let i=0;i<6;i++){await page.mouse.move(anchor.x+55,anchor.y+anchor.height+5);await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));expect(await layout()).toEqual(baseline);await page.mouse.move(anchor.x+55,anchor.y+anchor.height/2);await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));expect(await layout()).toEqual(baseline);}
+  await page.mouse.up();expect(await markdown(page)).toBe(raw);
+ }
+ await page.screenshot({path:'/tmp/mojian-link-selection-stable.png'});
+});

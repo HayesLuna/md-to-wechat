@@ -1,11 +1,12 @@
 import type { Editor } from '@tiptap/core';
 import { Bold, Italic, Strikethrough, Code, Link, Quote, List, ListOrdered, ListTodo, Table, ImagePlus, Minus, Braces, Undo2, Redo2, MoreHorizontal } from 'lucide-react';
 export type Operation='link'|'image'|'table'|'more';
-export function Toolbar({editor,onOpen,source,onCopySource}: {editor:Editor|null;onOpen:(op:Operation)=>void;source:boolean;onCopySource:()=>void}) {
+export function Toolbar({editor,onOpen,source,onCopySource,linkTools}: {editor:Editor|null;onOpen:(op:Operation)=>void;source:boolean;onCopySource:()=>void;linkTools?:React.ReactNode}) {
  if(source)return <div className="toolbar source-tools"><span>原始 Markdown · 不自动改写输入</span><button onClick={onCopySource}><Code size={15}/>复制 Markdown 源码</button></div>;
  const action=(fn:(e:Editor)=>unknown)=>()=>{if(editor)fn(editor);};
  const button=(title:string,icon:React.ReactNode,fn:()=>void,active=false)=><button key={title} type="button" title={title} aria-label={title} className={active?'active':''} onMouseDown={e=>e.preventDefault()} onClick={fn}>{icon}</button>;
  return <div className="toolbar" role="toolbar" aria-label="正文格式">
+  {linkTools}
   <select aria-label="标题级别" value={editor?.isActive('heading')?String(editor.getAttributes('heading').level):'0'} onChange={e=>{const level=Number(e.target.value);if(editor){if(!level)editor.chain().focus().setParagraph().run();else editor.chain().focus().toggleHeading({level:level as 1|2|3}).run();}}}><option value="0">正文</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option></select><i/>
   {button('粗体',<Bold size={17}/>,action(e=>e.chain().focus().toggleBold().run()),editor?.isActive('bold'))}
   {button('斜体',<Italic size={17}/>,action(e=>e.chain().focus().toggleItalic().run()),editor?.isActive('italic'))}
