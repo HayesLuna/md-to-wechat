@@ -238,3 +238,24 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
  await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=330);await page.screenshot({path:'/tmp/mojian-svg-code-mobile.png'});expect(await markdown(page)).toBe(raw);
  await setDoc(page,'```unknown\n\n\t  last  \n\n```');await prepared(page);expect(await page.evaluate(()=>(window as any).__mojian.getOutput().text)).toContain('\n\t  last  \n\n');
 });
+
+test('mixed table cells and long identifiers stay readable in rich clipboard on narrow screens',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);await ready(page);
+ const identifier='assertThatVeryLongFactoryMethodName'.repeat(5);
+ const raw=`### 场景对比表\n\n| 场景 | 对比说明 |\n| :--- | ---: |\n| **中文场景**与普通正文 | 使用\`行内代码\`和*强调*，${'中文说明保持正常行距。'.repeat(12)} |\n\n### 内置断言工厂表\n\n| 工厂方法 | 说明 | 参数 |\n| --- | --- | --- |\n| \`${identifier}\` | **工厂**返回值与[说明链接](https://example.com/) | ${'unbroken_parameter_'.repeat(12)} |\n\n| A | B | C | D | E | F | G | H |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |`;
+ await setDoc(page,raw);await prepared(page);await page.getByRole('button',{name:'公众号预览',exact:true}).click();await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');
+ const clip=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];return {types:item.types,html:await(await item.getType('text/html')).text(),text:await(await item.getType('text/plain')).text()};});
+ expect(clip.types).toEqual(expect.arrayContaining(['text/html','text/plain']));expect(clip.text).toContain(identifier);expect(await markdown(page)).toBe(raw);expect(await page.locator('.preview-paper').innerHTML()).toBe(clip.html);
+ const measured=await page.evaluate(html=>[320,375,677].map(width=>{
+  // Detached from app CSS: verify the actual pasted HTML with inline styles only.
+  const host=document.createElement('div');host.style.width=width+'px';host.innerHTML=html;document.body.append(host);
+  const wrappers=Array.from(host.querySelectorAll<HTMLElement>('[data-table-scroll]'));
+  const normalTables=Array.from(host.querySelectorAll<HTMLTableElement>('table')).slice(0,2);
+  const overflowingCells=Array.from(host.querySelectorAll<HTMLElement>('th,td')).filter(cell=>{const r=document.createRange();r.selectNodeContents(cell);return Array.from(r.getClientRects()).some(rect=>rect.right>cell.getBoundingClientRect().right+1);}).map(cell=>cell.textContent);
+  const legacyWarnings=Array.from(host.querySelectorAll<HTMLElement>('th,td')).filter(cell=>{if(!Array.from(cell.childNodes).some(n=>n.nodeType===Node.TEXT_NODE&&n.textContent?.trim()))return false;const r=document.createRange();r.selectNodeContents(cell);const count=Array.from(r.getClientRects()).filter(r=>r.height>0).length;return count>=2&&r.getBoundingClientRect().height/count<parseFloat(getComputedStyle(cell).fontSize)*.95;}).map(cell=>cell.textContent);
+  const result={width,wrapperWidths:wrappers.map(e=>e.getBoundingClientRect().width),tableWidths:normalTables.map(e=>e.getBoundingClientRect().width),overflowingCells,legacyWarnings,wideScroll:wrappers[2].scrollWidth>wrappers[2].clientWidth,alignments:Array.from(host.querySelectorAll('table:first-of-type th')).slice(0,2).map(e=>getComputedStyle(e).textAlign)};host.remove();return result;
+ }),clip.html);
+ for(const result of measured){expect(result.wrapperWidths.every(w=>w<=result.width+1)).toBe(true);expect(result.tableWidths.every(w=>w<=result.width+1)).toBe(true);expect(result.overflowingCells).toEqual([]);expect(result.legacyWarnings).toEqual([]);expect(result.alignments).toEqual(['left','right']);if(result.width<640)expect(result.wideScroll).toBe(true);}
+ await page.setViewportSize({width:390,height:844});await page.locator('.preview-scroll').evaluate(e=>e.scrollTop=e.scrollHeight);await page.screenshot({path:'/tmp/mojian-table-compatibility.png'});
+ await import('node:fs/promises').then(fs=>fs.writeFile('/tmp/mojian-table-clipboard.html',clip.html));
+});

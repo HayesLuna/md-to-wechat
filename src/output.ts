@@ -24,7 +24,7 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  h3:`font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,h4:'font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;',h5:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',h6:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',
  blockquote:`margin:20px 0;padding:14px 18px;border-left:3px solid ${color};background:#f6f6f5;color:#686868;`,
  ul:'padding-left:24px;margin:14px 0 20px;',ol:'padding-left:26px;margin:14px 0 20px;',li:'margin:6px 0;line-height:inherit;',strong:'font-weight:700;',em:'font-style:italic;',s:'text-decoration:line-through;',a:`color:${color};text-decoration:underline;`,hr:'border:0;border-top:1px solid #ddd;margin:30px 0;',
- table:'border-collapse:collapse;width:100%;font-size:14px;margin:20px 0;table-layout:auto;',th:'border:1px solid #ddd;background:#f2f2f2;font-weight:600;padding:9px 12px;',td:'border:1px solid #ddd;padding:9px 12px;',
+ table:'border-collapse:collapse;width:100%;font-size:14px;margin:0;table-layout:fixed;box-sizing:border-box;',th:'border:1px solid #ddd;background:#f2f2f2;font-weight:600;padding:9px 12px;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word;',td:'border:1px solid #ddd;padding:9px 12px;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word;',
  pre:`margin:20px 0;padding:16px;background:${dark?'#25272b':'#f5f5f5'};color:${dark?'#e2e4e8':'#373a40'};font-size:13px;line-height:1.7;white-space:pre;overflow-x:auto;border-radius:3px;font-family:Consolas,Menlo,monospace;tab-size:4;`,
  code:'font-family:Consolas,Menlo,monospace;font-size:0.88em;background:#f0f0ef;padding:2px 4px;border-radius:3px;',
  img:'height:auto;max-width:100%;display:block;margin:20px auto;',
@@ -81,7 +81,7 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  // WeChat's older overlap checker miscounts mixed direct text + inline marks.
  // Keep rich text inline, but give direct text its own leaf span in mixed blocks.
  // Traverse DOM nodes (not Markdown) so nested lists and code stay intact.
- for(const block of root.querySelectorAll<HTMLElement>('p,li,h1,h2,h3,h4,h5,h6,blockquote')) {
+ for(const block of root.querySelectorAll<HTMLElement>('p,li,h1,h2,h3,h4,h5,h6,blockquote,th,td')) {
   if(!block.children.length)continue;
   for(const node of Array.from(block.childNodes)) {
    if(node.nodeType!==Node.TEXT_NODE||!node.textContent?.trim())continue;
@@ -89,6 +89,21 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
    leaf.style.fontSize=block.style.fontSize;leaf.style.lineHeight=block.style.lineHeight;leaf.style.setProperty('display','inline','important');
    node.replaceWith(leaf);leaf.appendChild(node);
   }
+ }
+
+ // Keep a real table layout in both preview and pasted HTML. Many columns may
+ // deliberately scroll, but the article itself must stay within its viewport.
+ for(const table of root.querySelectorAll<HTMLTableElement>('table')) {
+  const columns=Math.max(1,...Array.from(table.rows,row=>row.cells.length));
+  table.style.minWidth=columns*80+'px';
+  // The official checker can detach a table as its own paragraph, so retain the
+  // documented exemption for intentional scrolling on the table as well.
+  table.setAttribute('data-ignore-width','');
+  const scroll=document.createElement('div');
+  scroll.setAttribute('data-table-scroll','');
+  scroll.setAttribute('data-ignore-width','');
+  scroll.setAttribute('style',`display:block;width:100%;max-width:100%;min-width:0;margin:20px 0;overflow-x:auto;box-sizing:border-box;-webkit-overflow-scrolling:touch;font-size:${table.style.fontSize};line-height:${table.style.lineHeight};`);
+  table.replaceWith(scroll);scroll.append(table);
  }
 
  // The quote padding already provides bottom space; avoid stacking its last
