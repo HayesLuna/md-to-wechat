@@ -80,6 +80,14 @@ test('outline duplicates and code exclusions, full screen and Esc layering; mobi
 
 test('context menu retargets outside selection and stays in viewport',async({page})=>{
  await ready(page);await setDoc(page,'第一段\n\n第二段');await cursor(page,'第一段');const p=page.locator('.article-editor p').nth(1);await p.click({button:'right'});await expect(page.locator('.context-menu')).toBeVisible();expect((await selection(page)).from).toBeGreaterThan(4);const box=await page.locator('.context-menu').boundingBox();expect(box!.x+box!.width).toBeLessThanOrEqual(1440);await page.keyboard.press('Escape');await expect(page.locator('.context-menu')).toHaveCount(0);
+ // Short menus should remain at the pointer well below the old fixed 360px cutoff.
+ await setDoc(page,Array(35).fill('可右键的正文段落').join('\n\n'));
+ const check=async(x:number,y:number)=>{x=Math.floor(x);y=Math.floor(y);await page.mouse.click(x,y,{button:'right'});const menu=page.locator('.context-menu');await expect(menu).toBeVisible();const box=(await menu.boundingBox())!;const viewport=page.viewportSize()!;expect(box.x).toBeCloseTo(Math.max(8,Math.min(x,viewport.width-box.width-8)),0);expect(box.y).toBeCloseTo(Math.max(8,Math.min(y,viewport.height-box.height-8)),0);return box;};
+ const editorBounds=(await page.locator('.article-editor').boundingBox())!;
+ let actual=await check(editorBounds.x+30,700);expect(actual.y).toBe(700);await page.screenshot({path:'/tmp/mojian-context-position.png'});await page.keyboard.press('Escape');
+ actual=await check(editorBounds.x+editorBounds.width-20,940);expect(actual.x+actual.width).toBeLessThanOrEqual(1432);expect(actual.y+actual.height).toBeLessThanOrEqual(992);
+ await page.setViewportSize({width:900,height:600});await expect.poll(async()=>{const b=(await page.locator('.context-menu').boundingBox())!;return b.x+b.width;}).toBeLessThanOrEqual(892);await expect.poll(async()=>{const b=(await page.locator('.context-menu').boundingBox())!;return b.y+b.height;}).toBeLessThanOrEqual(592);await page.keyboard.press('Escape');
+ await setDoc(page,'| A | B |\n| --- | --- |\n| 当前行 | 内容 |');const cell=page.locator('.article-editor td').first();await cell.scrollIntoViewIfNeeded();const target=(await cell.boundingBox())!;await check(target.x+20,target.y+10);await expect(page.locator('.context-menu')).toContainText('删除整表');await page.keyboard.press('Escape');
 });
 
 test('code copy is raw, fold keeps Markdown and output; Mermaid errors recover to latest source',async({page,context})=>{

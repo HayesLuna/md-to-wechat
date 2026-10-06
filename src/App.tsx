@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import type { Editor } from '@tiptap/core';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import { Upload, Download, Copy, CheckCircle2, Loader2, PanelRight, ListTree, Maximize2, Minimize2, X, Save, LockKeyhole, ChevronDown, FileText, ImagePlus, ExternalLink, AlertCircle, Trash2, RotateCcw, HelpCircle } from 'lucide-react';
@@ -28,6 +28,7 @@ export default function App() {
  const statusRef=useRef(saveStatus);statusRef.current=saveStatus;const target=useRef<ReturnType<typeof captureTarget>|null>(null);const imageRequest=useRef(0);
  const fileInput=useRef<HTMLInputElement>(null);const imageInput=useRef<HTMLInputElement>(null);const source=useRef<HTMLTextAreaElement>(null);const writingScroll=useRef<HTMLDivElement>(null);
  const fullRestore=useRef<{body:string;scroll:number;sourceScroll:number;page:number}|null>(null);
+ const contextElement=useRef<HTMLDivElement>(null);
  const notify=useCallback((s:string)=>setNotice(s),[]);
  useEffect(()=>{let active=true;loadDraft().then(d=>{if(!active)return;const text=d?d.markdown:SAMPLE;setMarkdown(text);setInitial(text);setSettings(validSettings(d?.settings));version.current=Math.max(Date.now(),(d?.version||0)+1);setSaveTime(d?.savedAt||0);setReady(true);}).catch(()=>{if(active){setMarkdown(SAMPLE);setInitial(SAMPLE);setReady(true);notify('无法读取本地存储；请保留内容并导出 Markdown。');}});return()=>{active=false;};},[notify]);
  const changed=(text:string)=>{current.current={...current.current,markdown:text};version.current++;setMarkdown(text);setSaveStatus('saving');};
@@ -97,7 +98,7 @@ export default function App() {
  const contextMenu=(event:MouseEvent,e:Editor)=>{
   if(window.matchMedia('(pointer: coarse)').matches)return false;event.preventDefault();
   const hit=e.view.posAtCoords({left:event.clientX,top:event.clientY});if(hit){const s=e.state.selection;if(s.empty||hit.pos<s.from||hit.pos>s.to){const image=(event.target as Element).closest('.image-node');if(image){const pos=e.view.posAtDOM(image,0);const n=e.state.doc.nodeAt(pos);if(n?.type.name==='image')e.view.dispatch(e.state.tr.setSelection(NodeSelection.create(e.state.doc,pos)));else e.view.dispatch(e.state.tr.setSelection(TextSelection.near(e.state.doc.resolve(hit.pos))));}else e.view.dispatch(e.state.tr.setSelection(TextSelection.near(e.state.doc.resolve(hit.pos))));}}
-  setSelectionTick(n=>n+1);setContext({x:Math.max(8,Math.min(event.clientX,window.innerWidth-224)),y:Math.max(8,Math.min(event.clientY,window.innerHeight-360))});return true;
+  setSelectionTick(n=>n+1);setContext({x:event.clientX,y:event.clientY});return true;
  };
  const replaceArticle=(text:string)=>{if(editor)replaceDocument(editor,text);changed(text);setModal(null);setMenu(false);setOutline(false);editor?.commands.focus('start');};
  const askReplace=(title:string,message:string,action:()=>void)=>{setMenu(false);setModal({type:'confirm',title,message,action});};
@@ -121,6 +122,19 @@ export default function App() {
  };
  const toggleFullscreen=()=>{if(!fullscreen)fullRestore.current={body:document.body.style.overflow,scroll:writingScroll.current?.scrollTop||0,sourceScroll:source.current?.scrollTop||0,page:window.scrollY};setFullscreen(f=>!f);};
  const inTable=editor?.isActive('table');const imageSelected=editor?.isActive('image');const linkActive=editor?.isActive('link');void selectionTick;
+ useLayoutEffect(()=>{
+  if(!context)return;
+  const position=()=>{
+   const el=contextElement.current;if(!el)return;
+   // Measure away from the edge, where fixed-position auto widths can shrink.
+   el.style.left='8px';el.style.top='8px';
+   const {width,height}=el.getBoundingClientRect();
+   el.style.left=Math.max(8,Math.min(context.x,window.innerWidth-width-8))+'px';
+   el.style.top=Math.max(8,Math.min(context.y,window.innerHeight-height-8))+'px';
+  };
+  position();window.addEventListener('resize',position);
+  return()=>window.removeEventListener('resize',position);
+ },[context,inTable,imageSelected]);
  const localAssets=output?.assets.filter(a=>a.kind==='image')||[];
  useEffect(()=>{const listener=(e:Event)=>{const {event,editor}=(e as CustomEvent).detail;contextMenu(event,editor);};window.addEventListener('mojian-context',listener);return()=>window.removeEventListener('mojian-context',listener);},[editor]);
  const assetDownloads=(assets=output?.assets||[])=>assets.length?assets.map((a,i)=><li key={i}><div><strong>{a.label}</strong><small>{a.kind==='diagram'?'下载 PNG 后在公众号手动插入':a.missing?'资源缺失，请重新选择图片':'仅保存在当前浏览器 · 需要重新上传'}</small></div><button disabled={a.missing} onClick={()=>{const task=a.kind==='diagram'?downloadDiagram(a.source!):downloadImage(a.src!,a.label);void task.catch(e=>notify(e.message));}}><Download size={15}/>{a.kind==='diagram'?'PNG':'下载'}</button></li>):<li>暂无本地图片</li>;
@@ -142,7 +156,7 @@ export default function App() {
   <footer className="app-footer"><span>字数：{words.toLocaleString()}<i/>预计阅读：{Math.max(1,Math.ceil(words/500))} 分钟</span><span><LockKeyhole size={12}/>草稿仅保存在当前浏览器，清除站点数据可能丢失。</span><button title="帮助与快捷键" onClick={()=>setModal({type:'help'})}><HelpCircle size={15}/></button></footer>
   {outline&&<aside className="outline-panel" aria-label="文章大纲"><header><strong>文章大纲</strong><button title="关闭大纲" onClick={()=>setOutline(false)}><X size={17}/></button></header><div>{headingList.length?headingList.map((h,i)=><button key={i} style={{paddingLeft:16+(h.level-1)*14}} onClick={()=>jump(i)}><span>{h.text||'无标题'}</span><small>{i+1}</small></button>):<p>暂无标题</p>}</div></aside>}
   {menu&&<div className="floating-menu more-menu"><button onClick={()=>{void saveNow(true);setMenu(false);}}><Save size={16}/>保存本地草稿</button><button onClick={()=>{copySource();setMenu(false);}}><FileText size={16}/>复制 Markdown 源码</button><button onClick={()=>{setModal({type:'downloads'});setMenu(false);}}><ImagePlus size={16}/>下载本地图片</button><button onClick={()=>askReplace('替换为示例文章','这会替换当前正文和结构，取消保持当前草稿。',()=>replaceArticle(SAMPLE))}><RotateCcw size={16}/>替换为示例文章</button><button onClick={()=>askReplace('清空草稿','正文会清空。建议先导出 Markdown，本地图片资源仍会保留。',()=>replaceArticle(''))}><Trash2 size={16}/>清空草稿</button><button onClick={()=>{setModal({type:'help'});setMenu(false);}}><HelpCircle size={16}/>使用说明与快捷键</button></div>}
-  {context&&<div className="floating-menu context-menu" style={{left:context.x,top:context.y}}><button onClick={()=>open('link')}>插入链接</button><button onClick={()=>open('table')}>插入 3×3 表格</button><button onClick={()=>open('image')}>插入图片</button>{inTable&&<><hr/><button onClick={()=>tableActions('row')}>下方添加行</button><button onClick={()=>tableActions('col')}>右侧添加列</button><button onClick={()=>tableActions('deleteRow')}>删除当前行</button><button onClick={()=>tableActions('deleteCol')}>删除当前列</button><button onClick={()=>tableActions('delete')}>删除整表</button></>}{imageSelected&&<><hr/><button onClick={()=>{editor?.chain().focus().deleteSelection().run();setContext(null);}}>删除选中图片</button><button onClick={()=>{setContext(null);editor?.commands.focus();notify('点击图片后可拖拽右下角手柄，或输入 10%–100% 宽度。');}}>调整图片尺寸</button></>}</div>}
+  {context&&<div ref={contextElement} className="floating-menu context-menu" style={{left:context.x,top:context.y}}><button onClick={()=>open('link')}>插入链接</button><button onClick={()=>open('table')}>插入 3×3 表格</button><button onClick={()=>open('image')}>插入图片</button>{inTable&&<><hr/><button onClick={()=>tableActions('row')}>下方添加行</button><button onClick={()=>tableActions('col')}>右侧添加列</button><button onClick={()=>tableActions('deleteRow')}>删除当前行</button><button onClick={()=>tableActions('deleteCol')}>删除当前列</button><button onClick={()=>tableActions('delete')}>删除整表</button></>}{imageSelected&&<><hr/><button onClick={()=>{editor?.chain().focus().deleteSelection().run();setContext(null);}}>删除选中图片</button><button onClick={()=>{setContext(null);editor?.commands.focus();notify('点击图片后可拖拽右下角手柄，或输入 10%–100% 宽度。');}}>调整图片尺寸</button></>}</div>}
   {modal&&<Dialog title={modal.type==='link'?'插入链接':modal.type==='image'?'插入图片':modal.type==='assets'?'复制前：这些图片需要手动上传':modal.type==='downloads'?'下载本地图片':modal.type==='help'?'写作说明':modal.type==='confirm'?modal.title:'操作'} onClose={closeModal}>
    {modal.type==='link'&&<form onSubmit={e=>{e.preventDefault();insertLink();}}><label>链接地址<input autoFocus aria-label="链接地址" type="text" placeholder="https://example.com" value={url} onChange={e=>setURL(e.target.value)}/></label><label>显示文字<input aria-label="链接显示文字" value={label} onChange={e=>setLabel(e.target.value)}/></label><p className="muted">有选中文字时，链接应用到原文字；无选区时使用显示文字。</p>{dialogError&&<p className="form-error">{dialogError}</p>}<div className="dialog-actions"><button type="button" onClick={closeModal}>取消</button><button className="primary" type="submit">插入链接</button></div></form>}
    {modal.type==='image'&&<form onSubmit={e=>{e.preventDefault();void insertURLImage();}}><label>公开图片 URL<input aria-label="图片地址" placeholder="https://…" value={url} onChange={e=>setURL(e.target.value)}/></label><label>图片说明<input aria-label="图片说明" value={label} onChange={e=>setLabel(e.target.value)}/></label><div className="image-upload"><button type="button" disabled={processing} onClick={()=>imageInput.current?.click()}>{processing?<Loader2 className="spin" size={17}/>:<Upload size={17}/>} {processing?'图片处理中…':'选择本地图片'}</button><p>PNG / JPEG / WebP / GIF，最大 10 MB。<br/>不上传到服务器，仅保存在当前浏览器。</p></div>{dialogError&&<p className="form-error">{dialogError}</p>}<div className="dialog-actions"><button type="button" onClick={closeModal}>取消</button><button className="primary" type="submit" disabled={processing}>插入 URL 图片</button></div></form>}
