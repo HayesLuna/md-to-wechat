@@ -10,7 +10,7 @@ import { EditorPane, replaceDocument } from './EditorPane';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
-import { captureTarget, protectedDeleteRow, protectedDeleteColumn, ancestor, alignTableColumns } from './editorExtensions';
+import { captureTarget, protectedDeleteRow, protectedDeleteColumn, ancestor, alignTableColumns, insertCenteredTable } from './editorExtensions';
 type Modal = {type:'link'|'image'|'assets'|'downloads'|'help'} | {type:'confirm';title:string;message:string;action:()=>void};
 type SaveStatus='saving'|'saved'|'failed';
 function validSettings(s?:Settings):Settings {
@@ -68,7 +68,7 @@ export default function App() {
  const tableActions=(action:'row'|'col'|'deleteRow'|'deleteCol'|'delete')=>{if(!editor)return;setContext(null);if(action==='row')editor.chain().focus().addRowAfter().run();if(action==='col')editor.chain().focus().addColumnAfter().run();if(action==='deleteRow')protectedDeleteRow(editor,notify);if(action==='deleteCol')protectedDeleteColumn(editor,notify);if(action==='delete')editor.chain().focus().deleteTable().run();};
  const open=(op:Operation)=>{
   setContext(null);setMenu(false);if(!editor)return;
-  if(op==='table'){editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).run();return;}
+  if(op==='table'){insertCenteredTable(editor);return;}
   if(op==='more'){setMenu(true);return;}
   if(op==='link'&&editor.isActive('link'))editor.commands.extendMarkRange('link');
   target.current?.cancel();target.current=captureTarget(editor);setURL(op==='link'?editor.getAttributes('link').href||'':'');setLabel(editor.state.doc.textBetween(editor.state.selection.from,editor.state.selection.to,' '));setDialogError('');setModal({type:op});

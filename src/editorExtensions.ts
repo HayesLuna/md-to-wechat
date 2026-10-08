@@ -41,6 +41,13 @@ function tableInfo(selection:Selection) {
  if(selection instanceof NodeSelection && selection.node.type.name==='table')return {node:selection.node,pos:selection.from,depth:0};
  const {$from}=selection;for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='table')return {node:$from.node(d),pos:$from.before(d),depth:d};return null;
 }
+export function insertCenteredTable(editor:Editor) {
+ editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).command(({tr})=>{
+  const table=tableInfo(tr.selection);if(!table)return false;
+  table.node.descendants((node,offset)=>{if(['tableCell','tableHeader'].includes(node.type.name))tr.setNodeMarkup(table.pos+1+offset,undefined,{...node.attrs,align:'center'});});
+  return true;
+ }).run();
+}
 // GFM stores alignment per column, so update its header and all data cells.
 export function alignTableColumns(editor:Editor,align:'left'|'center'|'right') {
  const selection=editor.state.selection;const table=tableInfo(selection);if(!table)return;
