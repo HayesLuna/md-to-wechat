@@ -1,6 +1,7 @@
 import { Extension, wrappingInputRule, type Editor } from '@tiptap/core';
 import { Plugin, PluginKey, AllSelection, NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
+import { joinBackward } from '@tiptap/pm/commands';
 import type { Node } from '@tiptap/pm/model';
 import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -82,6 +83,15 @@ export const EditingRules=Extension.create({
      if(itemDepth){selections.push(NodeSelection.create(state.doc,$from.before(itemDepth)));for(let d=itemDepth-1;d>0;d--)if(['bulletList','orderedList','taskList'].includes($from.node(d).type.name))selections.push(NodeSelection.create(state.doc,$from.before(d)));}
     }
     selections.push(new AllSelection(state.doc));view.dispatch(state.tr.setSelection(selections[0]).setMeta('mojian-progress',{selections,index:0}));return true;
+   }
+   if(event.key==='Enter'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parent.type.name==='paragraph'&&!$from.parent.content.size&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote') {
+    return this.editor.commands.lift('blockquote');
+   }
+   // Typora-style quote editing: Backspace joins an interior paragraph with
+   // the previous block. Enter lifts an empty paragraph out of the quote.
+   // Bypass Blockquote's default Backspace handler, which lifts/splits instead.
+   if(event.key==='Backspace'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parentOffset===0&&$from.parent.isTextblock&&!$from.parent.type.spec.code&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote'&&$from.index($from.depth-1)>0) {
+    return joinBackward(state,tr=>view.dispatch(tr),view);
    }
    if(['Backspace','Delete'].includes(event.key)) {
     const table=tableInfo(selection);const pending=key.getState(state)?.emptyTable;
