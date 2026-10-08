@@ -377,3 +377,21 @@ test('code header downloads raw UTF-8 source, respects language and keeps draft,
  await page.getByLabel('代码语言',{exact:true}).fill('unrecognized');await save('txt',source);await page.getByLabel('代码语言',{exact:true}).fill('constructor');await save('txt',source);await page.getByLabel('代码语言',{exact:true}).fill('mermaid');await save('mmd',source);
  await setDoc(page,'```python\n\tprint("你好")\n```');await page.setViewportSize({width:390,height:844});await save('py','\tprint("你好")');expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);await page.screenshot({path:'/tmp/mojian-code-download-mobile.png'});
 });
+
+
+test('progressive quote selection covers full nested blocks, resets on caret edits and stays out of dialogs and source mode',async({page})=>{
+ await ready(page);await setDoc(page,'正文前\n\n> 外层第一段\n>\n> > 内层第一段\n> >\n> > 内层第二段 **强调**\n>\n> 外层最后段\n\n正文后');await cursor(page,'内层第二段');
+ await page.keyboard.press('Control+a');let s=await selection(page);expect(s.node).toBe('blockquote');expect(s.text).toContain('内层第一段');expect(s.text).toContain('内层第二段');expect(s.text).not.toContain('外层第一段');
+ await page.keyboard.press('Control+a');s=await selection(page);expect(s.node).toBe('blockquote');expect(s.text).toContain('外层第一段');expect(s.text).toContain('外层最后段');expect(s.text).not.toContain('正文后');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');
+ await cursor(page,'内层第一段');await page.keyboard.press('Meta+a');expect((await selection(page)).node).toBe('blockquote');await page.keyboard.press('ArrowRight');await page.keyboard.press('Control+a');expect((await selection(page)).node).toBe('blockquote');expect((await selection(page)).type).not.toBe('all');
+ await cursor(page,'内层第一段',2);await page.keyboard.insertText('新');await page.keyboard.press('Control+a');expect((await selection(page)).text).not.toContain('外层第一段');
+ await page.getByRole('button',{name:'插入链接',exact:true}).click();const url=page.getByRole('textbox',{name:'链接地址',exact:true});await url.fill('https://example.com');await url.press('Control+a');expect(await url.evaluate(el=>{const input=el as HTMLInputElement;return input.selectionEnd!-input.selectionStart!;})).toBe(19);await page.getByRole('button',{name:'取消',exact:true}).click();
+ await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await page.locator('.source-editor').press('Control+a');expect(await page.locator('.source-editor').evaluate(el=>{const input=el as HTMLTextAreaElement;return input.selectionEnd-input.selectionStart;})).toBe((await markdown(page)).length);
+});
+
+test('quoted lists tables and code retain their selection stages before expanding to the quote',async({page})=>{
+ await ready(page);const all=async()=>{await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('all');};const quote=async()=>{await page.keyboard.press('Control+a');expect((await selection(page)).node).toBe('blockquote');};
+ await setDoc(page,'> 引用说明\n>\n> - 列表项\n>   - 嵌套项\n> - 第二项\n\n引用外');await cursor(page,'嵌套项');await page.keyboard.press('Control+a');expect((await selection(page)).node).toBe('listItem');for(let i=0;i<2;i++){await page.keyboard.press('Control+a');expect((await selection(page)).node).toBe('bulletList');}await quote();expect((await selection(page)).text).toContain('引用说明');await all();
+ await setDoc(page,'> 表格说明\n>\n> | A | B |\n> | --- | --- |\n> | 当前行 | 内容 |\n> | 下一行 | 内容 |\n\n引用外');await cursor(page,'当前行');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('cell');expect((await selection(page)).text).not.toContain('下一行');await page.keyboard.press('Control+a');expect((await selection(page)).text).toContain('下一行');await quote();await all();
+ for(const language of ['java','mermaid']){await setDoc(page,'> 代码说明\n>\n> ```'+language+'\n> flowchart LR\n> A-->B\n> ```\n\n引用外');await cursor(page,'flowchart LR');await page.keyboard.press('Control+a');expect((await selection(page)).type).toBe('text');expect((await selection(page)).text).toBe('flowchart LR\nA-->B');await quote();await all();}
+});

@@ -89,6 +89,12 @@ export const EditingRules=Extension.create({
      let itemDepth=0;for(let d=$from.depth;d>0;d--)if(['listItem','taskItem'].includes($from.node(d).type.name)){itemDepth=d;break;}
      if(itemDepth){selections.push(NodeSelection.create(state.doc,$from.before(itemDepth)));for(let d=itemDepth-1;d>0;d--)if(['bulletList','orderedList','taskList'].includes($from.node(d).type.name))selections.push(NodeSelection.create(state.doc,$from.before(d)));}
     }
+    if(selection instanceof NodeSelection&&selection.node.type.name==='blockquote')selections.push(selection);
+    for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='blockquote'){
+     const quote=NodeSelection.create(state.doc,$from.before(d));const previous=selections.at(-1);
+     // Never shrink the selection when quotes and lists are interleaved.
+     if(!previous||(quote.from<=previous.from&&quote.to>=previous.to))selections.push(quote);
+    }
     selections.push(new AllSelection(state.doc));view.dispatch(state.tr.setSelection(selections[0]).setMeta('mojian-progress',{selections,index:0}));return true;
    }
    if(event.key==='Enter'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parent.type.name==='paragraph'&&!$from.parent.content.size&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote') {
