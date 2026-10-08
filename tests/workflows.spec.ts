@@ -367,3 +367,13 @@ test('quote editing respects text deletion, first paragraph boundary, nested quo
  await setDoc(page,'> 引用末尾');await cursor(page,'引用末尾',4);await page.keyboard.press('Enter');await page.keyboard.press('Enter');await expect(page.locator('.article-editor blockquote > p')).toHaveCount(1);await page.keyboard.insertText('普通正文');await expect(page.locator('.article-editor > p').first()).toHaveText('普通正文');
 
 });
+
+
+test('code header downloads raw UTF-8 source, respects language and keeps draft, selection and folding',async({page})=>{
+ await ready(page);const source='/* 中文注释\n   第二行 */\n\tconst value = "连续  空格";\n\n    console.log(value);\n';await setDoc(page,'```javascript\n'+source+'\n```');await cursor(page,'const value',3);const before=await markdown(page);const originalSelection=await selection(page);
+ const save=async(extension:string,text:string)=>{const event=page.waitForEvent('download');await page.getByRole('button',{name:'下载源码',exact:true}).click();const file=await event;expect(file.suggestedFilename()).toBe('墨笺代码.'+extension);expect(await file.failure()).toBeNull();const stream=await file.createReadStream();const chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(chunk);expect(Buffer.concat(chunks).toString('utf8')).toBe(text);};
+ await save('js',source);expect(await markdown(page)).toBe(before);expect(await selection(page)).toEqual(originalSelection);await page.getByRole('button',{name:'折叠代码',exact:true}).click();await save('js',source);await expect(page.getByRole('button',{name:'展开代码',exact:true})).toBeVisible();
+ await page.getByLabel('代码语言',{exact:true}).fill('unrecognized');await save('txt',source);await page.getByLabel('代码语言',{exact:true}).fill('constructor');await save('txt',source);await page.getByLabel('代码语言',{exact:true}).fill('mermaid');await save('mmd',source);
+ await setDoc(page,'```python\n\tprint("你好")\n```');await page.setViewportSize({width:390,height:844});await save('py','\tprint("你好")');expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);await page.screenshot({path:'/tmp/mojian-code-download-mobile.png'});
+ await page.getByRole('button',{name:'退出代码块',exact:true}).click();await page.keyboard.insertText('在代码块下方继续写作');await expect(page.locator('.article-editor > p').first()).toHaveText('在代码块下方继续写作');await expect(page.locator('.code-node code')).toContainText('print("你好")');
+});

@@ -1,11 +1,12 @@
 import { NodeViewWrapper, NodeViewContent, type NodeViewProps } from '@tiptap/react';
 import { useEffect, useState, useRef } from 'react';
-import { Copy, ChevronDown, ChevronUp, Download, ArrowDownToLine, Trash2, ImageOff } from 'lucide-react';
-import { imageURL } from './storage';
+import { Copy, ChevronDown, ChevronUp, Download, CornerDownRight, Trash2, ImageOff } from 'lucide-react';
+import { imageURL, download } from './storage';
 import { copyText } from './output';
 import { diagram, downloadDiagram } from './mermaid';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
+const sourceExtensions:Record<string,string>={javascript:'js',js:'js',typescript:'ts',ts:'ts',jsx:'jsx',tsx:'tsx',python:'py',py:'py',java:'java',html:'html',css:'css',json:'json',yaml:'yaml',yml:'yml',xml:'xml',sql:'sql',bash:'sh',shell:'sh',sh:'sh',c:'c',cpp:'cpp',csharp:'cs',go:'go',rust:'rs',rs:'rs',php:'php',ruby:'rb',swift:'swift',kotlin:'kt',markdown:'md',md:'md',mermaid:'mmd'};
 function signal(message:string) {window.dispatchEvent(new CustomEvent('mojian-notice',{detail:message}));}
 export function ImageView({node,selected,editor,getPos}:NodeViewProps) {
  const [widthInput,setWidthInput]=useState(String(node.attrs.percent));
@@ -41,13 +42,14 @@ export function CodeView({node,updateAttributes,editor,getPos}:NodeViewProps) {
   const timer=setTimeout(()=>{setBusy(true);diagram(source).then(s=>{if(n===seq.current){setSVG(s);setError('');}}).catch(()=>{if(n===seq.current)setError('图形语法有误，请修正上方源码。')}).finally(()=>{if(n===seq.current)setBusy(false);});},250);
   return()=>{clearTimeout(timer);seq.current++;};
  },[source,mermaid]);
- const exit=()=>{const pos=getPos();if(pos===undefined)return;const at=pos+node.nodeSize;const tr=editor.state.tr.insert(at,editor.schema.nodes.paragraph.create());tr.setSelection(TextSelection.create(tr.doc,at+1));editor.view.dispatch(tr);editor.commands.focus();};
+ const exit=()=>{const pos=getPos();if(pos===undefined)return;const at=pos+node.nodeSize;const tr=editor.state.tr.insert(at,editor.schema.nodes.paragraph.create());tr.setSelection(TextSelection.create(tr.doc,at+1)).scrollIntoView();editor.view.dispatch(tr);editor.commands.focus();};
+ const downloadSource=()=>{try{const language=String(node.attrs.language||'').trim().toLowerCase();const extension=Object.hasOwn(sourceExtensions,language)?sourceExtensions[language]:'txt';download(new Blob([source],{type:'text/plain;charset=utf-8'}),`墨笺代码.${extension}`);signal('已发起源码下载');}catch{signal('源码下载失败，请检查浏览器是否允许下载后重试。');}};
  const asyncAction=(action:()=>Promise<unknown>)=>action().catch(e=>signal(e.message));
  return <NodeViewWrapper className={`code-node ${folded?'folded':''}`}>
   <div className="code-header" contentEditable={false}>
    <span className="code-traffic-lights" aria-hidden="true"><i/><i/><i/></span>
    <input aria-label="代码语言" value={node.attrs.language||''} placeholder="纯代码" spellCheck={false} onChange={e=>updateAttributes({language:e.target.value.trim()||null})}/>
-   <div><button aria-label="复制代码" title="复制代码" onClick={()=>asyncAction(async()=>{await copyText(source);signal('已复制原始代码');})}><Copy size={14}/><span>复制</span></button><button aria-label={folded?'展开代码':'折叠代码'} title={folded?'展开代码':'折叠代码'} onClick={()=>setFolded(f=>!f)}>{folded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}</button><button title="退出代码块" onClick={exit}><ArrowDownToLine size={15}/></button>{!source&&<button title="删除空代码块" onClick={()=>editor.chain().focus().toggleCodeBlock().run()}><Trash2 size={15}/></button>}</div>
+   <div><button aria-label="复制代码" title="复制代码" onClick={()=>asyncAction(async()=>{await copyText(source);signal('已复制原始代码');})}><Copy size={14}/><span>复制</span></button><button aria-label={folded?'展开代码':'折叠代码'} title={folded?'展开代码':'折叠代码'} onClick={()=>setFolded(f=>!f)}>{folded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}</button><button aria-label="下载源码" title="下载源码" onMouseDown={e=>e.preventDefault()} onClick={downloadSource}><Download size={15}/></button><button aria-label="退出代码块" title="退出代码块，在下方继续写作" onMouseDown={e=>e.preventDefault()} onClick={exit}><CornerDownRight size={15}/><span>退出</span></button>{!source&&<button title="删除空代码块" onClick={()=>editor.chain().focus().toggleCodeBlock().run()}><Trash2 size={15}/></button>}</div>
   </div>
   <pre style={{display:folded?'none':undefined}}><code><NodeViewContent/></code></pre>
   {folded&&<div className="fold-summary" contentEditable={false}>{source.split('\n').length} 行代码 · 已折叠</div>}

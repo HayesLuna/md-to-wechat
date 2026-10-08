@@ -35,3 +35,6 @@
 .column-align select{font-size:11px;padding:3px;border:1px solid var(--border);background:white;border-radius:3px;color:inherit}
 .article-editor ul[data-type=taskList] li>label{display:flex;align-items:center;justify-content:center;height:1.85em;height:1lh;margin:0}
 .article-editor ul[data-type=taskList] input[type=checkbox]{display:block;margin:0}
+
+.code-header input{flex:1;width:auto}.code-header>div{flex-shrink:0}.code-header{gap:8px}
+@media(max-width:480px){.code-header{flex-wrap:wrap;height:auto;min-height:40px;padding:8px 10px}.code-header>div{margin-left:0;flex-wrap:wrap}}
