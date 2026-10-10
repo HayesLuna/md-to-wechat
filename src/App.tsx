@@ -10,6 +10,8 @@ import { EditorPane, replaceDocument } from './EditorPane';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
+import { MediaPreview } from './MediaPreview';
+import type { MediaPreviewItem } from './mediaPreview';
 import { captureTarget, protectedDeleteRow, protectedDeleteColumn, ancestor, alignTableColumns, insertCenteredTable } from './editorExtensions';
 type Modal = {type:'link'|'image'|'assets'|'downloads'|'help'} | {type:'confirm';title:string;message:string;action:()=>void} | {type:'rename';draft:Draft};
 type SaveStatus='saving'|'saved'|'failed';
@@ -17,6 +19,7 @@ function validSettings(s?:Settings):Settings {
  if(!s)return DEFAULT_SETTINGS;return {...DEFAULT_SETTINGS,theme:['default','simple','elegant'].includes(s.theme)?s.theme:'default',color:/^#[0-9a-f]{6}$/i.test(s.color)?s.color:DEFAULT_SETTINGS.color,fontSize:Math.max(14,Math.min(20,s.fontSize||16)),lineHeight:Math.max(1.5,Math.min(2.3,s.lineHeight||1.85)),codeTheme:s.codeTheme==='dark'?'dark':'light'};
 }
 export default function App() {
+ const [media,setMedia]=useState<MediaPreviewItem|null>(null);
  const [drafts,setDrafts]=useState<Draft[]>([]);const [draftBox,setDraftBox]=useState(false);const [query,setQuery]=useState('');const [renameTitle,setRenameTitle]=useState('');const [switching,setSwitching]=useState(false);
  const activeDraft=useRef<Draft|null>(null);const switchingRef=useRef(false);
  const [ready,setReady]=useState(false);const [markdown,setMarkdown]=useState('');const [initial,setInitial]=useState('');const [settings,setSettings]=useState(DEFAULT_SETTINGS);
@@ -50,18 +53,19 @@ export default function App() {
  useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),6500);return()=>clearTimeout(timer);},[notice]);
  useEffect(()=>{if(!ready)return;let active=true;setPreparing(true);setRenderError('');const timer=setTimeout(()=>{renderArticle(markdown,settings).then(result=>{if(active){setOutput(result);setPreparing(false);}}).catch(e=>{if(active){setPreparing(false);setRenderError('排版准备失败，请重试：'+e.message);}});},250);return()=>{active=false;clearTimeout(timer);};},[markdown,settings,ready]);
  const closeModal=()=>{imageRequest.current++;setProcessing(false);target.current?.cancel();target.current=null;setModal(null);setDialogError('');if(!draftBox)editor?.commands.focus();};
+ useEffect(()=>{const open=(event:Event)=>{setContext(null);setMenu(false);setMedia((event as CustomEvent<MediaPreviewItem>).detail);};window.addEventListener('mojian-preview-media',open);return()=>window.removeEventListener('mojian-preview-media',open);},[]);
  const restoreTarget=()=>{target.current?.restore();target.current=null;};
  useEffect(()=>{
   const key=(e:KeyboardEvent)=>{
    if(e.isComposing||e.keyCode===229||editor?.view.composing)return;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();void saveNow(true).catch(()=>{});return;}
-   if(e.key==='Escape') {if(modal){e.preventDefault();closeModal();}else if(draftBox){e.preventDefault();setDraftBox(false);}else if(context){e.preventDefault();setContext(null);}else if(menu){e.preventDefault();setMenu(false);}else if(outline){e.preventDefault();setOutline(false);}else if(fullscreen){e.preventDefault();setFullscreen(false);}}
+   if(e.key==='Escape') {if(media){e.preventDefault();setMedia(null);}else if(modal){e.preventDefault();closeModal();}else if(draftBox){e.preventDefault();setDraftBox(false);}else if(context){e.preventDefault();setContext(null);}else if(menu){e.preventDefault();setMenu(false);}else if(outline){e.preventDefault();setOutline(false);}else if(fullscreen){e.preventDefault();setFullscreen(false);}}
   };
   const unload=(e:BeforeUnloadEvent)=>{if(statusRef.current!=='saved'){e.preventDefault();e.returnValue='';}};
   const visibility=()=>{if(document.visibilityState==='hidden'&&ready)void saveNow().catch(()=>{});};
   window.addEventListener('keydown',key);window.addEventListener('beforeunload',unload);document.addEventListener('visibilitychange',visibility);
   return()=>{window.removeEventListener('keydown',key);window.removeEventListener('beforeunload',unload);document.removeEventListener('visibilitychange',visibility);};
- },[modal,draftBox,context,menu,outline,fullscreen,editor,saveNow,ready]);
+ },[media,modal,draftBox,context,menu,outline,fullscreen,editor,saveNow,ready]);
  useEffect(()=>{
   if(fullscreen){document.body.style.overflow='hidden';if(mode==='wysiwyg')editor?.commands.focus(undefined,{scrollIntoView:false});else source.current?.focus({preventScroll:true});}
   else if(fullRestore.current){const previous=fullRestore.current;document.body.style.overflow=previous.body;requestAnimationFrame(()=>{if(mode==='wysiwyg')editor?.commands.focus(undefined,{scrollIntoView:false});else source.current?.focus({preventScroll:true});if(writingScroll.current)writingScroll.current.scrollTop=previous.scroll;if(source.current)source.current.scrollTop=previous.sourceScroll;window.scrollTo(0,previous.page);});fullRestore.current=null;}
@@ -197,7 +201,10 @@ export default function App() {
    <div ref={writingScroll} className="writing-scroll"><div className="editor-host" style={{display:mode==='wysiwyg'?'block':'none'}}><EditorPane key={activeDraft.current?.id} initial={initial} onReady={setEditor} onChange={changed} onSelection={()=>setSelectionTick(n=>n+1)} onContext={contextMenu} onPasteImage={file=>void insertFile(file,true)}/></div>{mode==='source'&&<textarea ref={source} className="source-editor" disabled={switching} aria-label="Markdown 源码正文" spellCheck={false} value={markdown} onChange={e=>changed(e.target.value)}/>}</div>
    </div>
   </section>
-  {preview&&<aside className="preview-pane"><div className="preview-header"><h2>公众号预览</h2><span>{preparing?'准备排版…':'与复制使用同一排版'}</span><button aria-label="关闭预览" title="关闭预览" onClick={()=>setPreview(false)}><X size={18}/></button></div><div className="preview-scroll"><SettingsPanel settings={settings} onChange={changeSettings}/><div className="preview-explanation">手机阅读宽度 · 图片与图形迁移前需确认</div>{renderError?<p className="output-error">{renderError}</p>:<div className={`preview-paper ${preparing?'preparing':''}`} aria-label="公众号排版正文" onClick={e=>{
+  {preview&&<aside className="preview-pane"><div className="preview-header"><h2>公众号预览</h2><span>{preparing?'准备排版…':'与复制使用同一排版'}</span><button aria-label="关闭预览" title="关闭预览" onClick={()=>setPreview(false)}><X size={18}/></button></div><div className="preview-scroll"><SettingsPanel settings={settings} onChange={changeSettings}/><div className="preview-explanation">手机阅读宽度 · 图片与图形迁移前需确认</div>{renderError?<p className="output-error">{renderError}</p>:<div className={`preview-paper ${preparing?'preparing':''}`} aria-label="公众号排版正文" onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){const target=e.target as HTMLElement;if(target.matches('[data-media-preview]')){e.preventDefault();target.click();}}}} onClick={e=>{
+ const target=(e.target as Element).closest<HTMLElement>('[data-media-preview]');
+ if(target){e.preventDefault();if(target instanceof HTMLImageElement){setMedia({kind:'image',url:target.src,title:target.alt||'图片'});}else{const svg=target.querySelector('svg');if(svg)setMedia({kind:'diagram',svg:svg.outerHTML,title:'Mermaid 图表'});}return;}
+
  const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button[data-mermaid-view]');const block=button?.closest<HTMLElement>('[data-mermaid-block]');if(!button||!block)return;
  const view=button.dataset.mermaidView;
  if(view==='copy'){void copyText(block.querySelector('.mermaid-preview-code')?.textContent||'').then(()=>notify('已复制原始代码')).catch(()=>notify('代码复制失败，请检查浏览器剪贴板权限。'));return;}
@@ -227,6 +234,7 @@ export default function App() {
    {modal.type==='confirm'&&<><p>{modal.message}</p><div className="dialog-actions"><button onClick={closeModal}>取消</button><button className="primary" disabled={switching} onClick={modal.action}>确认{modal.title.includes('删除')?'删除':modal.title.includes('清空')?'清空':'替换'}</button></div></>}
    {modal.type==='help'&&<div className="help-content"><p>在左侧写作，按需打开公众号预览。复制时仅使用现代 Clipboard API，同时写入 HTML 和纯文本；失败会保留草稿并显示原因。</p><dl><dt>保存</dt><dd>Ctrl / ⌘ + S，或“更多 → 保存本地草稿”</dd><dt>逐级全选</dt><dd>Ctrl / ⌘ + A：列表项 → 当前列表 → 外层列表 → 全文；表格行 → 整表 → 全文；代码 → 全文。引用内先选择当前引用，再逐级选择外层引用，最后全文；引用中的列表、表格和代码先按对应规则选择。</dd><dt>中文快捷输入</dt><dd>正文行首“》”后按空格成为引用；“···java”或“···mermaid”后按 Enter 成为代码块。</dd><dt>表格删除</dt><dd>整表选中后 Delete/Backspace 先清空全部单元格，再次按删除键移除空表；移动光标后重新开始。</dd><dt>图片尺寸</dt><dd>以 Markdown 图片标题 <code>"width=80%"</code> 保存。普通标题不代表尺寸，默认 100%。本地资源标识为 <code>local-image:UUID</code>。</dd><dt>网页全屏</dt><dd>工具栏“全屏写作”，Esc 先关闭弹窗或菜单，再退出全屏。</dd></dl><p className="muted">草稿仅属于当前浏览器和站点。请定期导出正文并下载本地图片。公众号中的外链、图片、代码和复杂结构仍需粘贴后核对。</p></div>}
   </Dialog>}
+  {media&&<MediaPreview item={media} onClose={()=>setMedia(null)}/>}
   {notice&&<div className="toast" role="status"><span>{notice}</span><button title="关闭提示" onClick={()=>setNotice('')}><X size={16}/></button></div>}
   <input ref={fileInput} type="file" accept=".md,text/markdown" hidden onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void importFile(file);}}/>
   <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void insertFile(file);}}/>

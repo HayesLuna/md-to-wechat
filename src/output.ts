@@ -192,6 +192,9 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
  // decoration. User/imported SVG and Mermaid SVG never enter clipboard HTML.
  const sanitized=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
  const clean=document.createElement('div');clean.innerHTML=sanitized;addCodeDecorations(clean);const html=clean.innerHTML;
+ // Preview affordances are applied after the clipboard document is finalized.
+ for(const image of root.querySelectorAll('img')){image.setAttribute('data-media-preview','image');image.setAttribute('role','button');image.tabIndex=0;image.setAttribute('aria-label',`预览图片：${image.alt||'图片'}`);image.title='点击放大预览';}
+ for(const graph of root.querySelectorAll<HTMLElement>('.mermaid-preview-diagram'))if(graph.querySelector('svg')){graph.setAttribute('data-media-preview','diagram');graph.setAttribute('role','button');graph.tabIndex=0;graph.setAttribute('aria-label','预览 Mermaid 图表');graph.title='点击放大预览';}
  return {html,previewHTML:root.outerHTML,text:readableText(clean,codeSources),assets,errors,key:outputKey(markdown,s)};
 }
 export async function copyRich(output:Output) {
