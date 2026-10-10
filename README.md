@@ -2,6 +2,12 @@
 
 纯浏览器中文多篇草稿编辑工具：所见即所得写作 → 公众号排版预览 → 复制到微信公众号编辑器。采用 React、Vite、Tiptap / ProseMirror 和 GFM Markdown；没有后端、登录、数据库服务或图片上传服务器。
 
+## 开源协议与贡献
+
+本项目采用 [MIT License](LICENSE)，允许商用、修改和闭源分发；复制或分发本项目的软件或其重要部分时，须保留版权和许可声明。软件按原样提供，不附带担保。第三方依赖及资源仍遵循各自的许可。
+
+欢迎提交 Issue 和 Pull Request，具体流程见 [贡献指南](CONTRIBUTING.md)。只有仓库所有者授权的协作者拥有本仓库的写入权限；其他人可以通过 Fork 和 PR 参与贡献。
+
 ## 运行
 
 需要 Node.js 22.12+（本云环境为 Node.js 24）。
@@ -44,4 +50,4 @@ Chromium 浏览器测试覆盖中文符号快捷输入及 composition 事件保�
 
 ## 项目连接
 
-源码位于本云环境的 `md-to-wechat` 仓库。当前会话没有可读取、更新或发布 `sites-project://appgprj_6ac1c592fc788191af0474cfb1405dd6` 的工具，所以不声称已同步到该 Sites 项目或已经获得公网网址。`dist/` 是可部署的完整静态构建产物。
+源码仓库：[HayesLuna/md-to-wechat](https://github.com/HayesLuna/md-to-wechat)。线上地址：[墨笺](https://hayesluna.github.io/md-to-wechat/)，由 main 分支的 GitHub Actions 构建并发布到 GitHub Pages。`dist/` 是可部署的完整静态构建产物。

@@ -1,6 +1,7 @@
 import { Extension, wrappingInputRule, type Editor } from '@tiptap/core';
 import { Plugin, PluginKey, AllSelection, NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
-import { CellSelection } from '@tiptap/pm/tables';
+import { CellSelection, TableMap } from '@tiptap/pm/tables';
+import { joinBackward } from '@tiptap/pm/commands';
 import type { Node } from '@tiptap/pm/model';
 import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -11,7 +12,7 @@ import { widthFromTitle } from './output';
 export const SizedImage=Image.extend({
  addAttributes() { return {...this.parent?.(),percent:{default:100,parseHTML:el=>widthFromTitle(el.getAttribute('title')||'')}}; },
  parseMarkdown(token,h) {return h.createNode('image',{src:token.href,alt:token.text,title:null,percent:widthFromTitle(token.title||'')});},
- renderMarkdown(node) {const alt=String(node.attrs?.alt||'').replace(/[\\\[\]]/g,'\\$&');const src=String(node.attrs?.src||'').replace(/ /g,'%20').replace(/\)/g,'%29');return `![${alt}](${src} "width=${node.attrs?.percent||100}%")`;},
+ renderMarkdown(node) {const alt=String(node.attrs?.alt||'').replace(/[\\\[\]]/g,'\\$&');const src=String(node.attrs?.src||'').replace(/ /g,'%20').replace(/\)/g,'%29');return `![${alt}](${src} "width=${node.attrs?.percent??100}%")`;},
  addNodeView(){return ReactNodeViewRenderer(ImageView);},
 });
 export const SmartCode=CodeBlockLowlight.extend({
@@ -39,6 +40,26 @@ function fullTable(selection:Selection,table:Node) {
 function tableInfo(selection:Selection) {
  if(selection instanceof NodeSelection && selection.node.type.name==='table')return {node:selection.node,pos:selection.from,depth:0};
  const {$from}=selection;for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='table')return {node:$from.node(d),pos:$from.before(d),depth:d};return null;
+}
+export function insertCenteredTable(editor:Editor) {
+ editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).command(({tr})=>{
+  const table=tableInfo(tr.selection);if(!table)return false;
+  table.node.descendants((node,offset)=>{if(['tableCell','tableHeader'].includes(node.type.name))tr.setNodeMarkup(table.pos+1+offset,undefined,{...node.attrs,align:'center'});});
+  return true;
+ }).run();
+}
+// GFM stores alignment per column, so update its header and all data cells.
+export function alignTableColumns(editor:Editor,align:'left'|'center'|'right') {
+ const selection=editor.state.selection;const table=tableInfo(selection);if(!table)return;
+ const map=TableMap.get(table.node);let left=0,right=map.width;
+ if(selection instanceof CellSelection){const rect=map.rectBetween(selection.$anchorCell.pos-table.pos-1,selection.$headCell.pos-table.pos-1);left=rect.left;right=rect.right;}
+ else if(!(selection instanceof NodeSelection)){
+  const cell=ancestor(editor,'tableCell')||ancestor(editor,'tableHeader');if(!cell)return;
+  const rect=map.findCell(cell.pos-table.pos-1);left=rect.left;right=rect.right;
+ }
+ const positions=new Set<number>();for(let row=0;row<map.height;row++)for(let col=left;col<right;col++)positions.add(map.map[row*map.width+col]);
+ const tr=editor.state.tr;for(const offset of positions){const pos=table.pos+1+offset;const cell=tr.doc.nodeAt(pos);if(cell)tr.setNodeMarkup(pos,undefined,{...cell.attrs,align});}
+ editor.view.dispatch(tr);editor.commands.focus();
 }
 export const EditingRules=Extension.create({
  name:'mojianEditing',priority:1000,
@@ -68,7 +89,22 @@ export const EditingRules=Extension.create({
      let itemDepth=0;for(let d=$from.depth;d>0;d--)if(['listItem','taskItem'].includes($from.node(d).type.name)){itemDepth=d;break;}
      if(itemDepth){selections.push(NodeSelection.create(state.doc,$from.before(itemDepth)));for(let d=itemDepth-1;d>0;d--)if(['bulletList','orderedList','taskList'].includes($from.node(d).type.name))selections.push(NodeSelection.create(state.doc,$from.before(d)));}
     }
+    if(selection instanceof NodeSelection&&selection.node.type.name==='blockquote')selections.push(selection);
+    for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='blockquote'){
+     const quote=NodeSelection.create(state.doc,$from.before(d));const previous=selections.at(-1);
+     // Never shrink the selection when quotes and lists are interleaved.
+     if(!previous||(quote.from<=previous.from&&quote.to>=previous.to))selections.push(quote);
+    }
     selections.push(new AllSelection(state.doc));view.dispatch(state.tr.setSelection(selections[0]).setMeta('mojian-progress',{selections,index:0}));return true;
+   }
+   if(event.key==='Enter'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parent.type.name==='paragraph'&&!$from.parent.content.size&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote') {
+    return this.editor.commands.lift('blockquote');
+   }
+   // Typora-style quote editing: Backspace joins an interior paragraph with
+   // the previous block. Enter lifts an empty paragraph out of the quote.
+   // Bypass Blockquote's default Backspace handler, which lifts/splits instead.
+   if(event.key==='Backspace'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parentOffset===0&&$from.parent.isTextblock&&!$from.parent.type.spec.code&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote'&&$from.index($from.depth-1)>0) {
+    return joinBackward(state,tr=>view.dispatch(tr),view);
    }
    if(['Backspace','Delete'].includes(event.key)) {
     const table=tableInfo(selection);const pending=key.getState(state)?.emptyTable;

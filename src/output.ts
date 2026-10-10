@@ -1,30 +1,30 @@
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
-import hljs from 'highlight.js/lib/common';
 import { imageURL } from './storage';
 import { diagram } from './mermaid';
 import type { Settings } from './sample';
+import { codeCard, addCodeDecorations, type CodeSource } from './codeOutput';
 export type Asset = { kind:'image'|'diagram'; label:string; src?:string; source?:string; missing?:boolean };
 export type Output = { html:string; previewHTML:string; text:string; assets:Asset[]; errors:string[]; key:string };
 export const outputKey=(markdown:string,settings:Settings)=>JSON.stringify([markdown,settings]);
 export function safeURL(url:string) { try{const parsed=new URL(url);return ['https:','http:','mailto:','tel:'].includes(parsed.protocol);}catch{return false;} }
 export function escapeHTML(value:string) { const div=document.createElement('div');div.textContent=value;return div.innerHTML; }
-export function widthFromTitle(title:string) { const m=/^width=(\d{1,3})%$/.exec(title||'');return m?Math.min(100,Math.max(10,Number(m[1]))):100; }
+export function widthFromTitle(title:string) { const m=/^width=(\d{1,3})%$/.exec(title||'');return m?Math.min(200,Math.max(1,Number(m[1]))):100; }
 export function headings(markdown:string) {
  const md=new MarkdownIt({html:false});const tokens=md.parse(markdown,{});const out:{level:number;text:string;line:number}[]=[];
  for(let i=0;i<tokens.length;i++)if(tokens[i].type==='heading_open')out.push({level:Number(tokens[i].tag.slice(1)),text:tokens[i+1].content,line:tokens[i].map?.[0]||0});
  return out;
 }
-function inlineStyles(root:HTMLElement,s:Settings) {
+function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  const color=/^#[0-9a-f]{6}$/i.test(s.color)?s.color:'#a6493d';const dark=s.codeTheme==='dark';
- root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${s.lineHeight};color:#303030;word-wrap:break-word;`);
+ root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${Number((s.fontSize*s.lineHeight).toFixed(2))}px;color:#303030;word-wrap:break-word;`);
  const rules:Record<string,string>={
  p:'margin:0 0 20px;line-height:inherit;',h1:`font-size:26px;line-height:1.45;font-weight:700;margin:8px 0 24px;color:${s.theme==='simple'?'#242424':color};`,
  h2:`font-size:22px;line-height:1.5;font-weight:700;margin:30px 0 18px;color:${color};${s.theme==='default'?`border-bottom:1px solid #dedede;padding-bottom:8px;`:''}`,
- h3:`font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,h4:'font-size:17px;font-weight:700;margin:22px 0 12px;',h5:'font-size:16px;font-weight:700;margin:20px 0 12px;',h6:'font-size:16px;font-weight:700;margin:20px 0 12px;',
+ h3:`font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,h4:'font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;',h5:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',h6:'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',
  blockquote:`margin:20px 0;padding:14px 18px;border-left:3px solid ${color};background:#f6f6f5;color:#686868;`,
- ul:'padding-left:24px;margin:14px 0 20px;',ol:'padding-left:26px;margin:14px 0 20px;',li:'margin:6px 0;line-height:inherit;',strong:'font-weight:700;',em:'font-style:italic;',s:'text-decoration:line-through;',a:`color:${color};text-decoration:underline;`,hr:'border:0;border-top:1px solid #ddd;margin:30px 0;',
- table:'border-collapse:collapse;width:100%;font-size:14px;margin:20px 0;table-layout:auto;',th:'border:1px solid #ddd;background:#f2f2f2;font-weight:600;padding:9px 12px;',td:'border:1px solid #ddd;padding:9px 12px;',
+ ul:'padding-left:24px;margin:14px 0 20px;',ol:'padding-left:26px;margin:14px 0 20px;',li:'margin:6px 0;line-height:inherit;',strong:'font-weight:700;',em:'font-style:italic;font-synthesis:style;',s:'text-decoration:line-through;',a:`color:${color};text-decoration:underline;`,hr:'border:0;border-top:1px solid #ddd;margin:30px 0;',
+ table:'border-collapse:collapse;width:100%;font-size:14px;margin:0;table-layout:fixed;box-sizing:border-box;',th:'border:1px solid #ddd;background:#f2f2f2;font-weight:600;padding:9px 12px;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word;',td:'border:1px solid #ddd;padding:9px 12px;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word;',
  pre:`margin:20px 0;padding:16px;background:${dark?'#25272b':'#f5f5f5'};color:${dark?'#e2e4e8':'#373a40'};font-size:13px;line-height:1.7;white-space:pre;overflow-x:auto;border-radius:3px;font-family:Consolas,Menlo,monospace;tab-size:4;`,
  code:'font-family:Consolas,Menlo,monospace;font-size:0.88em;background:#f0f0ef;padding:2px 4px;border-radius:3px;',
  img:'height:auto;max-width:100%;display:block;margin:20px auto;',
@@ -43,15 +43,89 @@ function inlineStyles(root:HTMLElement,s:Settings) {
   }
   if(!el.className.startsWith('mermaid-preview-'))el.removeAttribute('class');
  }
+ // Resolve typography before export: WeChat can normalize unitless/inherited
+ // line-height differently during paste. Every text element carries pixel values,
+ // including inline marks and highlight tokens, without changing source Markdown.
+ for(const el of root.querySelectorAll<HTMLElement>('*')) {
+  if(el.namespaceURI!=='http://www.w3.org/1999/xhtml'||el.matches('img,hr'))continue;
+  const parent=el.parentElement!;
+  const parentSize=parseFloat(parent.style.fontSize)||s.fontSize;
+  const parentLine=parseFloat(parent.style.lineHeight)||s.fontSize*s.lineHeight;
+  const sizeValue=el.style.fontSize;
+  const size=sizeValue.endsWith('px')?parseFloat(sizeValue):sizeValue.endsWith('em')?parentSize*parseFloat(sizeValue):parentSize;
+  const lineValue=el.style.lineHeight;
+  const line=lineValue.endsWith('px')?parseFloat(lineValue):lineValue&&lineValue!=='inherit'&&lineValue!=='normal'?size*parseFloat(lineValue):parentLine;
+  el.style.fontSize=Number(size.toFixed(2))+'px';
+  el.style.lineHeight=Number(Math.max(size,line).toFixed(2))+'px';
+  if(el.matches('strong,em,s,a,code,span')&&!el.matches('pre code'))el.style.setProperty('display','inline','important');
+ }
+ // Generated from Markdown token source, never from rendered editor DOM.
+ for(const pre of root.querySelectorAll<HTMLElement>('pre[data-code-index]')) {
+  const index=Number(pre.getAttribute('data-code-index'));pre.replaceWith(codeCard(codeSources[index],index,dark));
+ }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
+ // Paste importers can normalize bare link/code text differently from adjacent
+ // styled spans. Give their text the same inline leaf structure; keep safe hrefs
+ // and never touch block code cards or introduce line breaks.
+ for(const mark of root.querySelectorAll<HTMLElement>('a,code')) {
+  if(mark.closest('[data-code-block]'))continue;
+  for(const node of Array.from(mark.childNodes)) {
+   if(node.nodeType!==Node.TEXT_NODE)continue;
+   const leaf=document.createElement('span');
+   leaf.style.fontSize=mark.style.fontSize;leaf.style.lineHeight=mark.style.lineHeight;
+   leaf.style.setProperty('display','inline','important');
+   node.replaceWith(leaf);leaf.appendChild(node);
+  }
+ }
+ // WeChat's older overlap checker miscounts mixed direct text + inline marks.
+ // Keep rich text inline, but give direct text its own leaf span in mixed blocks.
+ // Traverse DOM nodes (not Markdown) so nested lists and code stay intact.
+ for(const block of root.querySelectorAll<HTMLElement>('p,li,h1,h2,h3,h4,h5,h6,blockquote,th,td')) {
+  if(!block.children.length)continue;
+  for(const node of Array.from(block.childNodes)) {
+   if(node.nodeType!==Node.TEXT_NODE||!node.textContent?.trim())continue;
+   const leaf=document.createElement('span');
+   leaf.style.fontSize=block.style.fontSize;leaf.style.lineHeight=block.style.lineHeight;leaf.style.setProperty('display','inline','important');
+   node.replaceWith(leaf);leaf.appendChild(node);
+  }
+ }
+
+ // Enlarged images scroll locally instead of widening or clipping the article.
+ for(const image of root.querySelectorAll<HTMLImageElement>('img')) {
+  if(parseFloat(image.style.width)<=100)continue;
+  image.style.maxWidth='none';image.setAttribute('data-ignore-width','');
+  const frame=document.createElement('span');frame.setAttribute('data-image-scroll','');frame.setAttribute('data-ignore-width','');
+  frame.setAttribute('style','display:block;width:100%;max-width:100%;overflow-x:auto;box-sizing:border-box;-webkit-overflow-scrolling:touch;');
+  image.replaceWith(frame);frame.append(image);
+ }
+ // Keep a real table layout in both preview and pasted HTML. Many columns may
+ // deliberately scroll, but the article itself must stay within its viewport.
+ for(const table of root.querySelectorAll<HTMLTableElement>('table')) {
+  const columns=Math.max(1,...Array.from(table.rows,row=>row.cells.length));
+  table.style.minWidth=columns*80+'px';
+  // The official checker can detach a table as its own paragraph, so retain the
+  // documented exemption for intentional scrolling on the table as well.
+  table.setAttribute('data-ignore-width','');
+  const scroll=document.createElement('div');
+  scroll.setAttribute('data-table-scroll','');
+  scroll.setAttribute('data-ignore-width','');
+  scroll.setAttribute('style',`display:block;width:100%;max-width:100%;min-width:0;margin:20px 0;overflow-x:auto;box-sizing:border-box;-webkit-overflow-scrolling:touch;font-size:${table.style.fontSize};line-height:${table.style.lineHeight};`);
+  table.replaceWith(scroll);scroll.append(table);
+ }
+
+ // The quote padding already provides bottom space; avoid stacking its last
+ // child's normal paragraph/list/quote margin onto that padding.
+ for(const quote of root.querySelectorAll('blockquote')){const last=quote.lastElementChild as HTMLElement|null;if(last)last.style.marginBottom='0';}
+
 }
-export function readableText(root:Node):string {
+export function readableText(root:Node,codeSources:CodeSource[]=[]):string {
  function walk(node:Node,depth=0):string {
   if(node.nodeType===Node.TEXT_NODE)return node.textContent||'';
   if(!(node instanceof Element))return Array.from(node.childNodes,n=>walk(n,depth)).join('');
   const tag=node.tagName;
   if(tag==='BR')return '\n';
+  if(node.hasAttribute('data-code-block'))return '\n'+(codeSources[Number(node.getAttribute('data-code-index'))]?.text||node.querySelector('code')?.textContent||'')+'\n\n';
   if(tag==='PRE')return '\n'+(node.textContent||'')+'\n\n';
   if(tag==='IMG')return '[图片：'+(node.getAttribute('alt')||'图片')+']\n';
   if(tag==='TR')return Array.from(node.children,n=>walk(n,depth).replace(/^\n+|\n+$/g,'')).join('\t')+'\n';
@@ -59,11 +133,12 @@ export function readableText(root:Node):string {
    const start=Number(node.getAttribute('start')||1);return '\n'+Array.from(node.children,(li,i)=>'  '.repeat(depth)+(tag==='OL'?`${start+i}. `:'• ')+Array.from(li.childNodes,n=>walk(n,depth+1)).join('').replace(/^\n+|\n+$/g,'')+'\n').join('')+'\n';
   }
   const content=Array.from(node.childNodes,n=>walk(n,depth)).join('');
-  return /^(P|H[1-6]|BLOCKQUOTE|TABLE|SECTION|DIV)$/.test(tag)?content+'\n\n':content;
+  return /^(P|H[1-6]|BLOCKQUOTE|TABLE)$/.test(tag)?content+'\n\n':content;
  }
- return walk(root).replace(/^\n+|\n+$/g,'');
+ return walk(root);
 }
 export async function renderArticle(markdown:string,s:Settings):Promise<Output> {
+ const codeSources:CodeSource[]=[];
  const assets:Asset[]=[]; const errors:string[]=[]; const sources:string[]=[];const images:{src:string;alt:string;width:number}[]=[];
  const md=new MarkdownIt({html:false,linkify:false,breaks:false});
  md.validateLink=url=>safeURL(url)||url.startsWith('local-image:');
@@ -74,9 +149,10 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
  md.renderer.rules.fence=(tokens,i)=>{
   const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0];
   if(lang==='mermaid'){sources.push(t.content);return `<section data-diagram-index="${sources.length-1}"></section>`;}
-  let code=escapeHTML(t.content);if(lang && hljs.getLanguage(lang))code=hljs.highlight(t.content,{language:lang,ignoreIllegals:true}).value;
-  return `<pre><code>${code}</code></pre>`;
+  const code=escapeHTML(t.content);
+  codeSources.push({text:t.content,language:lang});return `<pre data-code-index="${codeSources.length-1}"><code>${code}</code></pre>`;
  };
+ md.renderer.rules.code_block=md.renderer.rules.fence;
  // Task markers operate on list token content, never on the Markdown document.
  const original=md.renderer.rules.inline;
  md.renderer.rules.inline=(tokens,i,opts,env,self)=>{
@@ -111,11 +187,12 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   target.setAttribute('data-mermaid-block','');target.append(controls,diagramContent,code);
   target.removeAttribute('data-diagram-index');const p=document.createElement('p');p.textContent=`[请在此处插入 Mermaid 图形 ${i+1}，先下载 PNG 并上传到公众号]`;copy.replaceWith(p);
  }));
- inlineStyles(root,s);inlineStyles(clipboard,s);
- // SVG is only in the browser preview. The clipboard holds static explanatory text instead.
- const html=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style']});
- const clean=document.createElement('div');clean.innerHTML=html;
- return {html,previewHTML:root.outerHTML,text:readableText(clean),assets,errors,key:outputKey(markdown,s)};
+ inlineStyles(root,s,codeSources);inlineStyles(clipboard,s,codeSources);addCodeDecorations(root);
+ // Strip every SVG from the sanitized output, then insert only our fixed local
+ // decoration. User/imported SVG and Mermaid SVG never enter clipboard HTML.
+ const sanitized=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
+ const clean=document.createElement('div');clean.innerHTML=sanitized;addCodeDecorations(clean);const html=clean.innerHTML;
+ return {html,previewHTML:root.outerHTML,text:readableText(clean,codeSources),assets,errors,key:outputKey(markdown,s)};
 }
 export async function copyRich(output:Output) {
  if(!window.isSecureContext)throw new Error('富文本复制需要 HTTPS 独立网页，请在安全页面中打开后重试。');
