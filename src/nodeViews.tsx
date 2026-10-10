@@ -30,11 +30,12 @@ export function ImageView({node,selected,updateAttributes,editor,getPos}:NodeVie
 }
 export function CodeView({node,updateAttributes,editor,getPos}:NodeViewProps) {
  const [folded,setFolded]=useState(false);const [svg,setSVG]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const seq=useRef(0);
- const mermaid=node.attrs.language==='mermaid';const source=node.textContent;
+ const mermaid=node.attrs.language==='mermaid';const source=node.textContent;const [view,setView]=useState<'diagram'|'code'>('diagram');
+ const showCode=!mermaid||view==='code'||!!error;
  useEffect(()=>{
-  const n=++seq.current;setSVG('');setError('');if(!mermaid)return;
-  if(!source.trim()){setError('在上方输入 Mermaid 源码，下方显示图形。');return;}
-  const timer=setTimeout(()=>{setBusy(true);diagram(source).then(s=>{if(n===seq.current){setSVG(s);setError('');}}).catch(()=>{if(n===seq.current)setError('图形语法有误，请修正上方源码。')}).finally(()=>{if(n===seq.current)setBusy(false);});},250);
+  const n=++seq.current;setSVG('');setError('');setBusy(false);if(!mermaid)return;
+  if(!source.trim()){setError('请输入 Mermaid 源码以生成图表。');return;}
+  const timer=setTimeout(()=>{setBusy(true);diagram(source).then(s=>{if(n===seq.current){setSVG(s);setError('');}}).catch(()=>{if(n===seq.current)setError('图形语法有误，请修正源码。')}).finally(()=>{if(n===seq.current)setBusy(false);});},250);
   return()=>{clearTimeout(timer);seq.current++;};
  },[source,mermaid]);
  const exit=()=>{const pos=getPos();if(pos===undefined)return;const at=pos+node.nodeSize;const tr=editor.state.tr.insert(at,editor.schema.nodes.paragraph.create());tr.setSelection(TextSelection.create(tr.doc,at+1));editor.view.dispatch(tr);editor.commands.focus();};
@@ -42,11 +43,11 @@ export function CodeView({node,updateAttributes,editor,getPos}:NodeViewProps) {
  return <NodeViewWrapper className={`code-node ${folded?'folded':''}`}>
   <div className="code-header" contentEditable={false}>
    <input aria-label="代码语言" value={node.attrs.language||''} placeholder="纯代码" spellCheck={false} onChange={e=>updateAttributes({language:e.target.value.trim()||null})}/>
-   <div><button aria-label="复制代码" title="复制代码" onClick={()=>asyncAction(async()=>{await copyText(source);signal('已复制原始代码');})}><Copy size={14}/><span>复制</span></button><button aria-label={folded?'展开代码':'折叠代码'} title={folded?'展开代码':'折叠代码'} onClick={()=>setFolded(f=>!f)}>{folded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}</button><button title="退出代码块" onClick={exit}><ArrowDownToLine size={15}/></button>{!source&&<button title="删除空代码块" onClick={()=>editor.chain().focus().toggleCodeBlock().run()}><Trash2 size={15}/></button>}</div>
+   <div>{mermaid&&<><button aria-label="展示图表" aria-pressed={view==='diagram'} onClick={()=>setView('diagram')}>图表</button><button aria-label="展示代码" aria-pressed={view==='code'} onClick={()=>{setView('code');setFolded(false);}}>代码</button></>}<button aria-label="复制代码" title="复制代码" onClick={()=>asyncAction(async()=>{await copyText(source);signal('已复制原始代码');})}><Copy size={14}/><span>复制</span></button><button aria-label={folded?'展开代码':'折叠代码'} title={folded?'展开代码':'折叠代码'} onClick={()=>setFolded(f=>!f)}>{folded?<ChevronDown size={15}/>:<ChevronUp size={15}/>}</button><button title="退出代码块" onClick={exit}><ArrowDownToLine size={15}/></button>{!source&&<button title="删除空代码块" onClick={()=>editor.chain().focus().toggleCodeBlock().run()}><Trash2 size={15}/></button>}</div>
   </div>
-  <pre style={{display:folded?'none':undefined}}><code><NodeViewContent/></code></pre>
-  {folded&&<div className="fold-summary" contentEditable={false}>{source.split('\n').length} 行代码 · 已折叠</div>}
-  {mermaid&&<div className="mermaid-editor-preview" contentEditable={false} onMouseDown={e=>e.preventDefault()}>
+  <pre style={{display:folded||!showCode?'none':undefined}}><code><NodeViewContent/></code></pre>
+  {folded&&showCode&&<div className="fold-summary" contentEditable={false}>{source.split('\n').length} 行代码 · 已折叠</div>}
+  {mermaid&&(view==='diagram'||!!error)&&<div className="mermaid-editor-preview" contentEditable={false} onMouseDown={e=>e.preventDefault()}>
    {busy&&!svg?<small>图形生成中…</small>:error?<div className="diagram-error">{error}</div>:<div className="diagram" dangerouslySetInnerHTML={{__html:svg}}/>}
    {!!svg&&<div className="diagram-download"><button onClick={()=>asyncAction(()=>downloadDiagram(source))}><Download size={14}/> PNG</button><button onClick={()=>asyncAction(()=>downloadDiagram(source,'svg'))}>SVG</button></div>}
   </div>}

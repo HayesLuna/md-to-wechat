@@ -41,7 +41,7 @@ function inlineStyles(root:HTMLElement,s:Settings) {
    const index=/comment|quote/.test(c)?5:/keyword|selector|literal/.test(c)?1:/string|regexp/.test(c)?0:/number|attr/.test(c)?2:/title|function/.test(c)?3:4;
    el.setAttribute('style',`color:${palette[index]};${index===5?'font-style:italic;':''}`);
   }
-  el.removeAttribute('class');
+  if(!el.className.startsWith('mermaid-preview-'))el.removeAttribute('class');
  }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
@@ -103,7 +103,12 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   const target=root.querySelector(`[data-diagram-index="${i}"]`)!;const copy=clipboard.querySelector(`[data-diagram-index="${i}"]`)!;
   assets.push({kind:'diagram',label:`Mermaid 图形 ${i+1}`,source});
   try {target.innerHTML=await diagram(source);const svg=target.querySelector('svg');if(svg){svg.style.maxWidth='100%';svg.style.height='auto';}}
-  catch {errors.push(`Mermaid 图形 ${i+1} 语法错误，请修正源码。`);target.textContent=errors.at(-1)!;}
+  catch {errors.push(`Mermaid 图形 ${i+1} 语法错误，请修正源码。`);target.textContent=errors.at(-1)!;target.setAttribute('data-mermaid-error','true');}
+  const diagramContent=document.createElement('div');diagramContent.className='mermaid-preview-diagram';while(target.firstChild)diagramContent.append(target.firstChild);
+  const controls=document.createElement('div');controls.className='mermaid-preview-controls';
+  for(const [view,label] of [['diagram','图表'],['code','代码'],['copy','复制代码']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.setAttribute('data-mermaid-view',view);if(view!=='copy')button.setAttribute('aria-pressed',String(view==='diagram'));controls.append(button);}
+  const code=document.createElement('pre');code.className='mermaid-preview-code';code.textContent=source;code.hidden=!target.hasAttribute('data-mermaid-error');
+  target.setAttribute('data-mermaid-block','');target.append(controls,diagramContent,code);
   target.removeAttribute('data-diagram-index');const p=document.createElement('p');p.textContent=`[请在此处插入 Mermaid 图形 ${i+1}，先下载 PNG 并上传到公众号]`;copy.replaceWith(p);
  }));
  inlineStyles(root,s);inlineStyles(clipboard,s);
