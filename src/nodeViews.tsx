@@ -36,7 +36,7 @@ export function ImageView({node,selected,editor,getPos}:NodeViewProps) {
 }
 export function CodeView({node,updateAttributes,editor}:NodeViewProps) {
  const [folded,setFolded]=useState(false);const [svg,setSVG]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const seq=useRef(0);
- const mermaid=node.attrs.language==='mermaid';const source=node.textContent;const [view,setView]=useState<'diagram'|'code'>('diagram');
+ const mermaid=String(node.attrs.language||'').trim().toLowerCase()==='mermaid';const source=node.textContent;const [view,setView]=useState<'diagram'|'code'>('diagram');
  const showCode=!mermaid||view==='code'||!!error;
  useEffect(()=>{
   const n=++seq.current;setSVG('');setError('');setBusy(false);if(!mermaid)return;

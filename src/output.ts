@@ -147,7 +147,7 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   return `<span data-image-index="${images.length-1}"></span>`;
  };
  md.renderer.rules.fence=(tokens,i)=>{
-  const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0];
+  const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0].toLowerCase();
   if(lang==='mermaid'){sources.push(t.content);return `<section data-diagram-index="${sources.length-1}"></section>`;}
   const code=escapeHTML(t.content);
   codeSources.push({text:t.content,language:lang});return `<pre data-code-index="${codeSources.length-1}"><code>${code}</code></pre>`;

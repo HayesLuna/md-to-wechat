@@ -1,4 +1,4 @@
-import { Extension, wrappingInputRule, type Editor } from '@tiptap/core';
+import { Extension, wrappingInputRule, type Editor, type Attributes } from '@tiptap/core';
 import { Plugin, PluginKey, AllSelection, NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { joinBackward } from '@tiptap/pm/commands';
@@ -23,6 +23,15 @@ export const SizedImage=Image.extend({
  addNodeView(){return ReactNodeViewRenderer(ImageView);},
 });
 export const SmartCode=CodeBlockLowlight.extend({
+ addAttributes(){
+  const attributes:Attributes=this.parent?.()||{};const language=attributes.language;
+  return {...attributes,language:{...language,parseHTML:(element:HTMLElement)=>language?.parseHTML?.(element)||element.getAttribute('lang')||element.getAttribute('data-language')||null}};
+ },
+ parseMarkdown(token,h){
+  // The lexer already identified a code block. Nested list fences can retain
+  // leading indentation in raw; checking raw.startsWith('```') drops them.
+  return h.createNode('codeBlock',{language:token.lang||null},token.text?[h.createTextNode(token.text)]:[]);
+ },
  renderMarkdown(node) {
   const source=(node.content||[]).map(n=>n.text||'').join('');
   // Choose a fence longer than any source run, preserving code containing backticks.
