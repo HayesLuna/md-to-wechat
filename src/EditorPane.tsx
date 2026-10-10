@@ -6,9 +6,9 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { createLowlight, common } from 'lowlight';
 import DOMPurify from 'dompurify';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
-import { SizedImage, SmartCode, EditingRules } from './editorExtensions';
+import { SizedImage, SmartCode, CleanParagraph, EditingRules } from './editorExtensions';
 import { safeURL } from './output';
 function modifiedLink(event:MouseEvent,dom:HTMLElement) {
  if(event.button!==0||(!event.ctrlKey&&!event.metaKey))return null;
@@ -33,8 +33,9 @@ export function EditorPane({initial,onReady,onChange,onSelection,onContext,onPas
 }) {
  const props=useRef({onChange,onSelection,onContext,onPasteImage});props.current={onChange,onSelection,onContext,onPasteImage};
  const editorRef=useRef<Editor|null>(null);
+ const extensions=useMemo(()=>([StarterKit.configure({paragraph:false,codeBlock:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url),HTMLAttributes:{title:'Ctrl / Cmd＋点击，在新标签页打开'}}}),Markdown.configure({markedOptions:{gfm:true,breaks:false}}),CleanParagraph,SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules]),[]);
  const editor=useEditor({
-  extensions:[StarterKit.configure({codeBlock:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url),HTMLAttributes:{title:'Ctrl / Cmd＋点击，在新标签页打开'}}}),Markdown.configure({markedOptions:{gfm:true,breaks:false}}),SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules],
+  extensions,
   content:initial,contentType:'markdown',immediatelyRender:false,
   editorProps:{attributes:{class:'article-editor',spellcheck:'false','aria-label':'所见即所得正文'},
    transformPastedHTML:html=>DOMPurify.sanitize(html,{FORBID_TAGS:['svg','script','style','iframe'],FORBID_ATTR:['style']}),

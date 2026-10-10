@@ -4,10 +4,17 @@ import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { joinBackward } from '@tiptap/pm/commands';
 import type { Node } from '@tiptap/pm/model';
 import Image from '@tiptap/extension-image';
+import Paragraph from '@tiptap/extension-paragraph';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
+
+// Let block separators represent empty paragraphs, without HTML placeholders.
+// Keep inline text and code untouched, including intentionally written entities.
+export const CleanParagraph=Paragraph.extend({
+ renderMarkdown(node,h){return h.renderChildren(node.content||[]);},
+});
 
 export const SizedImage=Image.extend({
  addAttributes() { return {...this.parent?.(),percent:{default:100,parseHTML:el=>widthFromTitle(el.getAttribute('title')||'')}}; },

@@ -7,7 +7,7 @@ export function diagram(source: string): Promise<string> {
  if(!source.trim()) return Promise.reject(new Error('请输入 Mermaid 源码。'));
  if(cache.has(source)) return cache.get(source)!;
  const pending = queue.then(async()=>{
-  engine ||= import('mermaid').then(m=>{m.default.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral',htmlLabels:false,secure:['secure','securityLevel','startOnLoad','htmlLabels','flowchart'],flowchart:{htmlLabels:false},suppressErrorRendering:true});return m.default;});
+  engine ||= import('mermaid').then(m=>{m.default.initialize({startOnLoad:false,securityLevel:'strict',theme:'base',themeVariables:{primaryColor:'#f7e5df',primaryTextColor:'#303036',primaryBorderColor:'#b76e60',secondaryColor:'#e1f0ec',secondaryTextColor:'#303036',secondaryBorderColor:'#6c9b8d',tertiaryColor:'#e7eef8',tertiaryTextColor:'#303036',tertiaryBorderColor:'#819abb',lineColor:'#737d89',textColor:'#303036',clusterBkg:'#eef6f3',clusterBorder:'#91b5a8',actorBkg:'#e7eef8',actorBorder:'#819abb',actorTextColor:'#303036',signalColor:'#626d7a',signalTextColor:'#303036',noteBkgColor:'#fff3d6',noteBorderColor:'#c4a468',noteTextColor:'#303036'},htmlLabels:false,secure:['secure','securityLevel','startOnLoad','htmlLabels','flowchart'],flowchart:{htmlLabels:false},suppressErrorRendering:true});return m.default;});
   const m=await engine;
   const result=await m.render('mojian-'+crypto.randomUUID(),source);
   return DOMPurify.sanitize(result.svg,{USE_PROFILES:{svg:true,svgFilters:true},FORBID_TAGS:['foreignObject','script'],FORBID_ATTR:['onload','onclick']});
