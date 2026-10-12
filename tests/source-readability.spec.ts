@@ -8,7 +8,7 @@ test('source soft-wraps long paragraphs and URLs without changing text; outline 
   await page.setViewportSize({width,height:844});
   expect(await source.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
   await expect(source).toHaveValue(text);
-  await page.getByRole('button',{name:'大纲',exact:true}).click();await page.locator('.sidebar-outline button').filter({hasText:'目标标题'}).click();
+  await page.getByRole('button',{name:'展开侧栏',exact:true}).click();await page.locator('.sidebar-outline button').filter({hasText:'目标标题'}).click();
   const position=await source.evaluate((el:HTMLTextAreaElement)=>({at:el.selectionStart,scroll:el.scrollTop}));expect(position.at).toBe(text.indexOf('## 目标标题'));expect(position.scroll).toBeGreaterThan(300);
  }
  await page.screenshot({path:'/tmp/mojian-source-wrap-mobile.png'});
@@ -43,4 +43,13 @@ test('Mermaid uses blue in editor, previews and SVG export while preserving sour
  const exported=page.waitForEvent('download');await page.locator('.mermaid-editor-preview').getByRole('button',{name:'SVG',exact:true}).click();
  const stream=await (await exported).createReadStream();let svg='';for await(const chunk of stream!)svg+=chunk.toString();expect(svg.toLowerCase()).toContain('#e8f2ff');expect(svg).toContain('#123456');
  await page.screenshot({path:'/tmp/mojian-mermaid-colors.png'});
+});
+
+test('long sequence diagrams stay compact and sequence numbers are readable in all outputs',async({page})=>{
+ await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);
+ await page.evaluate(()=>(window as any).__mojian.setMarkdown('```mermaid\nsequenceDiagram\n autonumber\n participant A as 用户\n participant B as 服务\n'+Array.from({length:30},(_,i)=>` A->>B: 请求 ${i+1}\n B-->>A: 响应 ${i+1}`).join('\n')+'\n```'));
+ const svg=page.locator('.mermaid-editor-preview .diagram>svg');await expect(svg).toBeVisible();await expect(svg.locator('.sequenceNumber').first()).toHaveCSS('fill','rgb(255, 255, 255)');expect((await svg.boundingBox())!.height).toBeLessThanOrEqual(480);
+ await page.getByRole('button',{name:'预览 Mermaid 图表',exact:true}).click();const image=page.getByRole('region',{name:'图表预览'}).locator('img');await expect(image).toBeVisible();const enlarged=await image.evaluate(async(img:HTMLImageElement)=>(await fetch(img.src)).text());expect(enlarged).toMatch(/sequenceNumber\{fill:#ffffff;/);await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>{const m=(window as any).__mojian;return m.getOutput()?.key===JSON.stringify([m.getMarkdown(),m.getSettings()]);});await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.preview-paper .sequenceNumber').first()).toHaveCSS('fill','rgb(255, 255, 255)');
+ const download=page.waitForEvent('download');await page.locator('.mermaid-editor-preview').getByRole('button',{name:'SVG',exact:true}).click();const stream=await (await download).createReadStream();let exported='';for await(const chunk of stream!)exported+=chunk.toString();expect(exported).toMatch(/sequenceNumber\{fill:#ffffff;/);
 });

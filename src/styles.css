@@ -108,3 +108,5 @@
 .writing-pane{--editor-toolbar-height:52px}
 .writing-content>.toolbar,.sidebar-header{height:var(--editor-toolbar-height);min-height:var(--editor-toolbar-height)}
 @media(max-width:800px){.writing-pane{--editor-toolbar-height:44px}}
+
+.mermaid-editor-preview .diagram>svg{max-height:480px;max-width:100%;width:auto;display:block;margin:0 auto}
