@@ -27,10 +27,20 @@ test('empty paragraphs serialize as blank lines while explicit breaks and code e
  await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await expect(page.getByRole('textbox',{name:'Markdown 源码正文'})).toHaveValue(result.markdown);
 });
 
-test('Mermaid uses a colored palette and preserves source-defined colors',async({page})=>{
+test('Mermaid uses blue in editor, previews and SVG export while preserving source-defined colors',async({page})=>{
  await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);
  await page.evaluate(()=>(window as any).__mojian.setMarkdown('```mermaid\nflowchart LR\nsubgraph 准备\nA[开始] --> B[编辑]\nend\nB --> C[发布]\nstyle C fill:#123456,color:#ffffff\n```'));
  const graph=page.locator('.diagram svg');await expect(graph).toBeVisible();
- const colors=await graph.locator('.node rect').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).fill));expect(colors).toContain('rgb(247, 229, 223)');expect(colors).toContain('rgb(18, 52, 86)');
+ const colors=await graph.locator('.node rect').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).fill));expect(colors).toContain('rgb(232, 242, 255)');expect(colors).toContain('rgb(18, 52, 86)');
+ await expect(graph.locator('.node rect').first()).toHaveCSS('stroke','rgb(91, 146, 212)');
+ await page.getByRole('button',{name:'预览 Mermaid 图表',exact:true}).click();
+ const enlarged=page.getByRole('region',{name:'图表预览'}).locator('img');await expect(enlarged).toBeVisible();
+ const enlargedSVG=await enlarged.evaluate(async(img:HTMLImageElement)=>(await fetch(img.src)).text());expect(enlargedSVG.toLowerCase()).toContain('#e8f2ff');
+ await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>{const m=(window as any).__mojian;return m.getOutput()?.key===JSON.stringify([m.getMarkdown(),m.getSettings()]);});
+ await page.getByRole('button',{name:'公众号预览',exact:true}).click();
+ await expect(page.locator('.preview-paper .node rect').first()).toHaveCSS('fill','rgb(232, 242, 255)');
+ const exported=page.waitForEvent('download');await page.locator('.mermaid-editor-preview').getByRole('button',{name:'SVG',exact:true}).click();
+ const stream=await (await exported).createReadStream();let svg='';for await(const chunk of stream!)svg+=chunk.toString();expect(svg.toLowerCase()).toContain('#e8f2ff');expect(svg).toContain('#123456');
  await page.screenshot({path:'/tmp/mojian-mermaid-colors.png'});
 });

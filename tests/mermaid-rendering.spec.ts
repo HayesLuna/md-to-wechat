@@ -5,7 +5,7 @@ test('mixed-case Mermaid fences render in editor, article preview and enlarged v
  const markdown='```Mermaid\nflowchart LR\nA[开始] --> B[完成]\n```';
  await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await page.getByRole('textbox',{name:'Markdown 源码正文'}).fill(markdown);
  await page.getByRole('button',{name:'所见即所得',exact:true}).click();await expect(page.locator('.diagram svg')).toBeVisible();
- await page.getByRole('button',{name:'预览 Mermaid 图表',exact:true}).click();await expect(page.getByRole('dialog',{name:'图表预览'}).locator('img')).toBeVisible();await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'预览 Mermaid 图表',exact:true}).click();await expect(page.getByRole('region',{name:'图表预览'}).locator('img')).toBeVisible();await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('[data-mermaid-block] svg')).toBeVisible();
  expect(await page.evaluate(()=>(window as any).__mojian.getMarkdown())).toBe(markdown);
 });
@@ -49,7 +49,7 @@ test('user fare-date Gantt inside a numbered list renders in editor and preview'
  expect(await page.locator('.diagram svg rect[class*=task]').count()).toBeGreaterThanOrEqual(5);
  await page.getByRole('button',{name:'展示代码',exact:true}).click();await expect(page.locator('.code-node pre')).toContainText(source);await page.getByRole('button',{name:'展示图表',exact:true}).click();
  await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('[data-mermaid-block] svg')).toBeVisible();await expect(page.locator('[data-mermaid-block] svg')).toContainText('固定运价与销售时间轴');
- await page.locator('.diagram').click();const dialog=page.getByRole('dialog',{name:'图表预览'});await expect(dialog.locator('img')).toBeVisible();expect(await dialog.locator('img').evaluate((el:HTMLImageElement)=>el.naturalWidth)).toBeGreaterThan(0);
+ await page.locator('.diagram').click();const dialog=page.getByRole('region',{name:'图表预览'});await expect(dialog.locator('img')).toBeVisible();expect(await dialog.locator('img').evaluate((el:HTMLImageElement)=>el.naturalWidth)).toBeGreaterThan(0);
  await page.screenshot({path:'/tmp/mojian-user-gantt.png'});
 });
 
