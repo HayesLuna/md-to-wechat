@@ -71,3 +71,40 @@
 .media-preview-screen .media-preview-close:focus-visible{outline:2px solid #83b4f2;outline-offset:0}
 .media-preview-screen .media-preview-message{color:#d2d5dc}
 .media-preview-screen{outline:none}
+
+/* Typora-style navigation: one flat rail for drafts and article headings. */
+.document-sidebar{width:258px;min-width:258px;flex-shrink:0;display:flex;flex-direction:column;min-height:0;border-right:1px solid #dedfe2;background:#fafafa;color:#42464c;overflow:hidden}
+.sidebar-header{display:flex;align-items:center;justify-content:space-between;gap:6px;height:44px;min-height:44px;padding:0 6px;border-bottom:1px solid #ececef}
+.sidebar-header>button,.sidebar-launch{width:30px;height:30px;border:0;background:transparent;padding:6px;color:#646a73}
+.sidebar-title{flex:1;text-align:center;font-size:13px;font-weight:400;color:#383d46}
+.sidebar-search{padding:9px 10px;border-bottom:1px solid #ececef}.sidebar-search input{width:100%;border:1px solid #e0e2e5;border-radius:3px;background:white;font-size:12px;padding:7px 9px}
+.sidebar-content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 0 20px;scrollbar-width:thin}
+.sidebar-outline>button{display:block;width:100%;border:0;border-radius:0;background:transparent;text-align:left;justify-content:flex-start;padding:7px 12px;font-size:13px;font-weight:400;line-height:1.6;overflow-wrap:anywhere;color:#50545b}
+.sidebar-outline>button:hover{background:#f0f0f2}.sidebar-outline>button.current{background:#eaeaec;color:#34383e}
+.sidebar-empty{font-size:12px;line-height:1.8;color:#969aa2;padding:16px;margin:0}
+.sidebar-drafts{display:flex;flex-direction:column;padding:0;overflow:hidden}.sidebar-draft-count{padding:12px;font-size:11px;color:#969aa2;flex-shrink:0}.sidebar-draft-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin}.sidebar-draft-tools{padding:12px;flex-shrink:0;border-top:1px solid #e7e8eb;background:#fafafa}.sidebar-draft-tools button{width:100%;min-height:36px;font-size:14px;padding:6px 14px}
+.sidebar-drafts .draft-list{list-style:none;margin:0;padding:0;max-height:none;overflow:visible}
+.sidebar-drafts .draft-list li{border:0;border-radius:0;padding:6px 10px;gap:0}.sidebar-drafts .draft-list li.current{background:#eaeaec}.sidebar-drafts .draft-list li:hover{background:#f0f0f2}
+.sidebar-drafts .draft-select{padding:6px 3px;gap:5px}.sidebar-drafts .draft-select strong{font-size:13px;line-height:20px;font-weight:500}.sidebar-drafts .draft-select small{font-size:10px;line-height:16px;color:#90959e}
+.sidebar-drafts .draft-actions button{padding:5px;color:#8c929a}
+.document-sidebar-backdrop{display:none}
+/* The format toolbar belongs to the article column beside navigation. */
+.writing-pane{container-type:inline-size}
+.editor-mode-switches{display:flex;align-items:center;gap:8px;height:100%;min-width:0}
+.editor-mode-switches>.sidebar-launch{flex-shrink:0}
+.writing-content{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;position:relative;overflow:hidden}
+@container(max-width:600px){.document-sidebar{position:absolute;left:0;top:0;bottom:0;z-index:39;min-width:0;width:min(290px,calc(100% - 40px));border:0}.document-sidebar-backdrop{display:block;position:absolute;inset:0;z-index:38;padding:0;border:0;border-radius:0;background:#202b3b66}.document-sidebar-backdrop:hover{background:#202b3b66}.pane-tabs{padding:0 10px}.mode-tabs{gap:14px}.mode-tabs button{font-size:12px}.pane-actions{gap:0}.pane-actions button{padding:6px}.pane-actions span{display:none}}
+
+.writing-surface{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;position:relative;overflow:hidden}
+
+.header-actions .copy-main{flex:0 0 144px;width:144px;min-width:144px;margin-left:auto}
+
+.document-sidebar{position:relative;width:min(var(--sidebar-width,258px),calc(100% - 320px));min-width:180px}
+.sidebar-resize-handle{position:absolute;right:0;top:0;bottom:0;width:6px;z-index:40;cursor:col-resize;touch-action:none;outline-offset:-2px}
+.sidebar-resize-handle:hover,.sidebar-resize-handle:focus-visible,.document-sidebar.resizing .sidebar-resize-handle{background:#5b92d466}
+.writing-body:has(.document-sidebar.resizing){cursor:col-resize;user-select:none}
+@container(max-width:600px){.document-sidebar{width:min(var(--sidebar-width,258px),calc(100% - 40px));min-width:0}}
+
+.writing-pane{--editor-toolbar-height:52px}
+.writing-content>.toolbar,.sidebar-header{height:var(--editor-toolbar-height);min-height:var(--editor-toolbar-height)}
+@media(max-width:800px){.writing-pane{--editor-toolbar-height:44px}}

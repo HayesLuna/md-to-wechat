@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 async function ready(page:Page){await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');await expect(page.locator('.workspace')).toBeVisible();await expect(page.locator('vite-error-overlay')).toHaveCount(0);}
 async function setDoc(page:Page,text:string){await page.evaluate(text=>(window as any).__mojian.setMarkdown(text),text);}
 async function content(page:Page){return page.evaluate(()=>(window as any).__mojian.getMarkdown());}
-async function box(page:Page){await page.getByRole('button',{name:'草稿箱',exact:true}).click();await expect(page.getByRole('dialog',{name:'草稿箱',exact:true})).toBeVisible();}
+async function box(page:Page){if(!await page.getByRole('complementary',{name:'文章导航'}).isVisible())await page.getByRole('button',{name:'展开侧栏',exact:true}).click();if(await page.getByRole('button',{name:'切换到草稿',exact:true}).isVisible())await page.getByRole('button',{name:'切换到草稿',exact:true}).click();if(!await page.getByRole('textbox',{name:'搜索草稿标题',exact:true}).isVisible())await page.getByRole('button',{name:'搜索草稿',exact:true}).click();await expect(page.getByRole('region',{name:'草稿箱',exact:true})).toBeVisible();}
 
 test('drafts preserve immediate edits, titles, settings and active article across refresh; search and deletion',async({page})=>{
  test.setTimeout(60000);
@@ -37,7 +37,7 @@ test('legacy draft and local images migrate without replacing content or setting
 test('failed save blocks switching and creation, preserving current content',async({page})=>{
  await ready(page);await setDoc(page,'# 不能丢失\n\n尚未保存的正文');
  await page.evaluate(()=>{const original=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args:any[]){if(this.name==='draft')throw new DOMException('quota','QuotaExceededError');return (original as any).apply(this,args);};});
- await box(page);await page.getByRole('button',{name:'新建文章',exact:true}).click();await expect(page.locator('.toast')).toContainText(/操作未完成|保存失败/);await expect(page.locator('.draft-list li')).toHaveCount(1);await expect.poll(()=>content(page)).toContain('尚未保存的正文');await expect(page.getByRole('dialog',{name:'草稿箱'})).toBeVisible();
+ await box(page);await page.getByRole('button',{name:'新建文章',exact:true}).click();await expect(page.locator('.toast')).toContainText(/操作未完成|保存失败/);await expect(page.locator('.draft-list li')).toHaveCount(1);await expect.poll(()=>content(page)).toContain('尚未保存的正文');await expect(page.getByRole('region',{name:'草稿箱'})).toBeVisible();
 });
 
 test('Mermaid blocks independently switch diagram/code, copy raw source and recover from errors; mobile drawer fits',async({page,context})=>{
@@ -47,5 +47,5 @@ test('Mermaid blocks independently switch diagram/code, copy raw source and reco
  await page.getByRole('button',{name:'公众号预览',exact:true}).click();const preview=page.locator('[data-mermaid-block]').first();await expect(preview.locator('svg')).toBeVisible();await preview.getByRole('button',{name:'代码',exact:true}).click();await expect(preview.locator('.mermaid-preview-code')).toBeVisible();await expect(preview.locator('svg')).toBeHidden();await expect(page.locator('[data-mermaid-block]').nth(1).locator('svg')).toBeVisible();await preview.getByRole('button',{name:'复制代码',exact:true}).click();expect((await page.evaluate(()=>navigator.clipboard.readText())).trim()).toBe('flowchart LR\nA-->B');
  expect(await page.evaluate(()=>(window as any).__mojian.getOutput().html)).not.toContain('data-mermaid-view');
  await page.screenshot({path:'/tmp/mojian-mermaid-toggle.png'});await page.getByRole('button',{name:'关闭预览',exact:true}).first().click();await setDoc(page,'```mermaid\ninvalid syntax !!!\n```');await expect(page.locator('.diagram-error')).toContainText('语法有误');await expect(page.locator('.code-node pre')).toBeVisible();
- await page.setViewportSize({width:390,height:844});await box(page);await expect(page.getByRole('button',{name:'新建文章'})).toBeVisible();const bounds=await page.locator('.draft-drawer').boundingBox();expect(bounds!.x).toBe(0);expect(bounds!.width).toBeLessThanOrEqual(390);await page.screenshot({path:'/tmp/mojian-drafts-mobile.png'});await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);expect(errors).toEqual([]);
+ await page.setViewportSize({width:390,height:844});await expect(page.locator('.document-sidebar')).toHaveCount(0);await box(page);await expect(page.getByRole('button',{name:'新建文章'})).toBeVisible();const bounds=await page.locator('.document-sidebar').boundingBox();const body=await page.locator('.writing-body').boundingBox();expect(bounds!.x).toBe(body!.x);expect(bounds!.y).toBe(body!.y);expect(bounds!.width).toBeLessThanOrEqual(390);await page.screenshot({path:'/tmp/mojian-drafts-mobile.png'});await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);expect(errors).toEqual([]);
 });

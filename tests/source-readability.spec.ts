@@ -8,7 +8,7 @@ test('source soft-wraps long paragraphs and URLs without changing text; outline 
   await page.setViewportSize({width,height:844});
   expect(await source.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
   await expect(source).toHaveValue(text);
-  await page.getByRole('button',{name:'大纲',exact:true}).click();await page.locator('.outline-panel button').filter({hasText:'目标标题'}).click();
+  await page.getByRole('button',{name:'大纲',exact:true}).click();await page.locator('.sidebar-outline button').filter({hasText:'目标标题'}).click();
   const position=await source.evaluate((el:HTMLTextAreaElement)=>({at:el.selectionStart,scroll:el.scrollTop}));expect(position.at).toBe(text.indexOf('## 目标标题'));expect(position.scroll).toBeGreaterThan(300);
  }
  await page.screenshot({path:'/tmp/mojian-source-wrap-mobile.png'});

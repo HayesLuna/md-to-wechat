@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import type { Editor } from '@tiptap/core';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
-import { Upload, Download, Copy, CheckCircle2, Loader2, PanelRight, ListTree, Maximize2, Minimize2, X, Save, LockKeyhole, FolderOpen, Plus, Pencil, FileText, ImagePlus, ExternalLink, AlertCircle, Trash2, RotateCcw, HelpCircle } from 'lucide-react';
+import { Upload, Download, Copy, CheckCircle2, Loader2, PanelRight, Maximize2, Minimize2, X, Save, LockKeyhole, PanelLeftOpen, PanelLeftClose, FileText, ImagePlus, ExternalLink, AlertCircle, Trash2, RotateCcw, HelpCircle } from 'lucide-react';
 import { SAMPLE, DEFAULT_SETTINGS, type Settings } from './sample';
 import { loadDrafts, newDraft, draftTitle, saveDraft, removeDraft, type Draft, storeImage, download, downloadImage } from './storage';
 import { renderArticle, outputKey, headings, safeURL, copyRich, copyText, type Output } from './output';
@@ -10,6 +10,8 @@ import { EditorPane, replaceDocument } from './EditorPane';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
+import { OutlineIcon } from './NavigationIcons';
+import { DocumentSidebar } from './DocumentSidebar';
 import { MediaPreview } from './MediaPreview';
 import { revealSourcePosition } from './sourceEditor';
 import type { MediaPreviewItem } from './mediaPreviewEvents';
@@ -21,11 +23,12 @@ function validSettings(s?:Settings):Settings {
 }
 export default function App() {
  const [media,setMedia]=useState<MediaPreviewItem|null>(null);
- const [drafts,setDrafts]=useState<Draft[]>([]);const [draftBox,setDraftBox]=useState(false);const [query,setQuery]=useState('');const [renameTitle,setRenameTitle]=useState('');const [switching,setSwitching]=useState(false);
+ const [drafts,setDrafts]=useState<Draft[]>([]);const [sidebarOpen,setSidebarOpen]=useState(false);const [sidebarTab,setSidebarTab]=useState<'drafts'|'outline'>('outline');const [sidebarSearch,setSidebarSearch]=useState(false);const [outlineQuery,setOutlineQuery]=useState('');const [activeHeading,setActiveHeading]=useState(0);const [query,setQuery]=useState('');const [renameTitle,setRenameTitle]=useState('');const [switching,setSwitching]=useState(false);
  const activeDraft=useRef<Draft|null>(null);const switchingRef=useRef(false);
+ useEffect(()=>{const screen=window.matchMedia('(max-width:800px)');const change=(e:MediaQueryListEvent)=>{if(e.matches)setSidebarOpen(false);};screen.addEventListener('change',change);return()=>screen.removeEventListener('change',change);},[]);
  const [ready,setReady]=useState(false);const [markdown,setMarkdown]=useState('');const [initial,setInitial]=useState('');const [settings,setSettings]=useState(DEFAULT_SETTINGS);
  const [editor,setEditor]=useState<Editor|null>(null);const [mode,setMode]=useState<'wysiwyg'|'source'>('wysiwyg');const [preview,setPreview]=useState(false);
- const [outline,setOutline]=useState(false);const [fullscreen,setFullscreen]=useState(false);const [menu,setMenu]=useState(false);const [modal,setModal]=useState<Modal|null>(null);
+ const [fullscreen,setFullscreen]=useState(false);const [menu,setMenu]=useState(false);const [modal,setModal]=useState<Modal|null>(null);
  const [context,setContext]=useState<{x:number;y:number}|null>(null);const [notice,setNotice]=useState('');const [saveStatus,setSaveStatus]=useState<SaveStatus>('saving');
  const [output,setOutput]=useState<Output|null>(null);const [preparing,setPreparing]=useState(true);const [renderError,setRenderError]=useState('');const [selectionTick,setSelectionTick]=useState(0);
  const [url,setURL]=useState('');const [label,setLabel]=useState('');const [dialogError,setDialogError]=useState('');const [processing,setProcessing]=useState(false);
@@ -53,20 +56,20 @@ export default function App() {
  useEffect(()=>{const listener=(e:Event)=>notify((e as CustomEvent).detail);window.addEventListener('mojian-notice',listener);return()=>window.removeEventListener('mojian-notice',listener);},[notify]);
  useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),6500);return()=>clearTimeout(timer);},[notice]);
  useEffect(()=>{if(!ready)return;let active=true;setPreparing(true);setRenderError('');const timer=setTimeout(()=>{renderArticle(markdown,settings).then(result=>{if(active){setOutput(result);setPreparing(false);}}).catch(e=>{if(active){setPreparing(false);setRenderError('排版准备失败，请重试：'+e.message);}});},250);return()=>{active=false;clearTimeout(timer);};},[markdown,settings,ready]);
- const closeModal=()=>{imageRequest.current++;setProcessing(false);target.current?.cancel();target.current=null;setModal(null);setDialogError('');if(!draftBox)editor?.commands.focus();};
+ const closeModal=()=>{imageRequest.current++;setProcessing(false);target.current?.cancel();target.current=null;setModal(null);setDialogError('');editor?.commands.focus(undefined,{scrollIntoView:false});};
  useEffect(()=>{const open=(event:Event)=>{setContext(null);setMenu(false);setMedia((event as CustomEvent<MediaPreviewItem>).detail);};window.addEventListener('mojian-preview-media',open);return()=>window.removeEventListener('mojian-preview-media',open);},[]);
  const restoreTarget=()=>{target.current?.restore();target.current=null;};
  useEffect(()=>{
   const key=(e:KeyboardEvent)=>{
    if(e.isComposing||e.keyCode===229||editor?.view.composing)return;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();void saveNow(true).catch(()=>{});return;}
-   if(e.key==='Escape') {if(media){e.preventDefault();setMedia(null);}else if(modal){e.preventDefault();closeModal();}else if(draftBox){e.preventDefault();setDraftBox(false);}else if(context){e.preventDefault();setContext(null);}else if(menu){e.preventDefault();setMenu(false);}else if(outline){e.preventDefault();setOutline(false);}else if(fullscreen){e.preventDefault();setFullscreen(false);}}
+   if(e.key==='Escape') {if(media){e.preventDefault();setMedia(null);}else if(modal){e.preventDefault();closeModal();}else if(sidebarOpen&&window.matchMedia('(max-width:800px)').matches){e.preventDefault();setSidebarOpen(false);}else if(context){e.preventDefault();setContext(null);}else if(menu){e.preventDefault();setMenu(false);}else if(fullscreen){e.preventDefault();setFullscreen(false);}}
   };
   const unload=(e:BeforeUnloadEvent)=>{if(statusRef.current!=='saved'){e.preventDefault();e.returnValue='';}};
   const visibility=()=>{if(document.visibilityState==='hidden'&&ready)void saveNow().catch(()=>{});};
   window.addEventListener('keydown',key);window.addEventListener('beforeunload',unload);document.addEventListener('visibilitychange',visibility);
   return()=>{window.removeEventListener('keydown',key);window.removeEventListener('beforeunload',unload);document.removeEventListener('visibilitychange',visibility);};
- },[media,modal,draftBox,context,menu,outline,fullscreen,editor,saveNow,ready]);
+ },[media,modal,sidebarOpen,context,menu,fullscreen,editor,saveNow,ready]);
  useEffect(()=>{
   if(fullscreen){document.body.style.overflow='hidden';if(mode==='wysiwyg')editor?.commands.focus(undefined,{scrollIntoView:false});else source.current?.focus({preventScroll:true});}
   else if(fullRestore.current){const previous=fullRestore.current;document.body.style.overflow=previous.body;requestAnimationFrame(()=>{if(mode==='wysiwyg')editor?.commands.focus(undefined,{scrollIntoView:false});else source.current?.focus({preventScroll:true});if(writingScroll.current)writingScroll.current.scrollTop=previous.scroll;if(source.current)source.current.scrollTop=previous.sourceScroll;window.scrollTo(0,previous.page);});fullRestore.current=null;}
@@ -78,7 +81,7 @@ export default function App() {
   activeDraft.current=d;version.current=Math.max(version.current+1,d.version);current.current={markdown:d.markdown,settings:validSettings(d.settings)};
   setMarkdown(d.markdown);setSettings(current.current.settings);setInitial(d.markdown);setSaveTime(d.savedAt);setSaveStatus('saved');
   // Recreate the editor so undo cannot restore content from another article.
-  setEditor(null);setOutput(null);setPreparing(true);setOutline(false);setContext(null);setMenu(false);
+  setEditor(null);setOutput(null);setPreparing(true);setActiveHeading(0);setOutlineQuery('');setContext(null);setMenu(false);
  };
  const draftOperation=async(action:()=>Promise<void>)=>{
   if(switchingRef.current||processing)return;switchingRef.current=true;setSwitching(true);editor?.setEditable(false,false);
@@ -86,10 +89,10 @@ export default function App() {
   finally{switchingRef.current=false;setSwitching(false);if(editor&&!editor.isDestroyed)editor.setEditable(true,false);}
  };
  const selectDraft=(d:Draft)=>void draftOperation(async()=>{
-  if(d.id!==activeDraft.current?.id){await saveDraft(d);activateDraft(d);}setDraftBox(false);
+  if(d.id!==activeDraft.current?.id){await saveDraft(d);activateDraft(d);}if(window.matchMedia('(max-width:800px)').matches)setSidebarOpen(false);
  });
  const createDraft=()=>void draftOperation(async()=>{
-  const d=newDraft('',current.current.settings);await saveDraft(d);setDrafts(items=>[d,...items]);activateDraft(d);setDraftBox(false);
+  const d=newDraft('',current.current.settings);await saveDraft(d);setDrafts(items=>[d,...items]);activateDraft(d);setQuery('');if(window.matchMedia('(max-width:800px)').matches)setSidebarOpen(false);
  });
  const renameDraft=()=>{
   if(modal?.type!=='rename'||!renameTitle.trim())return;const selected=modal.draft;const title=renameTitle.trim().slice(0,100);
@@ -146,7 +149,7 @@ export default function App() {
   const hit=e.view.posAtCoords({left:event.clientX,top:event.clientY});if(hit){const s=e.state.selection;if(s.empty||hit.pos<s.from||hit.pos>s.to){const image=(event.target as Element).closest('.image-node');if(image){const pos=e.view.posAtDOM(image,0);const n=e.state.doc.nodeAt(pos);if(n?.type.name==='image')e.view.dispatch(e.state.tr.setSelection(NodeSelection.create(e.state.doc,pos)));else e.view.dispatch(e.state.tr.setSelection(TextSelection.near(e.state.doc.resolve(hit.pos))));}else e.view.dispatch(e.state.tr.setSelection(TextSelection.near(e.state.doc.resolve(hit.pos))));}}
   setSelectionTick(n=>n+1);setContext({x:event.clientX,y:event.clientY});return true;
  };
- const replaceArticle=(text:string)=>{if(editor)replaceDocument(editor,text);changed(text);setModal(null);setMenu(false);setOutline(false);editor?.commands.focus('start');};
+ const replaceArticle=(text:string)=>{if(editor)replaceDocument(editor,text);changed(text);setModal(null);setMenu(false);setActiveHeading(0);editor?.commands.focus('start');};
  const askReplace=(title:string,message:string,action:()=>void)=>{setMenu(false);setModal({type:'confirm',title,message,action});};
  const importFile=async(file:File)=>{
   if(!/\.md$/i.test(file.name)){notify('请选择 .md Markdown 文件。');return;}if(file.size>10*1024*1024){notify('Markdown 文件不能超过 10 MB。');return;}
@@ -164,7 +167,7 @@ export default function App() {
  const jump=(index:number)=>{
   if(mode==='source'){const line=headingList[index].line;const at=markdown.split('\n').slice(0,line).join('\n').length+(line?1:0);if(source.current)revealSourcePosition(source.current,at);}
   else if(editor){let i=0;let pos=0;editor.state.doc.descendants((node,p)=>{if(node.type.name==='heading'){if(i===index)pos=p;i++;}});editor.commands.setTextSelection(pos+1);const dom=editor.view.nodeDOM(pos) as HTMLElement;dom?.scrollIntoView({block:'start',behavior:'smooth'});editor.commands.focus(undefined,{scrollIntoView:false});}
-  setOutline(false);
+  setActiveHeading(index);if(window.matchMedia('(max-width:800px)').matches)setSidebarOpen(false);
  };
  const toggleFullscreen=()=>{if(!fullscreen)fullRestore.current={body:document.body.style.overflow,scroll:writingScroll.current?.scrollTop||0,sourceScroll:source.current?.scrollTop||0,page:window.scrollY};setFullscreen(f=>!f);};
  const tableAlign=(align:'left'|'center'|'right')=>{if(editor){setContext(null);alignTableColumns(editor,align);}};
@@ -186,21 +189,22 @@ export default function App() {
  useEffect(()=>{const listener=(e:Event)=>{const {event,editor}=(e as CustomEvent).detail;contextMenu(event,editor);};window.addEventListener('mojian-context',listener);return()=>window.removeEventListener('mojian-context',listener);},[editor]);
  const assetDownloads=(assets=output?.assets||[])=>assets.length?assets.map((a,i)=><li key={i}><div><strong>{a.label}</strong><small>{a.kind==='diagram'?'下载 PNG 后在公众号手动插入':a.missing?'资源缺失，请重新选择图片':'仅保存在当前浏览器 · 需要重新上传'}</small></div><button disabled={a.missing} onClick={()=>{const task=a.kind==='diagram'?downloadDiagram(a.source!):downloadImage(a.src!,a.label);void task.catch(e=>notify(e.message));}}><Download size={15}/>{a.kind==='diagram'?'PNG':'下载'}</button></li>):<li>暂无本地图片</li>;
  if(!ready)return <div className="loading"><Loader2 className="spin"/>正在恢复本地草稿…</div>;
- return <div className={`app ${fullscreen?'fullscreen':''} ${preview?'has-preview':''}`}>
+ return <div className={`app ${fullscreen?'fullscreen':''} ${preview?'has-preview':''} ${sidebarOpen&&!fullscreen?'has-document-sidebar':''}`}>
   <header className="app-header"><div className="brand"><img className="brand-mark" src={`${import.meta.env.BASE_URL}mojian-brand-icon.svg`} width="39" height="39" alt=""/><h1>墨笺</h1><span className="brand-description">Markdown 公众号排版</span></div>
    <div className={`save-indicator ${saveStatus}`} role="status">{saveStatus==='saved'?<CheckCircle2 size={14}/>:saveStatus==='saving'?<Loader2 className="spin" size={14}/>:<AlertCircle size={14}/>}<span>{saveStatus==='saved'?`已保存到本地${saveTime?' '+new Date(saveTime).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):''}`:saveStatus==='saving'?'保存中…':'保存失败'}</span>{saveStatus==='failed'&&<button onClick={()=>void saveNow(true).catch(()=>{})}>重试</button>}</div>
-   <nav className="header-actions"><button aria-expanded={draftBox} onClick={()=>{setDraftBox(true);setQuery('');}}><FolderOpen size={16}/><span>草稿箱</span></button><button className="import-export" onClick={()=>fileInput.current?.click()}><Upload size={16}/><span>导入 Markdown</span></button><button className="import-export" onClick={exportMD}><Download size={16}/><span>导出 Markdown</span></button><button className="mobile-save" title="保存草稿" onClick={()=>void saveNow(true).catch(()=>{})}><Save size={17}/></button><button className="primary copy-main" onClick={requestCopy} disabled={copying}>{copying?<Loader2 size={16} className="spin"/>:<Copy size={16}/>}<span>{copying?'复制中…':'复制到公众号'}</span></button></nav>
+   <nav className="header-actions"><button className="import-export" onClick={()=>fileInput.current?.click()}><Upload size={16}/><span>导入 Markdown</span></button><button className="import-export" onClick={exportMD}><Download size={16}/><span>导出 Markdown</span></button><button className="mobile-save" title="保存草稿" onClick={()=>void saveNow(true).catch(()=>{})}><Save size={17}/></button><button className="primary copy-main" onClick={requestCopy} disabled={copying}>{copying?<Loader2 size={16} className="spin"/>:<Copy size={16}/>}<span>{copying?'复制中…':'复制到公众号'}</span></button></nav>
   </header>
   <main className="workspace"><section className={`writing-pane ${preview?'mobile-hidden':''}`}>
-   <div className="pane-tabs"><div className="mode-tabs"><button className={mode==='wysiwyg'?'active':''} onClick={()=>switchMode('wysiwyg')}>所见即所得</button><button className={mode==='source'?'active':''} onClick={()=>switchMode('source')}>Markdown 源码</button></div><div className="pane-actions"><button title="大纲" className={outline?'active':''} onClick={()=>setOutline(o=>!o)}><ListTree size={17}/><span>大纲</span></button><button title={fullscreen?'退出全屏':'全屏写作'} aria-pressed={fullscreen} onMouseDown={e=>e.preventDefault()} onClick={toggleFullscreen}>{fullscreen?<Minimize2 size={17}/>:<Maximize2 size={17}/>}<span className="fullscreen-label">{fullscreen?'退出全屏':''}</span></button><button className="preview-trigger" title={preview?'关闭预览':'公众号预览'} onClick={()=>setPreview(p=>!p)}><PanelRight size={17}/><span>{preview?'关闭预览':'公众号预览'}</span></button></div></div>
+   <div className="pane-tabs"><div className="editor-mode-switches"><button className="sidebar-launch" aria-label={sidebarOpen&&!fullscreen?'折叠侧栏':'展开侧栏'} title={sidebarOpen&&!fullscreen?'折叠侧栏':'展开侧栏'} aria-expanded={sidebarOpen&&!fullscreen} aria-controls="document-sidebar" onMouseDown={e=>e.preventDefault()} onClick={()=>{if(fullscreen){setFullscreen(false);setSidebarOpen(true);}else setSidebarOpen(open=>!open);}}>{sidebarOpen&&!fullscreen?<PanelLeftClose size={19}/>:<PanelLeftOpen size={19}/>}</button><div className="mode-tabs"><button className={mode==='wysiwyg'?'active':''} onClick={()=>switchMode('wysiwyg')}>所见即所得</button><button className={mode==='source'?'active':''} onClick={()=>switchMode('source')}>Markdown 源码</button></div></div><div className="pane-actions"><button title="大纲" className={sidebarOpen&&sidebarTab==='outline'?'active':''} onClick={()=>{if(fullscreen)setFullscreen(false);setSidebarOpen(true);setSidebarTab('outline');}}><OutlineIcon size={17}/><span>大纲</span></button><button title={fullscreen?'退出全屏':'全屏写作'} aria-pressed={fullscreen} onMouseDown={e=>e.preventDefault()} onClick={toggleFullscreen}>{fullscreen?<Minimize2 size={17}/>:<Maximize2 size={17}/>}<span className="fullscreen-label">{fullscreen?'退出全屏':''}</span></button><button className="preview-trigger" title={preview?'关闭预览':'公众号预览'} onClick={()=>setPreview(p=>!p)}><PanelRight size={17}/><span>{preview?'关闭预览':'公众号预览'}</span></button></div></div>
+   <div className="writing-body">{sidebarOpen&&!fullscreen&&<><button className="document-sidebar-backdrop" aria-label="关闭侧栏" onClick={()=>setSidebarOpen(false)}/><DocumentSidebar tab={sidebarTab} onTab={setSidebarTab} searching={sidebarSearch} onSearchToggle={()=>setSidebarSearch(v=>!v)} query={sidebarTab==='drafts'?query:outlineQuery} onQuery={sidebarTab==='drafts'?setQuery:setOutlineQuery} drafts={shownDrafts} total={drafts.length} activeId={activeDraft.current?.id} busy={switching||processing} onCreate={createDraft} onSelect={selectDraft} onRename={d=>{setRenameTitle(d.title);setModal({type:'rename',draft:d});}} onDelete={deleteDraft} headings={headingList} activeHeading={activeHeading} onHeading={jump}/></>}<div className="writing-content">
    <Toolbar editor={editor} onOpen={open} source={mode==='source'} onCopySource={copySource}/>
-   <div className="writing-body">
+   <div className="writing-surface">
    <div className="context-overlay">
    {mode==='wysiwyg'&&inTable&&<div className="context-tools" aria-label="表格操作"><span>表格</span><label className="column-align">列对齐<select aria-label="当前列对齐" value={editor?.getAttributes('tableCell').align||editor?.getAttributes('tableHeader').align||'left'} onChange={e=>tableAlign(e.target.value as 'left'|'center'|'right')}><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><button onMouseDown={e=>e.preventDefault()} onClick={()=>tableActions('row')}>下方添加行</button><button onMouseDown={e=>e.preventDefault()} onClick={()=>tableActions('col')}>右侧添加列</button><button onMouseDown={e=>e.preventDefault()} onClick={()=>tableActions('deleteRow')}>删除当前行</button><button onMouseDown={e=>e.preventDefault()} onClick={()=>tableActions('deleteCol')}>删除当前列</button><button onMouseDown={e=>e.preventDefault()} onClick={()=>tableActions('delete')}>删除整表</button></div>}
    {mode==='wysiwyg'&&linkActive&&<div className="context-tools link-tools" aria-label="链接操作"><span>链接</span><button onMouseDown={e=>e.preventDefault()} onClick={()=>open('link')}>编辑链接</button><button onClick={()=>{const href=editor?.getAttributes('link').href;if(safeURL(href))window.open(href,'_blank','noopener,noreferrer');}}>新标签页打开 <ExternalLink size={12}/></button><button onMouseDown={e=>e.preventDefault()} onClick={()=>editor?.chain().focus().extendMarkRange('link').unsetLink().run()}>移除链接</button></div>}
    </div>
    <div ref={writingScroll} className="writing-scroll"><div className="editor-host" style={{display:mode==='wysiwyg'?'block':'none'}}><EditorPane key={activeDraft.current?.id} initial={initial} onReady={setEditor} onChange={changed} onSelection={()=>setSelectionTick(n=>n+1)} onContext={contextMenu} onPasteImage={file=>void insertFile(file,true)}/></div>{mode==='source'&&<textarea ref={source} className="source-editor" disabled={switching} aria-label="Markdown 源码正文" wrap="soft" spellCheck={false} value={markdown} onChange={e=>changed(e.target.value)}/>}</div>
-   </div>
+   </div></div></div>
   </section>
   {preview&&<aside className="preview-pane"><div className="preview-header"><h2>公众号预览</h2><span>{preparing?'准备排版…':'与复制使用同一排版'}</span><button aria-label="关闭预览" title="关闭预览" onClick={()=>setPreview(false)}><X size={18}/></button></div><div className="preview-scroll"><SettingsPanel settings={settings} onChange={changeSettings}/><div className="preview-explanation">手机阅读宽度 · 图片与图形迁移前需确认</div>{renderError?<p className="output-error">{renderError}</p>:<div className={`preview-paper ${preparing?'preparing':''}`} aria-label="公众号排版正文" onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){const target=e.target as HTMLElement;if(target.matches('[data-media-preview]')){e.preventDefault();target.click();}}}} onClick={e=>{
  const target=(e.target as Element).closest<HTMLElement>('[data-media-preview]');
@@ -215,17 +219,8 @@ export default function App() {
  }} dangerouslySetInnerHTML={{__html:output?.previewHTML||''}}/>}</div></aside>}
   </main>
   <footer className="app-footer"><span>字数：{words.toLocaleString()}<i/>预计阅读：{Math.max(1,Math.ceil(words/500))} 分钟</span><span><LockKeyhole size={12}/>草稿仅保存在当前浏览器，清除站点数据可能丢失。</span><button title="帮助与快捷键" onClick={()=>setModal({type:'help'})}><HelpCircle size={15}/></button></footer>
-  {outline&&<aside className="outline-panel" aria-label="文章大纲"><header><strong>文章大纲</strong><button title="关闭大纲" onClick={()=>setOutline(false)}><X size={17}/></button></header><div>{headingList.length?headingList.map((h,i)=><button key={i} style={{paddingLeft:16+(h.level-1)*14}} onClick={()=>jump(i)}><span>{h.text||'无标题'}</span><small>{i+1}</small></button>):<p>暂无标题</p>}</div></aside>}
   {menu&&<div className="floating-menu more-menu"><button onClick={()=>{void saveNow(true).catch(()=>{});setMenu(false);}}><Save size={16}/>保存本地草稿</button><button onClick={()=>{copySource();setMenu(false);}}><FileText size={16}/>复制 Markdown 源码</button><button onClick={()=>{setModal({type:'downloads'});setMenu(false);}}><ImagePlus size={16}/>下载本地图片</button><button onClick={()=>askReplace('替换为示例文章','这会替换当前正文和结构，取消保持当前草稿。',()=>replaceArticle(SAMPLE))}><RotateCcw size={16}/>替换为示例文章</button><button onClick={()=>askReplace('清空草稿','正文会清空。建议先导出 Markdown，本地图片资源仍会保留。',()=>replaceArticle(''))}><Trash2 size={16}/>清空草稿</button><button onClick={()=>{setModal({type:'help'});setMenu(false);}}><HelpCircle size={16}/>使用说明与快捷键</button></div>}
   {context&&<div ref={contextElement} className="floating-menu context-menu" style={{left:context.x,top:context.y}}><button onClick={()=>open('link')}>插入链接</button><button onClick={()=>open('table')}>插入 3×3 表格</button><button onClick={()=>open('image')}>插入图片</button>{inTable&&<><hr/><button onClick={()=>tableAlign('left')}>当前列左对齐</button><button onClick={()=>tableAlign('center')}>当前列居中</button><button onClick={()=>tableAlign('right')}>当前列右对齐</button><hr/><button onClick={()=>tableActions('row')}>下方添加行</button><button onClick={()=>tableActions('col')}>右侧添加列</button><button onClick={()=>tableActions('deleteRow')}>删除当前行</button><button onClick={()=>tableActions('deleteCol')}>删除当前列</button><button onClick={()=>tableActions('delete')}>删除整表</button></>}{imageSelected&&<><hr/><button onClick={()=>{editor?.chain().focus().deleteSelection().run();setContext(null);}}>删除选中图片</button><button onClick={()=>{setContext(null);editor?.commands.focus();notify('点击图片后可拖拽右下角手柄，或输入 1%–200% 宽度。');}}>调整图片尺寸</button></>}</div>}
-  {draftBox&&<Dialog drawer title="草稿箱" onClose={()=>{if(!switching)setDraftBox(false);}}>
-   <div className="draft-box-tools"><input aria-label="搜索草稿标题" placeholder="搜索文章标题…" value={query} onChange={e=>setQuery(e.target.value)}/><button className="primary" disabled={switching||processing} onClick={createDraft}><Plus size={16}/>新建文章</button></div>
-   <p className="muted">{drafts.length} 篇草稿 · 按最近编辑排序 · 仅保存在当前浏览器</p>
-   <ul className="draft-list">{shownDrafts.map(d=><li key={d.id} className={d.id===activeDraft.current?.id?'current':''}>
-    <button className="draft-select" disabled={switching||processing} onClick={()=>selectDraft(d)}><strong>{d.title}</strong><small>{new Date(d.savedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}{d.id===activeDraft.current?.id?' · 当前文章':''}</small></button>
-    <div className="draft-actions"><button disabled={switching||processing} aria-label={`重命名 ${d.title}`} title="重命名" onClick={()=>{setRenameTitle(d.title);setModal({type:'rename',draft:d});}}><Pencil size={15}/></button><button disabled={switching||processing} aria-label={`删除 ${d.title}`} title="删除草稿" onClick={()=>deleteDraft(d)}><Trash2 size={15}/></button></div>
-   </li>)}</ul>{!shownDrafts.length&&<p className="draft-empty">没有找到匹配的草稿</p>}
-  </Dialog>}
   {modal&&<Dialog title={modal.type==='link'?'插入链接':modal.type==='image'?'插入图片':modal.type==='assets'?'复制前：这些图片需要手动上传':modal.type==='downloads'?'下载本地图片':modal.type==='help'?'写作说明':modal.type==='confirm'?modal.title:modal.type==='rename'?'重命名文章':'操作'} onClose={closeModal}>
    {modal.type==='rename'&&<form onSubmit={e=>{e.preventDefault();renameDraft();}}><label>文章标题<input aria-label="文章标题" value={renameTitle} maxLength={100} onChange={e=>setRenameTitle(e.target.value)}/></label><div className="dialog-actions"><button type="button" onClick={closeModal}>取消</button><button type="submit" className="primary" disabled={!renameTitle.trim()||switching}>保存标题</button></div></form>}
    {modal.type==='link'&&<form onSubmit={e=>{e.preventDefault();insertLink();}}><label>链接地址<input autoFocus aria-label="链接地址" type="text" placeholder="https://example.com" value={url} onChange={e=>setURL(e.target.value)}/></label><label>显示文字<input aria-label="链接显示文字" value={label} onChange={e=>setLabel(e.target.value)}/></label><p className="muted">有选中文字时，链接应用到原文字；无选区时使用显示文字。</p>{dialogError&&<p className="form-error">{dialogError}</p>}<div className="dialog-actions"><button type="button" onClick={closeModal}>取消</button><button className="primary" type="submit">插入链接</button></div></form>}
