@@ -1,10 +1,12 @@
-import { Extension, wrappingInputRule, type Editor } from '@tiptap/core';
+import { Extension, wrappingInputRule, type Editor, type Attributes } from '@tiptap/core';
 import { Plugin, PluginKey, AllSelection, NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { Fragment, Slice, type Node } from '@tiptap/pm/model';
 import { ReplaceAroundStep } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { joinBackward } from '@tiptap/pm/commands';
 import Image from '@tiptap/extension-image';
+import Paragraph from '@tiptap/extension-paragraph';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { ListItem } from '@tiptap/extension-list';
 import { ReactNodeViewRenderer } from '@tiptap/react';
@@ -26,6 +28,12 @@ export const StructuredListItem=ListItem.extend({
  },
 });
 
+// Let block separators represent empty paragraphs, without HTML placeholders.
+// Keep inline text and code untouched, including intentionally written entities.
+export const CleanParagraph=Paragraph.extend({
+ renderMarkdown(node,h){return h.renderChildren(node.content||[]);},
+});
+
 export const SizedImage=Image.extend({
  addAttributes() { return {...this.parent?.(),percent:{default:100,parseHTML:el=>widthFromTitle(el.getAttribute('title')||'')}}; },
  parseMarkdown(token,h) {return h.createNode('image',{src:token.href,alt:token.text,title:null,percent:widthFromTitle(token.title||'')});},
@@ -33,6 +41,15 @@ export const SizedImage=Image.extend({
  addNodeView(){return ReactNodeViewRenderer(ImageView);},
 });
 export const SmartCode=CodeBlockLowlight.extend({
+ addAttributes(){
+  const attributes:Attributes=this.parent?.()||{};const language=attributes.language;
+  return {...attributes,language:{...language,parseHTML:(element:HTMLElement)=>language?.parseHTML?.(element)||element.getAttribute('lang')||element.getAttribute('data-language')||null}};
+ },
+ parseMarkdown(token,h){
+  // The lexer already identified a code block. Nested list fences can retain
+  // leading indentation in raw; checking raw.startsWith('```') drops them.
+  return h.createNode('codeBlock',{language:token.lang||null},token.text?[h.createTextNode(token.text)]:[]);
+ },
  renderMarkdown(node) {
   const source=(node.content||[]).map(n=>n.text||'').join('');
   // Choose a fence longer than any source run, preserving code containing backticks.
@@ -101,6 +118,13 @@ function tableInfo(selection:Selection) {
  if(selection instanceof NodeSelection && selection.node.type.name==='table')return {node:selection.node,pos:selection.from,depth:0};
  const {$from}=selection;for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='table')return {node:$from.node(d),pos:$from.before(d),depth:d};return null;
 }
+export function insertCenteredTable(editor:Editor) {
+ editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).command(({tr})=>{
+  const table=tableInfo(tr.selection);if(!table)return false;
+  table.node.descendants((node,offset)=>{if(['tableCell','tableHeader'].includes(node.type.name))tr.setNodeMarkup(table.pos+1+offset,undefined,{...node.attrs,align:'center'});});
+  return true;
+ }).run();
+}
 // GFM stores alignment per column, so update its header and all data cells.
 export function alignTableColumns(editor:Editor,align:'left'|'center'|'right') {
  const selection=editor.state.selection;const table=tableInfo(selection);if(!table)return;
@@ -162,7 +186,22 @@ export const EditingRules=Extension.create({
      let itemDepth=0;for(let d=$from.depth;d>0;d--)if(['listItem','taskItem'].includes($from.node(d).type.name)){itemDepth=d;break;}
      if(itemDepth){selections.push(NodeSelection.create(state.doc,$from.before(itemDepth)));for(let d=itemDepth-1;d>0;d--)if(['bulletList','orderedList','taskList'].includes($from.node(d).type.name))selections.push(NodeSelection.create(state.doc,$from.before(d)));}
     }
+    if(selection instanceof NodeSelection&&selection.node.type.name==='blockquote')selections.push(selection);
+    for(let d=$from.depth;d>0;d--)if($from.node(d).type.name==='blockquote'){
+     const quote=NodeSelection.create(state.doc,$from.before(d));const previous=selections.at(-1);
+     // Never shrink the selection when quotes and lists are interleaved.
+     if(!previous||(quote.from<=previous.from&&quote.to>=previous.to))selections.push(quote);
+    }
     selections.push(new AllSelection(state.doc));view.dispatch(state.tr.setSelection(selections[0]).setMeta('mojian-progress',{selections,index:0}));return true;
+   }
+   if(event.key==='Enter'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parent.type.name==='paragraph'&&!$from.parent.content.size&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote') {
+    return this.editor.commands.lift('blockquote');
+   }
+   // Typora-style quote editing: Backspace joins an interior paragraph with
+   // the previous block. Enter lifts an empty paragraph out of the quote.
+   // Bypass Blockquote's default Backspace handler, which lifts/splits instead.
+   if(event.key==='Backspace'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&selection instanceof TextSelection&&selection.empty&&$from.parentOffset===0&&$from.parent.isTextblock&&!$from.parent.type.spec.code&&$from.depth>1&&$from.node($from.depth-1).type.name==='blockquote'&&$from.index($from.depth-1)>0) {
+    return joinBackward(state,tr=>view.dispatch(tr),view);
    }
    if(['Backspace','Delete'].includes(event.key)) {
     const table=tableInfo(selection);const pending=key.getState(state)?.emptyTable;

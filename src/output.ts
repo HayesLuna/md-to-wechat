@@ -41,7 +41,7 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
    const index=/comment|quote/.test(c)?5:/keyword|selector|literal/.test(c)?1:/string|regexp/.test(c)?0:/number|attr/.test(c)?2:/title|function/.test(c)?3:4;
    el.setAttribute('style',`color:${palette[index]};${index===5?'font-style:italic;':''}`);
   }
-  el.removeAttribute('class');
+  if(!el.className.startsWith('mermaid-preview-'))el.removeAttribute('class');
  }
  // Resolve typography before export: WeChat can normalize unitless/inherited
  // line-height differently during paste. Every text element carries pixel values,
@@ -156,7 +156,7 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   return `<span data-image-index="${images.length-1}"></span>`;
  };
  md.renderer.rules.fence=(tokens,i)=>{
-  const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0];
+  const t=tokens[i];const lang=t.info.trim().split(/\s+/)[0].toLowerCase();
   if(lang==='mermaid'){sources.push(t.content);return `<section data-diagram-index="${sources.length-1}"></section>`;}
   const code=escapeHTML(t.content);
   codeSources.push({text:t.content,language:lang});return `<pre data-code-index="${codeSources.length-1}"><code>${code}</code></pre>`;
@@ -188,7 +188,12 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
   const target=root.querySelector(`[data-diagram-index="${i}"]`)!;const copy=clipboard.querySelector(`[data-diagram-index="${i}"]`)!;
   assets.push({kind:'diagram',label:`Mermaid 图形 ${i+1}`,source});
   try {target.innerHTML=await diagram(source);const svg=target.querySelector('svg');if(svg){svg.style.maxWidth='100%';svg.style.height='auto';}}
-  catch {errors.push(`Mermaid 图形 ${i+1} 语法错误，请修正源码。`);target.textContent=errors.at(-1)!;}
+  catch {errors.push(`Mermaid 图形 ${i+1} 语法错误，请修正源码。`);target.textContent=errors.at(-1)!;target.setAttribute('data-mermaid-error','true');}
+  const diagramContent=document.createElement('div');diagramContent.className='mermaid-preview-diagram';while(target.firstChild)diagramContent.append(target.firstChild);
+  const controls=document.createElement('div');controls.className='mermaid-preview-controls';
+  for(const [view,label] of [['diagram','图表'],['code','代码'],['copy','复制代码']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.setAttribute('data-mermaid-view',view);if(view!=='copy')button.setAttribute('aria-pressed',String(view==='diagram'));controls.append(button);}
+  const code=document.createElement('pre');code.className='mermaid-preview-code';code.textContent=source;code.hidden=!target.hasAttribute('data-mermaid-error');
+  target.setAttribute('data-mermaid-block','');target.append(controls,diagramContent,code);
   target.removeAttribute('data-diagram-index');const p=document.createElement('p');p.textContent=`[请在此处插入 Mermaid 图形 ${i+1}，先下载 PNG 并上传到公众号]`;copy.replaceWith(p);
  }));
  inlineStyles(root,s,codeSources);inlineStyles(clipboard,s,codeSources);addCodeDecorations(root);
@@ -196,6 +201,9 @@ export async function renderArticle(markdown:string,s:Settings):Promise<Output> 
  // decoration. User/imported SVG and Mermaid SVG never enter clipboard HTML.
  const sanitized=DOMPurify.sanitize(clipboard.outerHTML,{FORBID_TAGS:['script','style','svg','input','button','iframe'],FORBID_ATTR:['id','class'],ADD_ATTR:['style','data-code-block']});
  const clean=document.createElement('div');clean.innerHTML=sanitized;addCodeDecorations(clean);const html=clean.innerHTML;
+ // Preview affordances are applied after the clipboard document is finalized.
+ for(const image of root.querySelectorAll('img')){image.setAttribute('data-media-preview','image');image.setAttribute('role','button');image.tabIndex=0;image.setAttribute('aria-label',`预览图片：${image.alt||'图片'}`);image.title='点击放大预览';}
+ for(const graph of root.querySelectorAll<HTMLElement>('.mermaid-preview-diagram'))if(graph.querySelector('svg')){graph.setAttribute('data-media-preview','diagram');graph.setAttribute('role','button');graph.tabIndex=0;graph.setAttribute('aria-label','预览 Mermaid 图表');graph.title='点击放大预览';}
  return {html,previewHTML:root.outerHTML,text:readableText(clean,codeSources),assets,errors,key:outputKey(markdown,s)};
 }
 export async function copyRich(output:Output) {
