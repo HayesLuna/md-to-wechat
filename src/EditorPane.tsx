@@ -8,7 +8,7 @@ import { createLowlight, common } from 'lowlight';
 import DOMPurify from 'dompurify';
 import { useEffect, useRef } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
-import { SizedImage, SmartCode, EditingRules } from './editorExtensions';
+import { SizedImage, SmartCode, EditingRules, StructuredListItem } from './editorExtensions';
 import { safeURL } from './output';
 function modifiedLink(event:MouseEvent,dom:HTMLElement) {
  if(event.button!==0||(!event.ctrlKey&&!event.metaKey))return null;
@@ -18,6 +18,7 @@ function modifiedLink(event:MouseEvent,dom:HTMLElement) {
 export function safeDocument(editor:Editor,markdown:string) {
  const json=editor.markdown!.parse(markdown);
  function clean(n:JSONContent) {
+  if(n.type==='listItem'&&n.content?.[0]?.type!=='paragraph')n.content=[{type:'paragraph'},...(n.content||[])];
   if(n.marks)n.marks=n.marks.filter(m=>m.type!=='link'||safeURL(m.attrs?.href||''));
   if(n.type==='image'&& !/^https?:\/\/|^local-image:[a-zA-Z0-9-]+$/.test(n.attrs?.src||'')){n.attrs={...n.attrs,src:'',alt:'不安全的图片地址已阻止'};}
   n.content?.forEach(clean);
@@ -34,7 +35,7 @@ export function EditorPane({initial,onReady,onChange,onSelection,onContext,onPas
  const props=useRef({onChange,onSelection,onContext,onPasteImage});props.current={onChange,onSelection,onContext,onPasteImage};
  const editorRef=useRef<Editor|null>(null);
  const editor=useEditor({
-  extensions:[StarterKit.configure({codeBlock:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url),HTMLAttributes:{title:'Ctrl / Cmd＋点击，在新标签页打开'}}}),Markdown.configure({markedOptions:{gfm:true,breaks:false}}),SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules],
+  extensions:[StarterKit.configure({codeBlock:false,listItem:false,link:{openOnClick:false,autolink:false,enableClickSelection:true,isAllowedUri:(url)=>safeURL(url),HTMLAttributes:{title:'Ctrl / Cmd＋点击，在新标签页打开'}}}),StructuredListItem,Markdown.configure({markedOptions:{gfm:true,breaks:false}}),SizedImage,SmartCode.configure({lowlight:createLowlight(common),defaultLanguage:null}),TableKit.configure({table:{resizable:false,renderWrapper:true,allowTableNodeSelection:true}}),TaskList,TaskItem.configure({nested:true}),EditingRules],
   content:initial,contentType:'markdown',immediatelyRender:false,
   editorProps:{attributes:{class:'article-editor',spellcheck:'false','aria-label':'所见即所得正文'},
    transformPastedHTML:html=>DOMPurify.sanitize(html,{FORBID_TAGS:['svg','script','style','iframe'],FORBID_ATTR:['style']}),

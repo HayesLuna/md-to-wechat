@@ -63,6 +63,12 @@ function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  for(const pre of root.querySelectorAll<HTMLElement>('pre[data-code-index]')) {
   const index=Number(pre.getAttribute('data-code-index'));pre.replaceWith(codeCard(codeSources[index],index,dark));
  }
+ // Empty structural parents represent indentation of a first list item.
+ for(const li of root.querySelectorAll<HTMLElement>('li')) {
+  const nested=Array.from(li.children).find(child=>['UL','OL'].includes(child.tagName));if(!nested)continue;
+  const surrounding=Array.from(li.childNodes).filter(child=>child!==nested);
+  if(surrounding.every(child=>/^(?:[☐☑]|\[[ xX]\])?\s*$/.test(child.textContent||'')&&(!(child instanceof Element)||child.tagName==='P'))) {li.style.listStyle='none';surrounding.forEach(child=>child.remove());}
+ }
  // Only remove a single paragraph from genuinely simple list items.
  for(const li of root.querySelectorAll('li'))if(li.children.length===1 && li.firstElementChild?.tagName==='P')li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
  // Paste importers can normalize bare link/code text differently from adjacent
@@ -130,7 +136,10 @@ export function readableText(root:Node,codeSources:CodeSource[]=[]):string {
   if(tag==='IMG')return '[图片：'+(node.getAttribute('alt')||'图片')+']\n';
   if(tag==='TR')return Array.from(node.children,n=>walk(n,depth).replace(/^\n+|\n+$/g,'')).join('\t')+'\n';
   if(tag==='UL'||tag==='OL') {
-   const start=Number(node.getAttribute('start')||1);return '\n'+Array.from(node.children,(li,i)=>'  '.repeat(depth)+(tag==='OL'?`${start+i}. `:'• ')+Array.from(li.childNodes,n=>walk(n,depth+1)).join('').replace(/^\n+|\n+$/g,'')+'\n').join('')+'\n';
+   const start=Number(node.getAttribute('start')||1);return '\n'+Array.from(node.children,(li,i)=>{
+    if((li as HTMLElement).style.listStyle==='none'&&li.children.length===1&&['UL','OL'].includes(li.children[0].tagName))return walk(li.children[0],depth+1);
+    return '  '.repeat(depth)+(tag==='OL'?`${start+i}. `:'• ')+Array.from(li.childNodes,n=>walk(n,depth+1)).join('').replace(/^\n+|\n+$/g,'')+'\n';
+   }).join('')+'\n';
   }
   const content=Array.from(node.childNodes,n=>walk(n,depth)).join('');
   return /^(P|H[1-6]|BLOCKQUOTE|TABLE)$/.test(tag)?content+'\n\n':content;
