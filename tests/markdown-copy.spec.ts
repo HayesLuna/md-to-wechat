@@ -27,3 +27,11 @@ test('selected tables copy GFM alignment and cut keeps Markdown and undo behavio
  const table=await copy(page);expect(table.text).toContain('| 名称');expect(table.text).toContain(':---:');expect(table.text).toContain('---:');expect(table.html).toContain('<table');
  await selectText(page,'剪切文字');const cut=await copy(page,'cut');expect(cut.text.trim()).toBe('**剪切文字**');await expect(page.locator('.article-editor')).not.toContainText('剪切文字');await page.keyboard.press('ControlOrMeta+z');await expect(page.locator('.article-editor')).toContainText('剪切文字');
 });
+
+test('copied prose uses ordinary spaces while intentional code and source NBSP remain unchanged',async({page})=>{
+ await ready(page,'# 标题\n\n正文\n\n```txt\n代码\n```');
+ await page.evaluate(()=>{const editor=(window as any).__mojian.editor;editor.commands.setContent({type:'doc',content:[{type:'heading',attrs:{level:2},content:[{type:'text',text:'标题\u00a0文字'}]},{type:'paragraph',content:[{type:'text',text:'普通\u00a0\u00a0空格'},{type:'text',text:'加粗\u00a0文字',marks:[{type:'bold'}]},{type:'text',text:'inline\u00a0code',marks:[{type:'code'}]},{type:'text',text:'字面 &nbsp;'}]},{type:'codeBlock',attrs:{language:'txt'},content:[{type:'text',text:'code\u00a0space'}]}]});editor.commands.selectAll();});
+ const before=await page.evaluate(()=>(window as any).__mojian.editor.getJSON());const result=await copy(page);
+ expect(result.text).toContain('## 标题 文字');expect(result.text).toContain('普通  空格');expect(result.text).toContain('**加粗 文字**');expect(result.text).toContain('`inline\u00a0code`');expect(result.text).toContain('code\u00a0space');expect(result.text).toContain('nbsp;');
+ expect(result.text.match(/\u00a0/g)).toHaveLength(2);expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(before);
+});

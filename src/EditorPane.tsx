@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { SizedImage, SmartCode, CleanParagraph, EditingRules, StructuredListItem } from './editorExtensions';
 import { safeURL } from './output';
+import { markdownSelection } from './markdownClipboard';
 function modifiedLink(event:MouseEvent,dom:HTMLElement) {
  if(event.button!==0||(!event.ctrlKey&&!event.metaKey))return null;
  const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
@@ -38,7 +39,7 @@ export function EditorPane({initial,onReady,onChange,onSelection,onContext,onPas
  const editor=useEditor({
   extensions,
   content:initial,contentType:'markdown',immediatelyRender:false,
-  editorProps:{clipboardTextSerializer:slice=>{const editor=editorRef.current;if(!editor?.markdown)return slice.content.textBetween(0,slice.content.size,'\n\n');return editor.markdown.serialize({type:'doc',content:slice.content.toJSON()});},attributes:{class:'article-editor',spellcheck:'false','aria-label':'所见即所得正文'},
+  editorProps:{clipboardTextSerializer:slice=>markdownSelection(editorRef.current,slice),attributes:{class:'article-editor',spellcheck:'false','aria-label':'所见即所得正文'},
    transformPastedHTML:html=>DOMPurify.sanitize(html,{FORBID_TAGS:['svg','script','style','iframe'],FORBID_ATTR:['style']}),
    handleDOMEvents:{
     keydown:(_view,event)=>Boolean(event.isComposing||event.keyCode===229),
