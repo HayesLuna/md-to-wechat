@@ -110,8 +110,8 @@ export default function App() {
   const next=deletingCurrent?(remaining[0]||newDraft('',current.current.settings)):activeDraft.current!;
   await removeDraft(d.id,next);setDrafts(remaining.length?remaining:[next]);if(deletingCurrent)activateDraft(next);setModal(null);notify('草稿已删除');
  })});
- const shownDrafts=drafts.filter(d=>d.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a,b)=>b.savedAt-a.savedAt);
- const headingList=useMemo(()=>headings(markdown),[markdown]);const words=Array.from(markdown.replace(/\s/g,'')).length;
+ const shownDrafts=useMemo(()=>{const search=query.trim().toLocaleLowerCase();return drafts.filter(d=>d.title.toLocaleLowerCase().includes(search)).sort((a,b)=>b.savedAt-a.savedAt);},[drafts,query]);
+ const headingList=useMemo(()=>headings(markdown),[markdown]);const words=useMemo(()=>Array.from(markdown.replace(/\s/g,'')).length,[markdown]);
  const switchMode=(next:'wysiwyg'|'source')=>{if(processing){notify('图片处理中，请完成或取消后切换模式。');return;}if(next===mode)return;if(next==='wysiwyg'&&editor)replaceDocument(editor,current.current.markdown);setMode(next);requestAnimationFrame(()=>next==='source'?source.current?.focus():editor?.commands.focus());};
  const tableActions=(action:'row'|'col'|'deleteRow'|'deleteCol'|'delete')=>{if(!editor)return;setContext(null);if(action==='row'||action==='col')addCenteredTablePart(editor,action);if(action==='deleteRow')protectedDeleteRow(editor,notify);if(action==='deleteCol')protectedDeleteColumn(editor,notify);if(action==='delete')editor.chain().focus().deleteTable().run();};
  const open=(op:Operation)=>{

@@ -51,3 +51,12 @@ test('sidebar dragging shares width between outline and drafts and restores it a
  await handle.focus();await page.keyboard.press('Home');expect((await sidebar.boundingBox())!.width).toBe(180);await page.keyboard.press('End');expect((await sidebar.boundingBox())!.width).toBe(480);
  await page.setViewportSize({width:390,height:844});await expect(sidebar).toHaveCount(0);await page.getByRole('button',{name:'展开侧栏',exact:true}).click();expect((await sidebar.boundingBox())!.width).toBeLessThanOrEqual(350);expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
 });
+
+test('outline depth is relative to the first heading level when an article starts at H2',async({page})=>{
+ await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);await page.evaluate(()=>(window as any).__mojian.setMarkdown('## 章节\n\n### 小节\n\n## 下一章'));await page.getByRole('button',{name:'展开侧栏',exact:true}).click();
+ const headings=page.locator('.sidebar-outline>button');await expect(headings).toHaveText(['章节','小节','下一章']);expect(await headings.evaluateAll(nodes=>nodes.map(n=>parseFloat(getComputedStyle(n).paddingLeft)))).toEqual([16,30,16]);
+});
+
+for(const width of [390,1053])test(`more actions menu fits its labels at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:726});await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);await page.getByRole('button',{name:'更多操作',exact:true}).click();const menu=page.locator('.more-menu');await expect(menu).toBeVisible();const box=await menu.boundingBox();expect(box!.width).toBeLessThan(200);expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(width);expect(await menu.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await expect(menu.getByRole('button',{name:'复制 Markdown 源码',exact:true})).toBeVisible();
+});
