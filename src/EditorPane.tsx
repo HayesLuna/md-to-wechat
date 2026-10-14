@@ -1,11 +1,11 @@
-import { useEditor, EditorContent } from "@tiptap/react";
-import { Markdown } from "@tiptap/markdown";
-import { TableKit } from "@tiptap/extension-table";
-import TaskList from "@tiptap/extension-task-list";
-import { createLowlight, common } from "lowlight";
-import DOMPurify from "dompurify";
-import { useEffect, useMemo, useRef } from "react";
-import type { Editor, JSONContent } from "@tiptap/core";
+import { useEditor, EditorContent } from '@tiptap/react';
+import { Markdown } from '@tiptap/markdown';
+import { TableKit } from '@tiptap/extension-table';
+import TaskList from '@tiptap/extension-task-list';
+import { createLowlight, common } from 'lowlight';
+import DOMPurify from 'dompurify';
+import { useEffect, useMemo, useRef } from 'react';
+import type { Editor, JSONContent } from '@tiptap/core';
 import {
   SizedImage,
   SmartCode,
@@ -15,35 +15,35 @@ import {
   StructuredListItem,
   StructuredTaskItem,
   MarkdownStarterKit,
-} from "./editorExtensions";
-import { safeURL } from "./output";
-import { markdownSelection, copyTaskMarkdown } from "./markdownClipboard";
+} from './editorExtensions';
+import { safeURL } from './output';
+import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
   shouldParseMarkdownPaste,
   normalizeTaskClipboardHTML,
-} from "./markdownPaste";
+} from './markdownPaste';
 function modifiedLink(event: MouseEvent, dom: HTMLElement) {
   if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return null;
   const link =
     event.target instanceof Element
-      ? event.target.closest<HTMLAnchorElement>("a[href]")
+      ? event.target.closest<HTMLAnchorElement>('a[href]')
       : null;
   return link && dom.contains(link) ? link : null;
 }
 export function safeDocument(editor: Editor, markdown: string) {
   const json = editor.markdown!.parse(markdown);
   function clean(n: JSONContent) {
-    if (n.type === "listItem" && n.content?.[0]?.type !== "paragraph")
-      n.content = [{ type: "paragraph" }, ...(n.content || [])];
+    if (n.type === 'listItem' && n.content?.[0]?.type !== 'paragraph')
+      n.content = [{ type: 'paragraph' }, ...(n.content || [])];
     if (n.marks)
       n.marks = n.marks.filter(
-        (m) => m.type !== "link" || safeURL(m.attrs?.href || ""),
+        (m) => m.type !== 'link' || safeURL(m.attrs?.href || ''),
       );
     if (
-      n.type === "image" &&
-      !/^https?:\/\/|^local-image:[a-zA-Z0-9-]+$/.test(n.attrs?.src || "")
+      n.type === 'image' &&
+      !/^https?:\/\/|^local-image:[a-zA-Z0-9-]+$/.test(n.attrs?.src || '')
     ) {
-      n.attrs = { ...n.attrs, src: "", alt: "不安全的图片地址已阻止" };
+      n.attrs = { ...n.attrs, src: '', alt: '不安全的图片地址已阻止' };
     }
     n.content?.forEach(clean);
   }
@@ -55,7 +55,7 @@ export function replaceDocument(editor: Editor, markdown: string) {
   editor
     .chain()
     .command(({ tr }) => {
-      tr.setMeta("addToHistory", false);
+      tr.setMeta('addToHistory', false);
       return true;
     })
     .setContent(json, { emitUpdate: false })
@@ -92,7 +92,7 @@ export function EditorPane({
           autolink: false,
           enableClickSelection: true,
           isAllowedUri: (url) => safeURL(url),
-          HTMLAttributes: { title: "Ctrl / Cmd＋点击，在新标签页打开" },
+          HTMLAttributes: { title: 'Ctrl / Cmd＋点击，在新标签页打开' },
         },
       }),
       StructuredListItem,
@@ -120,20 +120,20 @@ export function EditorPane({
   const editor = useEditor({
     extensions,
     content: initial,
-    contentType: "markdown",
+    contentType: 'markdown',
     immediatelyRender: false,
     editorProps: {
       clipboardTextSerializer: (slice) =>
         markdownSelection(editorRef.current, slice),
       attributes: {
-        class: "article-editor",
-        spellcheck: "false",
-        "aria-label": "所见即所得正文",
+        class: 'article-editor',
+        spellcheck: 'false',
+        'aria-label': '所见即所得正文',
       },
       transformPastedHTML: (html) =>
         DOMPurify.sanitize(normalizeTaskClipboardHTML(html), {
-          FORBID_TAGS: ["svg", "script", "style", "iframe"],
-          FORBID_ATTR: ["style"],
+          FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
+          FORBID_ATTR: ['style'],
         }),
       handleDOMEvents: {
         copy: (_view, event) => copyTaskMarkdown(editorRef.current, event),
@@ -142,7 +142,7 @@ export function EditorPane({
           plainPaste.current = !!(
             (event.ctrlKey || event.metaKey) &&
             event.shiftKey &&
-            event.key.toLowerCase() === "v"
+            event.key.toLowerCase() === 'v'
           );
           return Boolean(event.isComposing || event.keyCode === 229);
         },
@@ -159,8 +159,8 @@ export function EditorPane({
           const link = modifiedLink(event, view.dom);
           if (!link) return false;
           event.preventDefault();
-          if (safeURL(link.getAttribute("href") || ""))
-            window.open(link.href, "_blank", "noopener,noreferrer");
+          if (safeURL(link.getAttribute('href') || ''))
+            window.open(link.href, '_blank', 'noopener,noreferrer');
           return true;
         },
       },
@@ -169,7 +169,7 @@ export function EditorPane({
         plainPaste.current = false;
         const data = event.clipboardData;
         const file = Array.from(data?.files || []).find((f) =>
-          f.type.startsWith("image/"),
+          f.type.startsWith('image/'),
         );
         if (file) {
           event.preventDefault();
@@ -177,13 +177,13 @@ export function EditorPane({
           return true;
         }
         const editor = editorRef.current;
-        const text = data?.getData("text/plain") || "";
-        const html = data?.getData("text/html") || "";
+        const text = data?.getData('text/plain') || '';
+        const html = data?.getData('text/html') || '';
         if (
           !editor ||
           literal ||
-          editor.isActive("codeBlock") ||
-          editor.isActive("code") ||
+          editor.isActive('codeBlock') ||
+          editor.isActive('code') ||
           !shouldParseMarkdownPaste(text, html)
         )
           return false;

@@ -64,5 +64,17 @@ flowchart LR
 
 愿每一次落笔，都更接近你想说的话。
 `;
-export type Settings = { theme: 'default' | 'simple' | 'elegant'; color: string; fontSize: number; lineHeight: number; codeTheme: 'light' | 'dark' };
-export const DEFAULT_SETTINGS: Settings = { theme:'default', color:'#a6493d', fontSize:16, lineHeight:1.85, codeTheme:'light' };
+export type Settings = {
+  theme: 'default' | 'simple' | 'elegant';
+  color: string;
+  fontSize: number;
+  lineHeight: number;
+  codeTheme: 'light' | 'dark';
+};
+export const DEFAULT_SETTINGS: Settings = {
+  theme: 'default',
+  color: '#a6493d',
+  fontSize: 16,
+  lineHeight: 1.85,
+  codeTheme: 'light',
+};

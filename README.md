@@ -10,7 +10,7 @@
 
 ## 运行
 
-需要 Node.js 22.12+（本云环境为 Node.js 24）。
+需要 Node.js 22.13+（本云环境为 Node.js 24）。
 
 ```sh
 cd /workspace/md-to-wechat
@@ -20,7 +20,9 @@ npm run dev
 
 开发服务监听 0.0.0.0:5173。生产构建运行 `npm run build`，将 `dist/` 部署到 HTTPS 静态站点即可使用。`npm run preview` 可检查生产构建。部署不需要服务器端应用。
 
-`npm test` 运行 Chromium 中的实际交互测试。云环境公网示例图片由测试夹具通过已有 HTTPS 客户端代理获得真实且通过 TLS 校验的响应，再交给浏览器解码；这不代表 Chromium 直接公网访问已验证。未禁用 TLS/网页安全，也未修改持久证书信任。浏览器由带 npm integrity 校验的 `@sparticuz/chromium` 提供，不依赖环境中被拦截的 Playwright 浏览器下载域名。
+`npm run lint` 检查源码规范、类型及未使用代码；`npm run format:check` 检查统一格式，`npm run format` 自动整理源码。发布流水线会先完成这些检查和交互测试，再构建。
+
+`npm test` 在独立的 localhost:5175 服务上运行 Chromium 中的实际交互测试，端口被占用时直接失败，避免误用其他项目的服务。Linux 默认使用随依赖提供的 Chromium；macOS/Windows 首次运行可执行 `npx playwright install chromium`，也可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定已安装的浏览器。云环境公网示例图片由测试夹具通过已有 HTTPS 客户端代理获得真实且通过 TLS 校验的响应，再交给浏览器解码；这不代表 Chromium 直接公网访问已验证。未禁用 TLS/网页安全，也未修改持久证书信任。浏览器由带 npm integrity 校验的 `@sparticuz/chromium` 提供，不依赖环境中被拦截的 Playwright 浏览器下载域名。
 
 ## 内容与本地资源
 

@@ -1,9 +1,9 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 258;
-const STORAGE_KEY = "mojian-sidebar-width";
+const STORAGE_KEY = 'mojian-sidebar-width';
 
 function initialWidth() {
   try {
@@ -46,13 +46,13 @@ export function useSidebarResize() {
   };
 
   const handleProps = {
-    role: "separator" as const,
+    role: 'separator' as const,
     tabIndex: 0,
-    "aria-label": "调整侧栏宽度",
-    "aria-orientation": "vertical" as const,
-    "aria-valuemin": MIN_WIDTH,
-    "aria-valuemax": MAX_WIDTH,
-    "aria-valuenow": width,
+    'aria-label': '调整侧栏宽度',
+    'aria-orientation': 'vertical' as const,
+    'aria-valuemin': MIN_WIDTH,
+    'aria-valuemax': MAX_WIDTH,
+    'aria-valuenow': width,
     onPointerDown(event: PointerEvent<HTMLDivElement>) {
       if (event.button !== 0 || !sidebar.current) return;
       event.preventDefault();
@@ -79,15 +79,15 @@ export function useSidebarResize() {
       if (drag.current) finish();
     },
     onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
         return;
       event.preventDefault();
       resize(
-        event.key === "Home"
+        event.key === 'Home'
           ? MIN_WIDTH
-          : event.key === "End"
+          : event.key === 'End'
             ? MAX_WIDTH
-            : currentWidth.current + (event.key === "ArrowRight" ? 10 : -10),
+            : currentWidth.current + (event.key === 'ArrowRight' ? 10 : -10),
         maxWidth(),
       );
       finish();

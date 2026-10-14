@@ -1,4 +1,4 @@
-import MarkdownIt from "markdown-it";
+import MarkdownIt from 'markdown-it';
 
 export type ArticleHeading = { level: number; text: string; line: number };
 type InlineToken = {
@@ -11,14 +11,14 @@ const parser = new MarkdownIt({ html: false });
 function inlineText(tokens: InlineToken[]): string {
   return tokens
     .map((token) => {
-      if (token.type === "text" || token.type === "code_inline")
+      if (token.type === 'text' || token.type === 'code_inline')
         return token.content;
-      if (token.type === "softbreak" || token.type === "hardbreak") return " ";
-      if (token.type === "image")
+      if (token.type === 'softbreak' || token.type === 'hardbreak') return ' ';
+      if (token.type === 'image')
         return token.children ? inlineText(token.children) : token.content;
-      return "";
+      return '';
     })
-    .join("");
+    .join('');
 }
 
 // Labels use parsed text, so entities and inline formatting never leak into
@@ -29,7 +29,7 @@ export function headings(markdown: string): ArticleHeading[] {
   const result: ArticleHeading[] = [];
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
-    if (token.type !== "heading_open") continue;
+    if (token.type !== 'heading_open') continue;
     result.push({
       level: Number(token.tag.slice(1)),
       text: inlineText(tokens[index + 1]?.children ?? []).trim(),

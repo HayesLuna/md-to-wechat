@@ -9,7 +9,7 @@ async function prepared(page:Page) {await page.waitForFunction(()=>{const m=(win
 
 test('Chinese line shortcuts, composition guard, undo and literal symbols',async({page})=>{
  await ready(page);await setDoc(page,'正常的》与···java不应变化\n\n');
- await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.focus('end');e.commands.insertContent('》');});await page.keyboard.press('Space');
+ await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.focus('end');e.commands.insertContent('》');});await expect(page.locator('.article-editor')).toBeFocused();await page.keyboard.press('Space');
  await expect(page.locator('.article-editor blockquote')).toHaveCount(1);
  await page.keyboard.insertText('引用中文');await expect.poll(()=>markdown(page)).toContain('引用中文');
  expect(await markdown(page)).toContain('正常的》与···java不应变化');
@@ -231,6 +231,8 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
  await setDoc(page,raw);await prepared(page);await page.getByRole('button',{name:'复制代码',exact:true}).first().click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(code);
  await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.preview-paper [data-code-chrome] svg')).toHaveCount(2);
  for(const theme of ['浅色','深色']){
+  // A previous success toast must not satisfy the next asynchronous copy assertion.
+  if(await page.locator('.toast').isVisible())await page.locator('.toast').getByTitle('关闭提示').click();
   await page.getByRole('button',{name:theme,exact:true}).click();await prepared(page);await expect(page.locator('.preview-paper')).not.toHaveClass(/preparing/);
   const card=page.locator('.preview-paper [data-code-block] > pre').first();await expect(card).toHaveCSS('background-color',theme==='深色'?'rgb(13, 17, 23)':'rgb(248, 250, 252)');await expect(card).toHaveCSS('border-radius','8px');
   await expect(card.locator('svg')).toHaveCSS('width','45px');await expect(card.locator('svg')).toHaveCSS('height','13px');
@@ -279,11 +281,12 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
 });
 
 test('Ctrl and Cmd clicking editor links open actual new tabs without changing draft or selection',async({page,context})=>{
- await ready(page);const href='http://localhost:5173/?linked=1';await setDoc(page,`前面的正文 [打开页面](${href}) 后面的正文`);const raw=await markdown(page);const currentURL=page.url();
+ await ready(page);const href=new URL('/?linked=1',page.url()).href;await setDoc(page,`前面的正文 [打开页面](${href}) 后面的正文`);const raw=await markdown(page);const currentURL=page.url();
  const anchor=page.locator('.article-editor a');await anchor.click();await expect(page.getByRole('button',{name:'编辑链接',exact:true})).toBeVisible();expect(context.pages()).toHaveLength(1);expect(page.url()).toBe(currentURL);
- for(const modifier of ['Control','Meta'] as const){await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:4});e.commands.focus();});const before=await selection(page);const popupEvent=page.waitForEvent('popup');await anchor.click({modifiers:[modifier]});const popup=await popupEvent;await popup.waitForLoadState('domcontentloaded');expect(popup.url()).toBe(href);expect(await popup.evaluate(()=>window.opener)).toBeNull();expect(await popup.evaluate(()=>document.referrer)).toBe('');expect(page.url()).toBe(currentURL);expect(await markdown(page)).toBe(raw);expect(await selection(page)).toEqual(before);await popup.close();}
+ for(const modifier of ['Control','Meta'] as const){await page.evaluate(()=>{const e=(window as any).__mojian.editor;e.commands.setTextSelection({from:1,to:4});e.commands.focus();});const before=await selection(page);const popupEvent=context.waitForEvent('page');// macOS reserves native Control-click for its context menu; exercise the web handler directly there.
+  if(process.platform==='darwin'&&modifier==='Control')await anchor.dispatchEvent('click',{button:0,ctrlKey:true});else await anchor.click({modifiers:[modifier]});const popup=await popupEvent;await popup.waitForLoadState('domcontentloaded');expect(popup.url()).toBe(href);expect(await popup.evaluate(()=>window.opener)).toBeNull();expect(await popup.evaluate(()=>document.referrer)).toBe('');expect(page.url()).toBe(currentURL);expect(await markdown(page)).toBe(raw);expect(await selection(page)).toEqual(before);await popup.close();}
  // The modifier handler also cancels native navigation for a dangerous href.
- await anchor.evaluate(a=>a.setAttribute('href','javascript:window.__unsafeLink=true'));await anchor.click({modifiers:['Control']});expect(await page.evaluate(()=>(window as any).__unsafeLink)).toBeUndefined();expect(context.pages()).toHaveLength(1);expect(await markdown(page)).toBe(raw);
+ await anchor.evaluate(a=>a.setAttribute('href','javascript:window.__unsafeLink=true'));if(process.platform==='darwin')await anchor.dispatchEvent('click',{button:0,ctrlKey:true});else await anchor.click({modifiers:['Control']});expect(await page.evaluate(()=>(window as any).__unsafeLink)).toBeUndefined();expect(context.pages()).toHaveLength(1);expect(await markdown(page)).toBe(raw);
 });
 
 test('link selection controls never shift text during boundary drag selection',async({page})=>{
@@ -326,7 +329,7 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
  for(const width of [1,100,150,200]){await input.fill(String(width));await expect.poll(()=>markdown(page)).toContain(`width=${width}%`);expect(await page.locator('.image-box').evaluate(el=>parseFloat((el as HTMLElement).style.width))).toBe(width);}
  await input.fill('1');await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await expect(page.locator('.source-editor')).toHaveValue(/width=1%/);expect(await markdown(page)).toContain('width=1%');await page.getByRole('button',{name:'所见即所得',exact:true}).click();await page.locator('.image-box img').click();await page.keyboard.press('Escape');await input.fill('200');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('已保存');await page.reload();await page.waitForFunction(()=>!!(window as any).__mojian?.editor);expect(await markdown(page)).toContain('width=200%');
  await prepared(page);await page.getByRole('button',{name:'公众号预览',exact:true}).click();await expect(page.locator('.preview-paper [data-image-scroll] img')).toBeVisible();const dimensions=await page.locator('.preview-paper [data-image-scroll]').evaluate(el=>({frame:el.clientWidth,content:el.scrollWidth,image:el.querySelector('img')!.getBoundingClientRect().width}));expect(dimensions.content).toBeGreaterThan(dimensions.frame);expect(dimensions.image/dimensions.frame).toBeCloseTo(2,1);
- await page.getByRole('button',{name:'复制到公众号',exact:true}).click();const clip=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];const div=document.createElement('div');div.innerHTML=await(await item.getType('text/html')).text();return {types:item.types,width:(div.querySelector('img') as HTMLElement).style.width,scroll:!!div.querySelector('[data-image-scroll]')};});expect(clip.width).toBe('200%');expect(clip.scroll).toBe(true);expect(clip.types).toEqual(expect.arrayContaining(['text/html','text/plain']));await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);await page.screenshot({path:'/tmp/mojian-image-200.png'});
+ await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('已复制排版内容');const clip=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];const div=document.createElement('div');div.innerHTML=await(await item.getType('text/html')).text();return {types:item.types,width:(div.querySelector('img') as HTMLElement).style.width,scroll:!!div.querySelector('[data-image-scroll]')};});expect(clip.width).toBe('200%');expect(clip.scroll).toBe(true);expect(clip.types).toEqual(expect.arrayContaining(['text/html','text/plain']));await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);await page.screenshot({path:'/tmp/mojian-image-200.png'});
 });
 
 test('column alignment controls and context menu persist GFM header and data alignment',async({page})=>{

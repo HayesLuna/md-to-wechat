@@ -1,8 +1,8 @@
-import { useMemo, type CSSProperties } from "react";
-import { Search, Plus, Pencil, Trash2 } from "lucide-react";
-import { DraftListIcon, OutlineIcon } from "./NavigationIcons";
-import { useSidebarResize } from "./useSidebarResize";
-import type { Draft } from "./storage";
+import { useMemo, type CSSProperties } from 'react';
+import { Search, Plus, Pencil, Trash2 } from 'lucide-react';
+import { DraftListIcon, OutlineIcon } from './NavigationIcons';
+import { useSidebarResize } from './useSidebarResize';
+import type { Draft } from './storage';
 
 export function DocumentSidebar({
   tab,
@@ -23,8 +23,8 @@ export function DocumentSidebar({
   activeHeading,
   onHeading,
 }: {
-  tab: "drafts" | "outline";
-  onTab: (tab: "drafts" | "outline") => void;
+  tab: 'drafts' | 'outline';
+  onTab: (tab: 'drafts' | 'outline') => void;
   searching: boolean;
   onSearchToggle: () => void;
   query: string;
@@ -64,28 +64,28 @@ export function DocumentSidebar({
     <aside
       ref={sidebar}
       id="document-sidebar"
-      className={`document-sidebar ${resizing ? "resizing" : ""}`}
-      style={{ "--sidebar-width": `${width}px` } as CSSProperties}
+      className={`document-sidebar ${resizing ? 'resizing' : ''}`}
+      style={{ '--sidebar-width': `${width}px` } as CSSProperties}
       aria-label="文章导航"
     >
       <header className="sidebar-header">
         <button
-          aria-label={tab === "outline" ? "切换到草稿" : "切换到大纲"}
-          title={tab === "outline" ? "切换到草稿" : "切换到大纲"}
+          aria-label={tab === 'outline' ? '切换到草稿' : '切换到大纲'}
+          title={tab === 'outline' ? '切换到草稿' : '切换到大纲'}
           aria-controls="sidebar-content"
-          onClick={() => onTab(tab === "outline" ? "drafts" : "outline")}
+          onClick={() => onTab(tab === 'outline' ? 'drafts' : 'outline')}
         >
-          {tab === "outline" ? (
+          {tab === 'outline' ? (
             <OutlineIcon size={16} />
           ) : (
             <DraftListIcon size={18} />
           )}
         </button>
         <span className="sidebar-title">
-          {tab === "outline" ? "大纲" : "草稿"}
+          {tab === 'outline' ? '大纲' : '草稿'}
         </span>
         <button
-          aria-label={tab === "drafts" ? "搜索草稿" : "搜索大纲"}
+          aria-label={tab === 'drafts' ? '搜索草稿' : '搜索大纲'}
           title="搜索"
           aria-expanded={searching}
           onClick={onSearchToggle}
@@ -97,8 +97,8 @@ export function DocumentSidebar({
         <div className="sidebar-search">
           <input
             autoFocus
-            aria-label={tab === "drafts" ? "搜索草稿标题" : "搜索大纲标题"}
-            placeholder={tab === "drafts" ? "搜索草稿…" : "搜索标题…"}
+            aria-label={tab === 'drafts' ? '搜索草稿标题' : '搜索大纲标题'}
+            placeholder={tab === 'drafts' ? '搜索草稿…' : '搜索标题…'}
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
@@ -107,31 +107,31 @@ export function DocumentSidebar({
       <div
         id="sidebar-content"
         role="region"
-        aria-label={tab === "drafts" ? "草稿箱" : "文章大纲"}
-        className={`sidebar-content ${tab === "drafts" ? "sidebar-drafts" : "sidebar-outline"}`}
+        aria-label={tab === 'drafts' ? '草稿箱' : '文章大纲'}
+        className={`sidebar-content ${tab === 'drafts' ? 'sidebar-drafts' : 'sidebar-outline'}`}
       >
-        {tab === "drafts" ? (
+        {tab === 'drafts' ? (
           <>
             <div className="sidebar-draft-count">{total} 篇草稿</div>
             <div className="sidebar-draft-scroll">
               <ul className="draft-list">
                 {drafts.map((d) => (
-                  <li key={d.id} className={d.id === activeId ? "current" : ""}>
+                  <li key={d.id} className={d.id === activeId ? 'current' : ''}>
                     <button
                       className="draft-select"
-                      aria-current={d.id === activeId ? "page" : undefined}
+                      aria-current={d.id === activeId ? 'page' : undefined}
                       disabled={busy}
                       onClick={() => onSelect(d)}
                     >
                       <strong>{d.title}</strong>
                       <small>
-                        {new Date(d.savedAt).toLocaleString("zh-CN", {
-                          month: "numeric",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
+                        {new Date(d.savedAt).toLocaleString('zh-CN', {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
                         })}
-                        {d.id === activeId ? " · 当前文章" : ""}
+                        {d.id === activeId ? ' · 当前文章' : ''}
                       </small>
                     </button>
                     <div className="draft-actions">
@@ -171,12 +171,12 @@ export function DocumentSidebar({
             {visibleHeadings.map(({ h, index }) => (
               <button
                 key={index}
-                className={index === activeHeading ? "current" : ""}
-                aria-current={index === activeHeading ? "location" : undefined}
+                className={index === activeHeading ? 'current' : ''}
+                aria-current={index === activeHeading ? 'location' : undefined}
                 style={{ paddingLeft: 16 + (h.level - base) * 14 }}
                 onClick={() => onHeading(index)}
               >
-                {h.text || "无标题"}
+                {h.text || '无标题'}
               </button>
             ))}
             {!headings.length && (

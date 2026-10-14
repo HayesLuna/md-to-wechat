@@ -49,3 +49,46 @@ test('Mermaid blocks independently switch diagram/code, copy raw source and reco
  await page.screenshot({path:'/tmp/mojian-mermaid-toggle.png'});await page.getByRole('button',{name:'关闭预览',exact:true}).first().click();await setDoc(page,'```mermaid\ninvalid syntax !!!\n```');await expect(page.locator('.diagram-error')).toContainText('语法有误');await expect(page.locator('.code-node pre')).toBeVisible();
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.document-sidebar')).toHaveCount(0);await box(page);await expect(page.getByRole('button',{name:'新建文章'})).toBeVisible();const bounds=await page.locator('.document-sidebar').boundingBox();const body=await page.locator('.writing-body').boundingBox();expect(bounds!.x).toBe(body!.x);expect(bounds!.y).toBe(body!.y);expect(bounds!.width).toBeLessThanOrEqual(390);await page.screenshot({path:'/tmp/mojian-drafts-mobile.png'});await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);expect(errors).toEqual([]);
 });
+
+test('another tab update cannot be reported saved or discarded by switching',async({page,context})=>{
+ await ready(page);await setDoc(page,'# 不能丢失');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('已保存');
+ const tab=await context.newPage();await tab.route('**/other-tab',r=>r.fulfill({contentType:'text/html',body:'<html></html>'}));await tab.goto(new URL('/other-tab',page.url()).href);
+ await tab.evaluate(async()=>{const s=await import('/src/storage.ts');const lib=await s.loadDrafts();const d=lib.drafts.find(d=>d.id===lib.activeId)!;await s.saveDraft({...d,markdown:'# 其他页面的新稿',title:'其他页面的新稿',version:d.version+100},d.version);});
+ await page.bringToFront();await setDoc(page,'# 本页未保存内容');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('保存失败');await expect(page.locator('.toast')).toContainText('其他页面更新');
+ await box(page);await page.getByRole('button',{name:'新建文章',exact:true}).click();expect(await content(page)).toBe('# 本页未保存内容');await expect(page.locator('.draft-list li')).toHaveCount(1);
+ expect(await tab.evaluate(async()=>{const s=await import('/src/storage.ts');return (await s.loadDrafts()).drafts[0].markdown;})).toBe('# 其他页面的新稿');
+});
+
+test('queued saves retain the last edit and selecting a draft reads another tab latest content',async({page,context})=>{
+ await ready(page);await setDoc(page,'# 第一篇');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('已保存');
+ await box(page);await page.getByRole('button',{name:'新建文章',exact:true}).click();await expect.poll(()=>content(page)).toBe('');
+ // Queue all snapshots in one event loop turn, before IndexedDB can complete the first write.
+ await page.evaluate(()=>{for(const text of ['# 第二篇','## 连续修改一','## 连续修改二']){(window as any).__mojian.setMarkdown(text);window.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true}));}});
+ await expect(page.locator('.save-indicator')).toContainText('已保存');expect(await page.evaluate(async()=>{const s=await import('/src/storage.ts');const lib=await s.loadDrafts();return lib.drafts.find(d=>d.id===lib.activeId)!.markdown;})).toBe('## 连续修改二');
+ const tab=await context.newPage();await tab.route('**/other-tab',r=>r.fulfill({contentType:'text/html',body:'<html></html>'}));await tab.goto(new URL('/other-tab',page.url()).href);
+ await tab.evaluate(async()=>{const s=await import('/src/storage.ts');const d=(await s.loadDrafts()).drafts.find(d=>d.title==='第一篇')!;await s.saveDraft({...d,markdown:'# 第一篇\n\n另一页面修改',version:d.version+100},d.version);});
+ await page.bringToFront();await page.locator('.draft-select').filter({hasText:'第一篇'}).click();await expect.poll(()=>content(page)).toContain('另一页面修改');await expect(page.locator('.save-indicator')).toContainText('已保存');
+});
+
+test('deleting another draft does not advance the current editor past an unseen concurrent update',async({page})=>{
+ await ready(page);await setDoc(page,'# 保留文章');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('已保存');await box(page);
+ await page.getByRole('button',{name:'新建文章',exact:true}).click();await expect.poll(()=>content(page)).toBe('');await setDoc(page,'# 删除文章');await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('已保存');
+ await page.locator('.draft-select').filter({hasText:'保留文章'}).click();await expect.poll(()=>content(page)).toBe('# 保留文章');
+ await page.getByRole('button',{name:'删除 删除文章',exact:true}).click();
+ await page.evaluate(async()=>{
+  const s=await import('/src/storage.ts');const lib=await s.loadDrafts();const current=lib.drafts.find(d=>d.id===lib.activeId)!;
+  const original=IDBDatabase.prototype.transaction;let writes=0;
+  IDBDatabase.prototype.transaction=function(...args:Parameters<typeof original>){
+   if(args[1]==='readwrite'&&Array.isArray(args[0])&&args[0].includes('draft')&&++writes===2){
+    IDBDatabase.prototype.transaction=original;
+    // Queue another tab's write immediately before the deletion transaction.
+    const concurrent=original.call(this,['draft'],'readwrite');
+    concurrent.objectStore('draft').put({...current,markdown:'# 并发更新的新稿',title:'并发更新的新稿',version:current.version+100},current.id);
+   }
+   return original.apply(this,args);
+  };
+ });
+ await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.draft-list li')).toHaveCount(1);
+ await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-indicator')).toContainText('保存失败');expect(await content(page)).toBe('# 保留文章');
+ expect(await page.evaluate(async()=>{const s=await import('/src/storage.ts');return (await s.loadDrafts()).drafts[0].markdown;})).toBe('# 并发更新的新稿');
+});

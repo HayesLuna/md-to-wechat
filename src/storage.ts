@@ -1,77 +1,257 @@
-import { openDB } from 'idb';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { headings } from './headings';
 import type { Settings } from './sample';
-export type Draft = { id: string; title: string; customTitle?: boolean; markdown: string; settings: Settings; version: number; createdAt: number; savedAt: number };
-export function compareDraftCreation(a:Draft,b:Draft) {return a.createdAt===b.createdAt?a.id.localeCompare(b.id):b.createdAt-a.createdAt;}
-export function draftTitle(markdown: string) { return headings(markdown).find(heading=>heading.level===1)?.text.slice(0,100) || '未命名文章'; }
+export type Draft = {
+  id: string;
+  title: string;
+  customTitle?: boolean;
+  markdown: string;
+  settings: Settings;
+  version: number;
+  createdAt: number;
+  savedAt: number;
+};
+export function compareDraftCreation(a: Draft, b: Draft) {
+  return a.createdAt === b.createdAt
+    ? a.id.localeCompare(b.id)
+    : b.createdAt - a.createdAt;
+}
+export function draftTitle(markdown: string) {
+  return (
+    headings(markdown)
+      .find((heading) => heading.level === 1)
+      ?.text.slice(0, 100) || '未命名文章'
+  );
+}
 export function newDraft(markdown: string, settings: Settings): Draft {
- const now=Date.now();
- return {id:crypto.randomUUID(),title:draftTitle(markdown),markdown,settings,version:now,createdAt:now,savedAt:now};
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    title: draftTitle(markdown),
+    markdown,
+    settings,
+    version: now,
+    createdAt: now,
+    savedAt: now,
+  };
 }
-let connection: ReturnType<typeof openDB> | undefined;
+interface StorageSchema extends DBSchema {
+  draft: { key: string; value: Draft };
+  images: { key: string; value: Blob };
+  meta: { key: string; value: string };
+}
+export class DraftConflictError extends Error {
+  constructor() {
+    super('草稿已在其他页面更新，请先导出当前正文，刷新后再编辑。');
+    this.name = 'DraftConflictError';
+  }
+}
+let connection: Promise<IDBPDatabase<StorageSchema>> | undefined;
 function db() {
- if(connection)return connection;
- const pending=openDB('mojian-v1', 3, {upgrade(db, oldVersion, _newVersion, tx) {
- if(oldVersion<1){db.createObjectStore('draft');db.createObjectStore('images');}
- if(oldVersion<2){
-  db.createObjectStore('meta');
-  const store=tx.objectStore('draft');
-  void store.get('current').then(async legacy=>{
-   if(!legacy)return;
-   const draft={...legacy,id:crypto.randomUUID(),title:draftTitle(legacy.markdown),createdAt:Date.now()};
-   await store.put(draft,draft.id);await tx.objectStore('meta').put(draft.id,'active');await store.delete('current');
+  if (connection) return connection;
+  const pending = openDB<StorageSchema>('mojian-v1', 3, {
+    upgrade(db, oldVersion, _newVersion, tx) {
+      if (oldVersion < 1) {
+        db.createObjectStore('draft');
+        db.createObjectStore('images');
+      }
+      if (oldVersion < 2) {
+        db.createObjectStore('meta');
+        const store = tx.objectStore('draft');
+        void store.get('current').then(async (legacy) => {
+          if (!legacy) return;
+          const draft = {
+            ...legacy,
+            id: crypto.randomUUID(),
+            title: draftTitle(legacy.markdown),
+            createdAt: Date.now(),
+          };
+          await store.put(draft, draft.id);
+          await tx.objectStore('meta').put(draft.id, 'active');
+          await store.delete('current');
+        });
+      }
+    },
+    blocking() {
+      // Release the connection when another tab upgrades the database.
+      if (connection === pending) connection = undefined;
+      void pending.then((database) => database.close());
+    },
+    terminated() {
+      if (connection === pending) connection = undefined;
+    },
   });
- }
-},blocking(){
- // Release the connection when another tab upgrades the database.
- if(connection===pending)connection=undefined;
- void pending.then(database=>database.close());
-},terminated(){if(connection===pending)connection=undefined;}});
- connection=pending;
- void pending.catch(()=>{if(connection===pending)connection=undefined;});
- return pending;
+  connection = pending;
+  void pending.catch(() => {
+    if (connection === pending) connection = undefined;
+  });
+  return pending;
 }
-export async function loadDrafts(): Promise<{drafts:Draft[];activeId:string|undefined}> {
- const d=await db();const tx=d.transaction(['draft','meta']);
- const [drafts,activeId]=await Promise.all([tx.objectStore('draft').getAll(),tx.objectStore('meta').get('active')]);
- await tx.done;return {drafts:drafts.map((draft:Draft)=>draft.customTitle?draft:{...draft,title:draftTitle(draft.markdown)}).sort(compareDraftCreation),activeId};
+export async function loadDrafts(): Promise<{
+  drafts: Draft[];
+  activeId: string | undefined;
+}> {
+  const d = await db();
+  const tx = d.transaction(['draft', 'meta']);
+  const [drafts, activeId] = await Promise.all([
+    tx.objectStore('draft').getAll(),
+    tx.objectStore('meta').get('active'),
+  ]);
+  await tx.done;
+  return {
+    drafts: drafts
+      .map((draft: Draft) =>
+        draft.customTitle
+          ? draft
+          : { ...draft, title: draftTitle(draft.markdown) },
+      )
+      .sort(compareDraftCreation),
+    activeId,
+  };
 }
-export async function saveDraft(draft: Draft) {
- const d = await db(); const tx = d.transaction(['draft','meta'],'readwrite');
- const previous = await tx.objectStore('draft').get(draft.id);
- if(!previous || previous.version <= draft.version) await tx.objectStore('draft').put({...draft,createdAt:previous?.createdAt??draft.createdAt},draft.id);
- await tx.objectStore('meta').put(draft.id,'active');await tx.done;
+export async function saveDraft(draft: Draft, expectedVersion?: number) {
+  const d = await db();
+  const tx = d.transaction(['draft', 'meta'], 'readwrite');
+  const previous = await tx.objectStore('draft').get(draft.id);
+  if (
+    (expectedVersion !== undefined && previous?.version !== expectedVersion) ||
+    (previous &&
+      (previous.version > draft.version ||
+        (previous.version === draft.version &&
+          (previous.markdown !== draft.markdown ||
+            previous.title !== draft.title ||
+            previous.customTitle !== draft.customTitle ||
+            JSON.stringify(previous.settings) !==
+              JSON.stringify(draft.settings)))))
+  ) {
+    await tx.done;
+    throw new DraftConflictError();
+  }
+  await tx
+    .objectStore('draft')
+    .put(
+      { ...draft, createdAt: previous?.createdAt ?? draft.createdAt },
+      draft.id,
+    );
+  await tx.objectStore('meta').put(draft.id, 'active');
+  await tx.done;
 }
-export async function removeDraft(id:string, next:Draft) {
- const d=await db();const tx=d.transaction(['draft','meta'],'readwrite');
- await tx.objectStore('draft').delete(id);await tx.objectStore('draft').put(next,next.id);
- await tx.objectStore('meta').put(next.id,'active');await tx.done;
+export async function removeDraft(id: string, next: Draft) {
+  const d = await db();
+  const tx = d.transaction(['draft', 'meta'], 'readwrite');
+  const retained = await tx.objectStore('draft').get(next.id);
+  await tx.objectStore('draft').delete(id);
+  if (!retained) await tx.objectStore('draft').put(next, next.id);
+  await tx.objectStore('meta').put(next.id, 'active');
+  await tx.done;
+  return retained ?? next;
 }
 export async function storeImage(file: Blob) {
- if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)) throw new Error('仅支持 PNG、JPEG、WebP、GIF 图片。');
- if(file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MB，请压缩后重试。');
- const bitmap = await createImageBitmap(file); bitmap.close();
- const id = crypto.randomUUID(); await (await db()).put('images',file,id); return 'local-image:'+id;
+  if (
+    !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)
+  )
+    throw new Error('仅支持 PNG、JPEG、WebP、GIF 图片。');
+  if (file.size > 10 * 1024 * 1024)
+    throw new Error('图片不能超过 10 MB，请压缩后重试。');
+  const bitmap = await createImageBitmap(file);
+  bitmap.close();
+  const id = crypto.randomUUID();
+  await (await db()).put('images', file, id);
+  return 'local-image:' + id;
 }
-const urls = new Map<string,Promise<string>>();
+type ImageEntry = {
+  promise: Promise<string>;
+  url: string;
+  users: number;
+  timer?: ReturnType<typeof setTimeout>;
+};
+const urls = new Map<string, ImageEntry>();
+const IMAGE_IDLE_MS = 30_000;
+function scheduleRelease(src: string, entry: ImageEntry) {
+  if (entry.users || entry.timer || !entry.url) return;
+  entry.timer = setTimeout(() => {
+    entry.timer = undefined;
+    if (entry.users || urls.get(src) !== entry) return;
+    urls.delete(src);
+    if (entry.url) URL.revokeObjectURL(entry.url);
+  }, IMAGE_IDLE_MS);
+}
+function imageEntry(src: string) {
+  const cached = urls.get(src);
+  if (cached) return cached;
+  const entry: ImageEntry = { promise: Promise.resolve(''), url: '', users: 0 };
+  entry.promise = (async () => {
+    const blob = await (await db()).get('images', src.slice(12));
+    entry.url = blob ? URL.createObjectURL(blob) : '';
+    if (!entry.url) urls.delete(src);
+    else scheduleRelease(src, entry);
+    return entry.url;
+  })().catch((error) => {
+    if (urls.get(src) === entry) urls.delete(src);
+    throw error;
+  });
+  urls.set(src, entry);
+  return entry;
+}
+function retainEntry(src: string, entry: ImageEntry) {
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = undefined;
+  }
+  entry.users++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    entry.users--;
+    scheduleRelease(src, entry);
+  };
+}
 export async function imageURL(src: string) {
- if(!src.startsWith('local-image:')) return /^https?:\/\//i.test(src) ? src : '';
- if(urls.has(src)) return urls.get(src)!;
- // Share in-flight reads between the editor and article preview.
- const pending=(async()=>{
-  const blob=await (await db()).get('images',src.slice(12));
-  return blob?URL.createObjectURL(blob):'';
- })();
- urls.set(src,pending);
- try {
-  const url=await pending;
-  if(!url)urls.delete(src);
-  return url;
- } catch(error) {urls.delete(src);throw error;}
+  if (!src.startsWith('local-image:'))
+    return /^https?:\/\//i.test(src) ? src : '';
+  return imageEntry(src).promise;
 }
-export async function imageBlob(src: string): Promise<Blob | undefined> { return (await db()).get('images',src.slice(12)); }
-export function download(blob: Blob, filename: string) { const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
+// Owners retain the shared URL until their editor, output or fullscreen view ends.
+export async function acquireImageURL(src: string) {
+  if (!src.startsWith('local-image:'))
+    return { url: await imageURL(src), release: () => {} };
+  const entry = imageEntry(src);
+  const release = retainEntry(src, entry);
+  try {
+    return { url: await entry.promise, release };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+export function retainImageURL(url: string) {
+  for (const [src, entry] of urls)
+    if (entry.url === url) return retainEntry(src, entry);
+  return () => {};
+}
+export async function imageBlob(src: string): Promise<Blob | undefined> {
+  return (await db()).get('images', src.slice(12));
+}
+export function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 export async function downloadImage(src: string, name: string) {
- const blob=await imageBlob(src); if(!blob) throw new Error('本地图片资源缺失。');
- const extension=({'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'} as Record<string,string>)[blob.type] || 'png'; download(blob,name+'.'+extension);
+  const blob = await imageBlob(src);
+  if (!blob) throw new Error('本地图片资源缺失。');
+  const extension =
+    (
+      {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+      } as Record<string, string>
+    )[blob.type] || 'png';
+  download(blob, name + '.' + extension);
 }
