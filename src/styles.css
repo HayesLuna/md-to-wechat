@@ -110,3 +110,6 @@
 .more-menu button{padding:8px 10px;white-space:nowrap}
 
 .article-editor{tab-size:4}
+
+/* Keep literal prose tabs equally wide while leaving code tab stops intact. */
+.article-editor .literal-tab{display:inline-block;width:32px;white-space:pre;tab-size:0}

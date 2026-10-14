@@ -4,6 +4,30 @@ export function shouldParseMarkdownPaste(text: string, html: string) {
   if (!text) return false;
   if (!html) return true;
   const root = new DOMParser().parseFromString(html, "text/html");
+  // Native editor HTML already describes its nodes and selection context.
+  if (root.querySelector("[data-pm-slice]")) return false;
+  // Source editors can wrap raw Markdown in syntax-highlighted HTML. Prefer
+  // source only when its text matches and no rendered article structure exists.
+  const pre = root.querySelector("pre");
+  const code = pre?.querySelector("code") || root.querySelector("code");
+  const language = /(?:language-|lang-)([\w-]+)/i.exec(
+    `${pre?.className || ""} ${code?.className || ""}`,
+  )?.[1]?.toLowerCase() || (code?.getAttribute("data-language") ||
+    pre?.getAttribute("data-language") || code?.getAttribute("lang") ||
+    pre?.getAttribute("lang"))?.toLowerCase();
+  const normalized = (value: string) => value.replace(/\r\n?/g, "\n").trim();
+  const source = normalized(text);
+  const body = root.body.cloneNode(true) as HTMLElement;
+  body.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
+  const rawOnly = normalized(body.textContent || "") === source &&
+    (!pre || (root.querySelectorAll("pre").length === 1 &&
+      normalized(pre.textContent || "") === source)) &&
+    !root.querySelector("h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,img");
+  const markdownLanguage = language === "markdown" || language === "md";
+  const neutralLanguage = !language || ["plaintext", "text", "txt"].includes(language);
+  const markdownBlocks = /^(?: {0,3}#{1,6}\s+\S| {0,3}[-+*]\s+\[[ xX]\]\s+\S| {0,3}(?:`{3,}|~{3,})\w*)/m.test(source);
+  if (rawOnly && (markdownLanguage || (neutralLanguage && markdownBlocks &&
+    (pre || source.includes("\n"))))) return true;
   return !root.querySelector(
     "[data-pm-slice],h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,pre,code,strong,b,em,i,s,del,a,img",
   );

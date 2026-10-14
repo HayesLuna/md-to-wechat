@@ -1,5 +1,4 @@
 import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { TableKit } from "@tiptap/extension-table";
 import TaskList from "@tiptap/extension-task-list";
@@ -15,6 +14,7 @@ import {
   EditingRules,
   StructuredListItem,
   StructuredTaskItem,
+  MarkdownStarterKit,
 } from "./editorExtensions";
 import { safeURL } from "./output";
 import { markdownSelection, copyTaskMarkdown } from "./markdownClipboard";
@@ -82,7 +82,7 @@ export function EditorPane({
   const plainPaste = useRef(false);
   const extensions = useMemo(
     () => [
-      StarterKit.configure({
+      MarkdownStarterKit.configure({
         paragraph: false,
         heading: false,
         codeBlock: false,

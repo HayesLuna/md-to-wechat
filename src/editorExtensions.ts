@@ -8,13 +8,22 @@ import { joinBackward } from '@tiptap/pm/commands';
 import Image from '@tiptap/extension-image';
 import Paragraph from '@tiptap/extension-paragraph';
 import Heading from '@tiptap/extension-heading';
-import { preserveBoundaryTabs } from './markdownTabs';
+import { preserveBoundaryTabs, preserveProseTabs } from './markdownTabs';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { ListItem } from '@tiptap/extension-list';
 import TaskItem from '@tiptap/extension-task-item';
+import StarterKit from '@tiptap/starter-kit';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
+
+// Markdown permits emphasis around inline code. StarterKit's default code
+// mark excludes all other marks, making valid Markdown fail insertion checks.
+export const MarkdownStarterKit=StarterKit.extend({
+ addExtensions(){return (this.parent?.()||[]).map(extension=>
+  extension.name==='code'?extension.extend({excludes:''}):extension,
+ );},
+});
 
 export const StructuredTaskItem=TaskItem.extend({
  parseHTML() {
@@ -45,14 +54,18 @@ export const StructuredListItem=ListItem.extend({
 // Let block separators represent empty paragraphs, without HTML placeholders.
 // Keep inline text and code untouched, including intentionally written entities.
 export const CleanParagraph=Paragraph.extend({
- renderMarkdown(node,h){return preserveBoundaryTabs(h.renderChildren(node.content||[]));},
+ renderMarkdown(node,h,ctx){
+  const text=preserveBoundaryTabs(h.renderChildren(node.content||[]));
+  return ctx.parentType&&ctx.parentType!=='doc'?preserveProseTabs(text):text;
+ },
 });
 
 export const CleanHeading=Heading.extend({
- renderMarkdown(node,h){
+ renderMarkdown(node,h,ctx){
   if(!node.content)return '';
   const level=node.attrs?.level?parseInt(node.attrs.level as string,10):1;
-  return '#'.repeat(level)+' '+preserveBoundaryTabs(h.renderChildren(node.content));
+  const text=preserveBoundaryTabs(h.renderChildren(node.content));
+  return '#'.repeat(level)+' '+(ctx.parentType&&ctx.parentType!=='doc'?preserveProseTabs(text):text);
  },
 });
 
@@ -190,7 +203,16 @@ export const EditingRules=Extension.create({
    if(tr.docChanged||tr.selectionSet)return {};return previous;
   }},
   props:{decorations:state=>{
-   const decorations:Decoration[]=[];state.doc.descendants((node,pos)=>{if(indentWrapper(node))decorations.push(Decoration.node(pos,pos+node.nodeSize,{'data-indent-wrapper':'true'}));});
+   const decorations:Decoration[]=[];state.doc.descendants((node,pos)=>{
+    if(node.type.spec.code)return false;
+    if(indentWrapper(node))decorations.push(Decoration.node(pos,pos+node.nodeSize,{'data-indent-wrapper':'true'}));
+    if(node.isText&&!node.marks.some(mark=>mark.type.name==='code')){
+     for(const match of node.text!.matchAll(/\t/g)){
+      const from=pos+match.index;
+      decorations.push(Decoration.inline(from,from+1,{class:'literal-tab','data-literal-tab':String(from)}));
+     }
+    }
+   });
    return DecorationSet.create(state.doc,decorations);
   },handleKeyDown:(view,event)=>{
    if(view.composing||event.isComposing||event.keyCode===229)return false;
