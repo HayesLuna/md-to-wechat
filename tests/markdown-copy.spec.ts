@@ -5,11 +5,11 @@ async function copy(page:Page,type='copy'){return page.evaluate(type=>{const edi
 async function selectText(page:Page,text:string,start=0,end=text.length){await page.evaluate(({text,start,end})=>{const editor=(window as any).__mojian.editor;let from=-1;editor.state.doc.descendants((node:any,pos:number)=>{if(from<0&&node.isText&&node.text.includes(text))from=pos+node.text.indexOf(text);});if(from<0)throw new Error('Missing selection text');editor.commands.setTextSelection({from:from+start,to:from+end});},{text,start,end});}
 test('WYSIWYG copy writes Markdown text and retains native rich HTML for a full selection',async({page,context})=>{
  await context.grantPermissions(['clipboard-read','clipboard-write']);
- await ready(page,'# 标题\n\n正文 **加粗** 和 *斜体*、[链接](https://example.com)\n\n- 项目一\n  - 嵌套项目\n\n1. 有序项\n\n- [x] 已完成\n\n> 引用\n\n| 名称 | 值 |\n| :---: | ---: |\n| 表格内容 | 123 |\n\n```js\nconst value = 1;\n```');
+ await ready(page,'# 标题\n\n正文 **加粗** 和 *斜体*、[链接](https://example.com)\n\n- 项目一\n  - 嵌套项目\n\n1. 有序项\n\n> 引用\n\n| 名称 | 值 |\n| :---: | ---: |\n| 表格内容 | 123 |\n\n```js\nconst value = 1;\n```');
  const before=await page.evaluate(()=>(window as any).__mojian.getMarkdown());await page.locator('.article-editor').click();await page.evaluate(()=>(window as any).__mojian.editor.commands.selectAll());
  await page.keyboard.press('ControlOrMeta+c');
  const data=await page.evaluate(async()=>{const item=(await navigator.clipboard.read())[0];return {text:await(await item.getType('text/plain')).text(),html:await(await item.getType('text/html')).text()};});
- for(const part of ['# 标题','**加粗**','*斜体*','[链接](https://example.com)','- 项目一','嵌套项目','1. 有序项','- [x] 已完成','> 引用','| 名称','```js','const value = 1;'])expect(data.text).toContain(part);
+ for(const part of ['# 标题','**加粗**','*斜体*','[链接](https://example.com)','- 项目一','嵌套项目','1. 有序项','> 引用','| 名称','```js','const value = 1;'])expect(data.text).toContain(part);
  expect(data.text).toMatch(/:\-{3,}:/);
  for(const tag of ['<h1','<strong','<ul','<ol','<table','<pre'])expect(data.html).toContain(tag);
  expect(await page.evaluate(()=>(window as any).__mojian.getMarkdown())).toBe(before);

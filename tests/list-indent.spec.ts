@@ -61,7 +61,7 @@ for(const [name,list,tag] of [['bullet','- 父项\n- 第二项\n- 第三项\n- �
  });
  for(const selected of [false,true])test(`${name}: first item has no parent to indent under (${selected?'multiple items selected':'caret'})`,async({page})=>{
   await ready(page,list+code);await select(page,'父项',selected?'第二项':'父项');const before=await page.evaluate(()=>(window as any).__mojian.editor.getJSON());const raw=await page.evaluate(()=>(window as any).__mojian.getMarkdown());
-  await page.keyboard.press('Tab');await page.keyboard.press('Tab');await expect(page.locator('.article-editor')).toBeFocused();await expect(page.getByLabel('代码语言',{exact:true})).not.toBeFocused();expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(before);expect(await page.evaluate(()=>(window as any).__mojian.getMarkdown())).toBe(raw);await expect(page.locator('[data-indent-wrapper]')).toHaveCount(0);
+  await page.keyboard.press('Tab');await page.keyboard.press('Tab');await expect(page.locator('.article-editor')).toBeFocused();await expect(page.getByLabel('代码语言',{exact:true})).not.toBeFocused();if(selected){expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(before);expect(await page.evaluate(()=>(window as any).__mojian.getMarkdown())).toBe(raw);}else{expect(await page.locator(`.article-editor > ${tag} > li > ${name==='task'?'div > ':''}p`).first().textContent()).toBe('\t\t父项');await expect(page.locator(`.article-editor > ${tag} > li`)).toHaveCount(4);await expect(page.locator('.article-editor ul ul,.article-editor ol ol')).toHaveCount(0);await page.keyboard.press('Shift+Tab');await page.keyboard.press('Shift+Tab');expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(before);}await expect(page.locator('[data-indent-wrapper]')).toHaveCount(0);
  });
 }
 
@@ -118,4 +118,13 @@ test('reported task checklist stays aligned on first-item Tab and nests later ta
  const positions=await page.locator('.article-editor ul[data-type=taskList]>li>label').evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().left));expect(new Set(positions).size).toBe(1);
  await select(page,'开发完成');await page.keyboard.press('Tab');await expect(page.locator('.article-editor > ul[data-type=taskList]>li')).toHaveCount(4);await expect(page.locator('.article-editor ul ul')).toHaveCount(0);await expect(page.locator('.article-editor')).toBeFocused();
  await select(page,'环境 DDL 已同步（若适用）');await page.keyboard.press('Tab');await expect(page.locator('.article-editor ul ul>li')).toContainText('环境 DDL 已同步（若适用）');await page.keyboard.press('Shift+Tab');await expect(page.locator('.article-editor > ul[data-type=taskList]>li')).toHaveCount(4);expect(await page.locator('.article-editor ul[data-type=taskList]>li>label').evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().left))).toEqual(positions);expect(await page.locator('.article-editor input[type=checkbox]').evaluateAll(nodes=>nodes.every(node=>!(node as HTMLInputElement).checked))).toBe(true);
+});
+for(const [name,list] of [['bullet','- 首项\n- 次项'],['ordered','1. 首项\n2. 次项'],['task','- [ ] 首项\n- [x] 次项']])test(`${name}: first item inserts a literal Tab with undo and Markdown roundtrip`,async({page})=>{
+ await ready(page,list);await select(page,'首项');const before=await page.evaluate(()=>(window as any).__mojian.editor.getJSON());
+ await page.keyboard.press('Tab');const after=await page.evaluate(()=>(window as any).__mojian.editor.getJSON());
+ expect(await page.locator('.article-editor li p').first().textContent()).toBe('\t首项');
+ await page.keyboard.press('ControlOrMeta+z');expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(before);
+ await page.keyboard.press('ControlOrMeta+Shift+z');expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(after);
+ const text=await page.evaluate(()=>(window as any).__mojian.getMarkdown());await page.evaluate(text=>(window as any).__mojian.setMarkdown(text),text);
+ expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(after);
 });

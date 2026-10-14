@@ -11,9 +11,21 @@ import Heading from '@tiptap/extension-heading';
 import { preserveBoundaryTabs } from './markdownTabs';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { ListItem } from '@tiptap/extension-list';
+import TaskItem from '@tiptap/extension-task-item';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
+
+export const StructuredTaskItem=TaskItem.extend({
+ parseHTML() {
+  // Editor HTML has a direct content wrapper. A descendant div may belong
+  // to a nested task and must never replace the current item's content.
+  return (this.parent?.()||[]).map(rule=>({
+   ...rule,
+   contentElement:(element:HTMLElement)=>element.querySelector(':scope > div')??element,
+  }));
+ },
+});
 
 export const StructuredListItem=ListItem.extend({
  parseMarkdown(token,h) {
@@ -195,8 +207,12 @@ export const EditingRules=Extension.create({
     for(let d=$from.depth;!itemType&&d>0;d--)if(['listItem','taskItem'].includes($from.node(d).type.name)){itemType=$from.node(d).type.name;break;}
     if(itemType) {
      event.preventDefault();
-     if(event.shiftKey){if(!unindentWrapper(this.editor,itemType))this.editor.commands.liftListItem(itemType);}
-     else this.editor.commands.sinkListItem(itemType);
+     if(event.shiftKey){
+      const before=selection.$from.parent.textBetween(0,selection.$from.parentOffset,'','\ufffc');
+      if(selection.empty&&before.endsWith('\t'))insertTextTab(this.editor,true);
+      else if(!unindentWrapper(this.editor,itemType))this.editor.commands.liftListItem(itemType);
+     }
+     else if(!this.editor.commands.sinkListItem(itemType)&&!(selection instanceof NodeSelection)&&selection.$from.sameParent(selection.$to)&&selection.$from.parent.isTextblock)insertTextTab(this.editor,false);
      return true;
     }
     if($from.parent.isTextblock){event.preventDefault();insertTextTab(this.editor,event.shiftKey);return true;}

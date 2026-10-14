@@ -3,7 +3,6 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { TableKit } from "@tiptap/extension-table";
 import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
 import { createLowlight, common } from "lowlight";
 import DOMPurify from "dompurify";
 import { useEffect, useMemo, useRef } from "react";
@@ -15,10 +14,14 @@ import {
   CleanHeading,
   EditingRules,
   StructuredListItem,
+  StructuredTaskItem,
 } from "./editorExtensions";
 import { safeURL } from "./output";
-import { markdownSelection } from "./markdownClipboard";
-import { shouldParseMarkdownPaste } from "./markdownPaste";
+import { markdownSelection, copyTaskMarkdown } from "./markdownClipboard";
+import {
+  shouldParseMarkdownPaste,
+  normalizeTaskClipboardHTML,
+} from "./markdownPaste";
 function modifiedLink(event: MouseEvent, dom: HTMLElement) {
   if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return null;
   const link =
@@ -109,7 +112,7 @@ export function EditorPane({
         },
       }),
       TaskList,
-      TaskItem.configure({ nested: true }),
+      StructuredTaskItem.configure({ nested: true }),
       EditingRules,
     ],
     [],
@@ -128,11 +131,13 @@ export function EditorPane({
         "aria-label": "所见即所得正文",
       },
       transformPastedHTML: (html) =>
-        DOMPurify.sanitize(html, {
+        DOMPurify.sanitize(normalizeTaskClipboardHTML(html), {
           FORBID_TAGS: ["svg", "script", "style", "iframe"],
           FORBID_ATTR: ["style"],
         }),
       handleDOMEvents: {
+        copy: (_view, event) => copyTaskMarkdown(editorRef.current, event),
+        cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
         keydown: (_view, event) => {
           plainPaste.current = !!(
             (event.ctrlKey || event.metaKey) &&

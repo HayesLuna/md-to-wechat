@@ -27,3 +27,28 @@ export function markdownSelection(editor: Editor | null, slice: Slice) {
     ordinarySpaces({ type: "doc", content: slice.content.toJSON() }),
   );
 }
+// Typora ignores checkbox inputs when importing rich HTML. Use the Markdown
+// flavor for selections containing tasks so checked state and nesting survive.
+export function copyTaskMarkdown(
+  editor: Editor | null,
+  event: ClipboardEvent,
+  cut = false,
+) {
+  if (!editor || editor.state.selection.empty || !event.clipboardData) return false;
+  if (cut && !editor.isEditable) {
+    event.preventDefault();
+    return true;
+  }
+  const slice = editor.state.selection.content();
+  let tasks = false;
+  slice.content.descendants((node) => {
+    if (node.type.name === "taskItem") tasks = true;
+  });
+  if (!tasks) return false;
+  const text = markdownSelection(editor, slice);
+  event.clipboardData.clearData();
+  event.clipboardData.setData("text/plain", text);
+  event.preventDefault();
+  if (cut) editor.commands.deleteSelection();
+  return true;
+}
