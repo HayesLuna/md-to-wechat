@@ -108,3 +108,5 @@
 
 .more-menu{display:flex;flex-direction:column;width:max-content;min-width:0;max-width:calc(100vw - 28px)}
 .more-menu button{padding:8px 10px;white-space:nowrap}
+
+.article-editor{tab-size:4}

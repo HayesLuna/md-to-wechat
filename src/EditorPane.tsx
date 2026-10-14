@@ -12,6 +12,7 @@ import {
   SizedImage,
   SmartCode,
   CleanParagraph,
+  CleanHeading,
   EditingRules,
   StructuredListItem,
 } from "./editorExtensions";
@@ -80,6 +81,7 @@ export function EditorPane({
     () => [
       StarterKit.configure({
         paragraph: false,
+        heading: false,
         codeBlock: false,
         listItem: false,
         link: {
@@ -93,6 +95,7 @@ export function EditorPane({
       StructuredListItem,
       Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
       CleanParagraph,
+      CleanHeading,
       SizedImage,
       SmartCode.configure({
         lowlight: createLowlight(common),

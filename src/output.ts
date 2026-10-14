@@ -10,11 +10,8 @@ export const outputKey=(markdown:string,settings:Settings)=>JSON.stringify([mark
 export function safeURL(url:string) { try{const parsed=new URL(url);return ['https:','http:','mailto:','tel:'].includes(parsed.protocol);}catch{return false;} }
 export function escapeHTML(value:string) { const div=document.createElement('div');div.textContent=value;return div.innerHTML; }
 export function widthFromTitle(title:string) { const m=/^width=(\d{1,3})%$/.exec(title||'');return m?Math.min(200,Math.max(1,Number(m[1]))):100; }
-export function headings(markdown:string) {
- const md=new MarkdownIt({html:false});const tokens=md.parse(markdown,{});const out:{level:number;text:string;line:number}[]=[];
- for(let i=0;i<tokens.length;i++)if(tokens[i].type==='heading_open')out.push({level:Number(tokens[i].tag.slice(1)),text:tokens[i+1].content,line:tokens[i].map?.[0]||0});
- return out;
-}
+export { headings } from './headings';
+
 function inlineStyles(root:HTMLElement,s:Settings,codeSources:CodeSource[]) {
  const color=/^#[0-9a-f]{6}$/i.test(s.color)?s.color:'#a6493d';const dark=s.codeTheme==='dark';
  root.setAttribute('style',`font-family:${s.theme==='elegant'?'Georgia,SimSun,serif':'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif'};font-size:${s.fontSize}px;line-height:${Number((s.fontSize*s.lineHeight).toFixed(2))}px;color:#303030;word-wrap:break-word;`);

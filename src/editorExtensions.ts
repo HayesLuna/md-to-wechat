@@ -1,12 +1,14 @@
 import { Extension, wrappingInputRule, type Editor, type Attributes } from '@tiptap/core';
 import { Plugin, PluginKey, AllSelection, NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { Fragment, Slice, type Node } from '@tiptap/pm/model';
+import { Slice, type Node } from '@tiptap/pm/model';
 import { ReplaceAroundStep } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { joinBackward } from '@tiptap/pm/commands';
 import Image from '@tiptap/extension-image';
 import Paragraph from '@tiptap/extension-paragraph';
+import Heading from '@tiptap/extension-heading';
+import { preserveBoundaryTabs } from './markdownTabs';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { ListItem } from '@tiptap/extension-list';
 import { ReactNodeViewRenderer } from '@tiptap/react';
@@ -31,7 +33,15 @@ export const StructuredListItem=ListItem.extend({
 // Let block separators represent empty paragraphs, without HTML placeholders.
 // Keep inline text and code untouched, including intentionally written entities.
 export const CleanParagraph=Paragraph.extend({
- renderMarkdown(node,h){return h.renderChildren(node.content||[]);},
+ renderMarkdown(node,h){return preserveBoundaryTabs(h.renderChildren(node.content||[]));},
+});
+
+export const CleanHeading=Heading.extend({
+ renderMarkdown(node,h){
+  if(!node.content)return '';
+  const level=node.attrs?.level?parseInt(node.attrs.level as string,10):1;
+  return '#'.repeat(level)+' '+preserveBoundaryTabs(h.renderChildren(node.content));
+ },
 });
 
 export const SizedImage=Image.extend({
@@ -67,18 +77,9 @@ export function captureTarget(editor:Editor) {
  return {restore(){if(!active)return;active=false;editor.off('transaction',map);try{editor.view.dispatch(editor.state.tr.setSelection(bookmark.resolve(editor.state.doc)));}catch{editor.commands.focus('end');}},cancel(){active=false;editor.off('transaction',map);editor.commands.focus();}};
 }
 const key=new PluginKey<{progress?:{selections:Selection[];index:number};emptyTable?:number}>('mojian-editing');
+// Retain support for empty-parent indentation saved by earlier versions.
 function indentWrapper(node:Node) {
  return ['listItem','taskItem'].includes(node.type.name)&&node.childCount===2&&node.firstChild?.type.name==='paragraph'&&!node.firstChild.content.size&&['bulletList','orderedList','taskList'].includes(node.lastChild!.type.name);
-}
-function indentFirstItem(editor:Editor,itemType:string) {
- const {state}=editor;const {$from,$to}=state.selection;
- const range=$from.blockRange($to,node=>node.childCount>0&&node.firstChild!.type.name===itemType);
- if(!range||range.startIndex!==0)return false;
- // An empty structural parent lets even the first item form a real Markdown
- // sublist. Its empty marker is hidden in the editor and rendered output.
- const wrapper=state.schema.nodes[itemType].create(null,[state.schema.nodes.paragraph.create(),range.parent.copy(Fragment.empty)]);
- const tr=state.tr.step(new ReplaceAroundStep(range.start,range.end,range.start,range.end,new Slice(Fragment.from(wrapper),0,0),4));
- editor.view.dispatch(tr.scrollIntoView());return true;
 }
 function unindentWrapper(editor:Editor,itemType:string) {
  const {state}=editor;const {$from,$to}=state.selection;
@@ -109,6 +110,16 @@ function indentCode(editor:Editor,outdent:boolean) {
  }
  const tr=state.tr;for(const edit of edits.reverse()){if(outdent)tr.delete(edit.pos,edit.pos+edit.remove);else tr.insertText('\t',edit.pos);}
  if(tr.docChanged)editor.view.dispatch(tr.scrollIntoView());return true;
+}
+function insertTextTab(editor:Editor,outdent:boolean) {
+ const {state}=editor;const {selection}=state;const tr=state.tr;
+ if(!outdent)tr.insertText('\t');
+ else if(selection.empty){
+  const before=selection.$from.parent.textBetween(0,selection.$from.parentOffset,'','\ufffc');
+  const remove=before.endsWith('\t')?1:/ {1,4}$/.exec(before)?.[0].length||0;
+  if(remove)tr.delete(selection.from-remove,selection.from);
+ }
+ if(tr.docChanged)editor.view.dispatch(tr.scrollIntoView());
 }
 function fullTable(selection:Selection,table:Node) {
  if(selection instanceof NodeSelection && selection.node.type.name==='table')return true;
@@ -185,9 +196,10 @@ export const EditingRules=Extension.create({
     if(itemType) {
      event.preventDefault();
      if(event.shiftKey){if(!unindentWrapper(this.editor,itemType))this.editor.commands.liftListItem(itemType);}
-     else if(!this.editor.commands.sinkListItem(itemType))indentFirstItem(this.editor,itemType);
+     else this.editor.commands.sinkListItem(itemType);
      return true;
     }
+    if($from.parent.isTextblock){event.preventDefault();insertTextTab(this.editor,event.shiftKey);return true;}
    }
    if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='a') {
     event.preventDefault();const previous=key.getState(state)?.progress;

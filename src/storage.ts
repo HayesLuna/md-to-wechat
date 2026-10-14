@@ -1,7 +1,8 @@
 import { openDB } from 'idb';
+import { headings } from './headings';
 import type { Settings } from './sample';
 export type Draft = { id: string; title: string; customTitle?: boolean; markdown: string; settings: Settings; version: number; savedAt: number };
-export function draftTitle(markdown: string) { return markdown.match(/^#\s+(.+)$/m)?.[1]?.trim().slice(0,100) || '未命名文章'; }
+export function draftTitle(markdown: string) { return headings(markdown).find(heading=>heading.level===1)?.text.slice(0,100) || '未命名文章'; }
 export function newDraft(markdown: string, settings: Settings): Draft {
  return {id:crypto.randomUUID(),title:draftTitle(markdown),markdown,settings,version:Date.now(),savedAt:Date.now()};
 }
@@ -31,7 +32,7 @@ function db() {
 export async function loadDrafts(): Promise<{drafts:Draft[];activeId:string|undefined}> {
  const d=await db();const tx=d.transaction(['draft','meta']);
  const [drafts,activeId]=await Promise.all([tx.objectStore('draft').getAll(),tx.objectStore('meta').get('active')]);
- await tx.done;return {drafts:drafts.sort((a:Draft,b:Draft)=>b.savedAt-a.savedAt),activeId};
+ await tx.done;return {drafts:drafts.map((draft:Draft)=>draft.customTitle?draft:{...draft,title:draftTitle(draft.markdown)}).sort((a:Draft,b:Draft)=>b.savedAt-a.savedAt),activeId};
 }
 export async function saveDraft(draft: Draft) {
  const d = await db(); const tx = d.transaction(['draft','meta'],'readwrite');
