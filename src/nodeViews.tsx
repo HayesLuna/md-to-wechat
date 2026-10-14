@@ -46,7 +46,7 @@ export function CodeView({node,updateAttributes,editor}:NodeViewProps) {
  },[source,mermaid]);
  const downloadSource=()=>{try{const language=String(node.attrs.language||'').trim().toLowerCase();const extension=Object.hasOwn(sourceExtensions,language)?sourceExtensions[language]:'txt';download(new Blob([source],{type:'text/plain;charset=utf-8'}),`墨笺代码.${extension}`);signal('已发起源码下载');}catch{signal('源码下载失败，请检查浏览器是否允许下载后重试。');}};
  const asyncAction=(action:()=>Promise<unknown>)=>action().catch(e=>signal(e.message));
- return <NodeViewWrapper className={`code-node ${folded?'folded':''}`}>
+ return <NodeViewWrapper className={`code-node ${showCode?'code-theme-dark':''} ${folded?'folded':''}`}>
   <div className="code-header" contentEditable={false}>
    <span className="code-traffic-lights" aria-hidden="true"><i/><i/><i/></span>
    <input aria-label="代码语言" value={node.attrs.language||''} placeholder="纯代码" spellCheck={false} onChange={e=>updateAttributes({language:e.target.value.trim()||null})}/>

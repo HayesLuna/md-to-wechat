@@ -204,14 +204,7 @@ export const EditingRules=Extension.create({
   }},
   props:{decorations:state=>{
    const decorations:Decoration[]=[];state.doc.descendants((node,pos)=>{
-    if(node.type.spec.code)return false;
     if(indentWrapper(node))decorations.push(Decoration.node(pos,pos+node.nodeSize,{'data-indent-wrapper':'true'}));
-    if(node.isText&&!node.marks.some(mark=>mark.type.name==='code')){
-     for(const match of node.text!.matchAll(/\t/g)){
-      const from=pos+match.index;
-      decorations.push(Decoration.inline(from,from+1,{class:'literal-tab','data-literal-tab':String(from)}));
-     }
-    }
    });
    return DecorationSet.create(state.doc,decorations);
   },handleKeyDown:(view,event)=>{

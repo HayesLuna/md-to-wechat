@@ -19,6 +19,12 @@ function ordinarySpaces(node: JSONContent, inCode = false): JSONContent {
   };
 }
 export function markdownSelection(editor: Editor | null, slice: Slice) {
+  if (editor) {
+    const { $from, $to } = editor.state.selection;
+    if ($from.sameParent($to) && $from.parent.type.name === "codeBlock") {
+      return $from.parent.textBetween($from.parentOffset, $to.parentOffset, "\n", "\n");
+    }
+  }
   if (!editor?.markdown)
     return slice.content
       .textBetween(0, slice.content.size, "\n\n")

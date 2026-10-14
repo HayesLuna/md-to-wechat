@@ -111,5 +111,17 @@
 
 .article-editor{tab-size:4}
 
-/* Keep literal prose tabs equally wide while leaving code tab stops intact. */
-.article-editor .literal-tab{display:inline-block;width:32px;white-space:pre;tab-size:0}
+.code-node.code-theme-dark{background:#0d1117;border-color:#30363d}
+.code-theme-dark .code-header{background:#161b22;border-bottom-color:#30363d}
+.code-theme-dark .code-header input,.code-theme-dark .code-header button{color:#c9d1d9}
+.code-theme-dark .code-header input::placeholder{color:#8b949e}
+.code-theme-dark .code-header button:hover{background:#30363d}
+.code-theme-dark .code-header button:focus-visible,.code-theme-dark .code-header input:focus-visible{outline-color:#58a6ff}
+.code-theme-dark .code-header button[aria-pressed=true]{background:#223b60;color:#a5d6ff;border-color:#456b96}
+.code-theme-dark pre{background:#0d1117;color:#c9d1d9;caret-color:#e6edf3}
+.code-theme-dark pre::selection,.code-theme-dark pre ::selection{background:#264f78;color:#fff}
+.code-theme-dark .fold-summary{color:#8b949e}
+.code-theme-dark .hljs-comment,.code-theme-dark .hljs-quote{color:#8b949e}
+.code-theme-dark .hljs-keyword,.code-theme-dark .hljs-literal{color:#ff7b72}
+.code-theme-dark .hljs-string,.code-theme-dark .hljs-regexp,.code-theme-dark .hljs-number,.code-theme-dark .hljs-attr{color:#a5d6ff}
+.code-theme-dark .hljs-title,.code-theme-dark .hljs-function{color:#d2a8ff}

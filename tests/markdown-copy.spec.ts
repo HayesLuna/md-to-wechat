@@ -19,7 +19,7 @@ test('partial selections copy only selected text while retaining heading, list a
  await selectText(page,'加粗文字',1,3);expect((await copy(page)).text.trim()).toBe('**粗文**');
  await selectText(page,'大纲标题',0,2);expect((await copy(page)).text.trim()).toBe('## 大纲');
  await selectText(page,'第二项目');const list=await copy(page);expect(list.text).toContain('- 第二项目');expect(list.text).not.toContain('第一项目');
- await selectText(page,'const second = 2;');const code=await copy(page);expect(code.text).toContain('```js');expect(code.text).toContain('const second = 2;');expect(code.text).not.toContain('const first');
+ await selectText(page,'const second = 2;');const code=await copy(page);expect(code.text).toBe('const second = 2;');expect(code.text).not.toContain('```');expect(code.text).not.toContain('const first');
 });
 test('selected tables copy GFM alignment and cut keeps Markdown and undo behavior',async({page})=>{
  await ready(page,'| 名称 | 数值 |\n| :---: | ---: |\n| 项目 | 123 |\n\n前面 **剪切文字** 后面');
