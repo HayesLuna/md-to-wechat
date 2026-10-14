@@ -3,7 +3,7 @@ import type { Editor } from '@tiptap/core';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import { Upload, Download, Copy, CheckCircle2, Loader2, PanelRight, Maximize2, Minimize2, X, Save, LockKeyhole, PanelLeftOpen, PanelLeftClose, FileText, ImagePlus, ExternalLink, AlertCircle, Trash2, RotateCcw, HelpCircle } from 'lucide-react';
 import { SAMPLE, DEFAULT_SETTINGS, type Settings } from './sample';
-import { loadDrafts, newDraft, draftTitle, saveDraft, removeDraft, type Draft, storeImage, download, downloadImage } from './storage';
+import { loadDrafts, newDraft, draftTitle, saveDraft, removeDraft, compareDraftCreation, type Draft, storeImage, download, downloadImage } from './storage';
 import { renderArticle, outputKey, headings, safeURL, copyRich, copyText, type Output } from './output';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument } from './EditorPane';
@@ -110,7 +110,7 @@ export default function App() {
   const next=deletingCurrent?(remaining[0]||newDraft('',current.current.settings)):activeDraft.current!;
   await removeDraft(d.id,next);setDrafts(remaining.length?remaining:[next]);if(deletingCurrent)activateDraft(next);setModal(null);notify('草稿已删除');
  })});
- const shownDrafts=useMemo(()=>{const search=query.trim().toLocaleLowerCase();return drafts.filter(d=>d.title.toLocaleLowerCase().includes(search)).sort((a,b)=>b.savedAt-a.savedAt);},[drafts,query]);
+ const shownDrafts=useMemo(()=>{const search=query.trim().toLocaleLowerCase();return drafts.filter(d=>d.title.toLocaleLowerCase().includes(search)).sort(compareDraftCreation);},[drafts,query]);
  const headingList=useMemo(()=>headings(markdown),[markdown]);const words=useMemo(()=>Array.from(markdown.replace(/\s/g,'')).length,[markdown]);
  const switchMode=(next:'wysiwyg'|'source')=>{if(processing){notify('图片处理中，请完成或取消后切换模式。');return;}if(next===mode)return;if(next==='wysiwyg'&&editor)replaceDocument(editor,current.current.markdown);setMode(next);requestAnimationFrame(()=>next==='source'?source.current?.focus():editor?.commands.focus());};
  const tableActions=(action:'row'|'col'|'deleteRow'|'deleteCol'|'delete')=>{if(!editor)return;setContext(null);if(action==='row'||action==='col')addCenteredTablePart(editor,action);if(action==='deleteRow')protectedDeleteRow(editor,notify);if(action==='deleteCol')protectedDeleteColumn(editor,notify);if(action==='delete')editor.chain().focus().deleteTable().run();};

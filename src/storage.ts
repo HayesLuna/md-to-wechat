@@ -1,22 +1,24 @@
 import { openDB } from 'idb';
 import { headings } from './headings';
 import type { Settings } from './sample';
-export type Draft = { id: string; title: string; customTitle?: boolean; markdown: string; settings: Settings; version: number; savedAt: number };
+export type Draft = { id: string; title: string; customTitle?: boolean; markdown: string; settings: Settings; version: number; createdAt: number; savedAt: number };
+export function compareDraftCreation(a:Draft,b:Draft) {return a.createdAt===b.createdAt?a.id.localeCompare(b.id):b.createdAt-a.createdAt;}
 export function draftTitle(markdown: string) { return headings(markdown).find(heading=>heading.level===1)?.text.slice(0,100) || '未命名文章'; }
 export function newDraft(markdown: string, settings: Settings): Draft {
- return {id:crypto.randomUUID(),title:draftTitle(markdown),markdown,settings,version:Date.now(),savedAt:Date.now()};
+ const now=Date.now();
+ return {id:crypto.randomUUID(),title:draftTitle(markdown),markdown,settings,version:now,createdAt:now,savedAt:now};
 }
 let connection: ReturnType<typeof openDB> | undefined;
 function db() {
  if(connection)return connection;
- const pending=openDB('mojian-v1', 2, {upgrade(db, oldVersion, _newVersion, tx) {
+ const pending=openDB('mojian-v1', 3, {upgrade(db, oldVersion, _newVersion, tx) {
  if(oldVersion<1){db.createObjectStore('draft');db.createObjectStore('images');}
  if(oldVersion<2){
   db.createObjectStore('meta');
   const store=tx.objectStore('draft');
   void store.get('current').then(async legacy=>{
    if(!legacy)return;
-   const draft={...legacy,id:crypto.randomUUID(),title:draftTitle(legacy.markdown)};
+   const draft={...legacy,id:crypto.randomUUID(),title:draftTitle(legacy.markdown),createdAt:Date.now()};
    await store.put(draft,draft.id);await tx.objectStore('meta').put(draft.id,'active');await store.delete('current');
   });
  }
@@ -32,12 +34,12 @@ function db() {
 export async function loadDrafts(): Promise<{drafts:Draft[];activeId:string|undefined}> {
  const d=await db();const tx=d.transaction(['draft','meta']);
  const [drafts,activeId]=await Promise.all([tx.objectStore('draft').getAll(),tx.objectStore('meta').get('active')]);
- await tx.done;return {drafts:drafts.map((draft:Draft)=>draft.customTitle?draft:{...draft,title:draftTitle(draft.markdown)}).sort((a:Draft,b:Draft)=>b.savedAt-a.savedAt),activeId};
+ await tx.done;return {drafts:drafts.map((draft:Draft)=>draft.customTitle?draft:{...draft,title:draftTitle(draft.markdown)}).sort(compareDraftCreation),activeId};
 }
 export async function saveDraft(draft: Draft) {
  const d = await db(); const tx = d.transaction(['draft','meta'],'readwrite');
  const previous = await tx.objectStore('draft').get(draft.id);
- if(!previous || previous.version <= draft.version) await tx.objectStore('draft').put(draft,draft.id);
+ if(!previous || previous.version <= draft.version) await tx.objectStore('draft').put({...draft,createdAt:previous?.createdAt??draft.createdAt},draft.id);
  await tx.objectStore('meta').put(draft.id,'active');await tx.done;
 }
 export async function removeDraft(id:string, next:Draft) {

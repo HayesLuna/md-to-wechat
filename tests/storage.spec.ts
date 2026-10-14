@@ -21,11 +21,11 @@ test('storage reuses connections, deduplicates image loads and releases connecti
   const restored=await storage.loadDrafts();
   // A missing image must be retried if the resource becomes available later.
   const missing=await storage.imageURL('local-image:restored');
-  const database=await new Promise<IDBDatabase>((resolve,reject)=>{const request=open('mojian-v1',2);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  const database=await new Promise<IDBDatabase>((resolve,reject)=>{const request=open('mojian-v1',3);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
   await new Promise<void>((resolve,reject)=>{const tx=database.transaction('images','readwrite');tx.objectStore('images').put(blob,'restored');tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});database.close();
   const recovered=await storage.imageURL('local-image:restored');
   // This upgrade would hang if the app kept any old connections open.
-  await new Promise<void>((resolve,reject)=>{const request=open('mojian-v1',3);request.onsuccess=()=>{request.result.close();resolve();};request.onerror=()=>reject(request.error);});
+  await new Promise<void>((resolve,reject)=>{const request=open('mojian-v1',4);request.onsuccess=()=>{request.result.close();resolve();};request.onerror=()=>reject(request.error);});
   return {opens,saveImageReads,imageReads,uniqueURLs:new Set(urls).size,bytes:loaded.size,expectedBytes:blob.size,markdown:restored.drafts[0].markdown,expectedMarkdown:draft.markdown,missing,recovered};
  });
  expect(result.opens).toBe(1);expect(result.saveImageReads).toBe(0);expect(result.imageReads).toBe(1);expect(result.uniqueURLs).toBe(1);expect(result.bytes).toBe(result.expectedBytes);expect(result.markdown).toBe(result.expectedMarkdown);expect(result.missing).toBe('');expect(result.recovered).toMatch(/^blob:/);
