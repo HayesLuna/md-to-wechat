@@ -125,6 +125,25 @@ export function insertCenteredTable(editor:Editor) {
   return true;
  }).run();
 }
+// New rows share GFM column alignment; new columns only change their own cells.
+export function addCenteredTablePart(editor:Editor,part:'row'|'col') {
+ const table=tableInfo(editor.state.selection);if(!table)return false;
+ const map=TableMap.get(table.node);const selection=editor.state.selection;
+ let column=map.width;
+ if(part==='col'){
+  if(selection instanceof CellSelection)column=map.rectBetween(selection.$anchorCell.pos-table.pos-1,selection.$headCell.pos-table.pos-1).right;
+  else {const cell=ancestor(editor,'tableCell')||ancestor(editor,'tableHeader');if(!cell)return false;column=map.findCell(cell.pos-table.pos-1).right;}
+ }
+ const chain=editor.chain().focus();if(part==='row')chain.addRowAfter();else chain.addColumnAfter();
+ return chain.command(({tr})=>{
+  const updated=tableInfo(tr.selection);if(!updated)return false;
+  const nextMap=TableMap.get(updated.node);const positions=new Set<number>();
+  if(part==='row')nextMap.map.forEach(pos=>positions.add(pos));
+  else for(let row=0;row<nextMap.height;row++)positions.add(nextMap.map[row*nextMap.width+column]);
+  for(const offset of positions){const pos=updated.pos+1+offset;const cell=tr.doc.nodeAt(pos);if(cell)tr.setNodeMarkup(pos,undefined,{...cell.attrs,align:'center'});}
+  return true;
+ }).run();
+}
 // GFM stores alignment per column, so update its header and all data cells.
 export function alignTableColumns(editor:Editor,align:'left'|'center'|'right') {
  const selection=editor.state.selection;const table=tableInfo(selection);if(!table)return;
@@ -160,7 +179,7 @@ export const EditingRules=Extension.create({
    }
    if(event.key==='Tab'&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
     if($from.parent.type.spec.code){event.preventDefault();indentCode(this.editor,event.shiftKey);return true;}
-    if(tableInfo(selection))return false;
+    if(tableInfo(selection)){if(event.shiftKey)return false;if(this.editor.commands.goToNextCell()){event.preventDefault();return true;}if(addCenteredTablePart(this.editor,'row')){this.editor.commands.goToNextCell();event.preventDefault();return true;}return false;}
     let itemType=selection instanceof NodeSelection&&['listItem','taskItem'].includes(selection.node.type.name)?selection.node.type.name:'';
     for(let d=$from.depth;!itemType&&d>0;d--)if(['listItem','taskItem'].includes($from.node(d).type.name)){itemType=$from.node(d).type.name;break;}
     if(itemType) {

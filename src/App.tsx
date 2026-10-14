@@ -14,7 +14,7 @@ import { DocumentSidebar } from './DocumentSidebar';
 import { MediaPreview } from './MediaPreview';
 import { revealSourcePosition } from './sourceEditor';
 import type { MediaPreviewItem } from './mediaPreviewEvents';
-import { captureTarget, protectedDeleteRow, protectedDeleteColumn, ancestor, alignTableColumns, insertCenteredTable } from './editorExtensions';
+import { captureTarget, protectedDeleteRow, protectedDeleteColumn, ancestor, alignTableColumns, insertCenteredTable, addCenteredTablePart } from './editorExtensions';
 type Modal = {type:'link'|'image'|'assets'|'downloads'|'help'} | {type:'confirm';title:string;message:string;action:()=>void} | {type:'rename';draft:Draft};
 type SaveStatus='saving'|'saved'|'failed';
 function validSettings(s?:Settings):Settings {
@@ -113,7 +113,7 @@ export default function App() {
  const shownDrafts=drafts.filter(d=>d.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a,b)=>b.savedAt-a.savedAt);
  const headingList=useMemo(()=>headings(markdown),[markdown]);const words=Array.from(markdown.replace(/\s/g,'')).length;
  const switchMode=(next:'wysiwyg'|'source')=>{if(processing){notify('图片处理中，请完成或取消后切换模式。');return;}if(next===mode)return;if(next==='wysiwyg'&&editor)replaceDocument(editor,current.current.markdown);setMode(next);requestAnimationFrame(()=>next==='source'?source.current?.focus():editor?.commands.focus());};
- const tableActions=(action:'row'|'col'|'deleteRow'|'deleteCol'|'delete')=>{if(!editor)return;setContext(null);if(action==='row')editor.chain().focus().addRowAfter().run();if(action==='col')editor.chain().focus().addColumnAfter().run();if(action==='deleteRow')protectedDeleteRow(editor,notify);if(action==='deleteCol')protectedDeleteColumn(editor,notify);if(action==='delete')editor.chain().focus().deleteTable().run();};
+ const tableActions=(action:'row'|'col'|'deleteRow'|'deleteCol'|'delete')=>{if(!editor)return;setContext(null);if(action==='row'||action==='col')addCenteredTablePart(editor,action);if(action==='deleteRow')protectedDeleteRow(editor,notify);if(action==='deleteCol')protectedDeleteColumn(editor,notify);if(action==='delete')editor.chain().focus().deleteTable().run();};
  const open=(op:Operation)=>{
   setContext(null);setMenu(false);if(!editor)return;
   if(op==='table'){insertCenteredTable(editor);return;}
