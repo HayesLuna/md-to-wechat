@@ -109,6 +109,51 @@ export async function loadDrafts(): Promise<{
     activeId,
   };
 }
+
+const IMAGE_SESSION_LOCK = 'mojian-image-session';
+
+async function collectUnusedImages() {
+  const database = await db();
+  const tx = database.transaction(['draft', 'images'], 'readwrite');
+  const drafts = await tx.objectStore('draft').getAll();
+  const referenced = new Set(
+    drafts.flatMap((draft) =>
+      Array.from(
+        draft.markdown.matchAll(/local-image:([a-zA-Z0-9-]+)/g),
+        (m) => m[1],
+      ),
+    ),
+  );
+  const images = tx.objectStore('images');
+  for (const id of await images.getAllKeys())
+    if (!referenced.has(id)) await images.delete(id);
+  await tx.done;
+}
+
+// Every live editor holds a shared lock, including while it has unsaved edits
+// or undo history. Collect only before opening the first editor of a session.
+// Browsers without Web Locks retain images instead of risking active content.
+export async function beginImageSession(): Promise<() => void> {
+  if (!navigator.locks) return () => {};
+  await navigator.locks
+    .request(
+      IMAGE_SESSION_LOCK,
+      { mode: 'exclusive', ifAvailable: true },
+      async (lock) => {
+        if (lock) await collectUnusedImages();
+      },
+    )
+    .catch(() => {});
+  return new Promise((resolve) => {
+    void navigator.locks
+      .request(
+        IMAGE_SESSION_LOCK,
+        { mode: 'shared' },
+        () => new Promise<void>((release) => resolve(release)),
+      )
+      .catch(() => resolve(() => {}));
+  });
+}
 export async function saveDraft(draft: Draft, expectedVersion?: number) {
   const d = await db();
   const tx = d.transaction(['draft', 'meta'], 'readwrite');

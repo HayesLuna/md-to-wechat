@@ -1,6 +1,40 @@
-import hljs from 'highlight.js/lib/common';
+import { highlighter as hljs, syntaxRevision } from './syntax';
 
 export type CodeSource = { text: string; language: string };
+const cards = new Map<string, { card: HTMLDivElement; size: number }>();
+let cachedCharacters = 0;
+const MAX_CACHED_CHARACTERS = 200_000;
+const MAX_CACHED_CARDS = 8;
+
+export function codeCard(source: CodeSource, index: number, dark: boolean) {
+  if (source.text.length > MAX_CACHED_CHARACTERS)
+    return createCodeCard(source, index, dark);
+  const key = JSON.stringify([
+    source.text,
+    source.language,
+    dark,
+    syntaxRevision,
+  ]);
+  let entry = cards.get(key);
+  if (entry) cards.delete(key);
+  else {
+    entry = { card: createCodeCard(source, 0, dark), size: source.text.length };
+    cachedCharacters += entry.size;
+  }
+  cards.set(key, entry);
+  while (
+    cards.size > MAX_CACHED_CARDS ||
+    cachedCharacters > MAX_CACHED_CHARACTERS
+  ) {
+    const oldest = cards.keys().next().value!;
+    cachedCharacters -= cards.get(oldest)!.size;
+    cards.delete(oldest);
+  }
+  // Consumers add decorations and styles. Never let those mutations enter cache.
+  const copy = entry.card.cloneNode(true) as HTMLDivElement;
+  copy.setAttribute('data-code-index', String(index));
+  return copy;
+}
 // Fixed, local decoration only. No SVG markup, URLs or attributes come from Markdown.
 export function codeDecoration(): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
@@ -62,7 +96,7 @@ function highlightColor(className: string, dark: boolean) {
             : 4;
   return `color:${palette[index]};${index === 5 ? 'font-style:italic;' : ''}`;
 }
-export function codeCard(
+function createCodeCard(
   source: CodeSource,
   index: number,
   dark: boolean,

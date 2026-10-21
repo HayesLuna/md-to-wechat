@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { ensureSyntax } from './syntax';
 import { markdownHighlight } from './highlight';
 import DOMPurify from 'dompurify';
 import { acquireImageURL } from './storage';
@@ -321,6 +322,7 @@ export function readableText(
 export async function renderArticle(
   markdown: string,
   s: Settings,
+  signal?: AbortSignal,
 ): Promise<Output> {
   const releases: (() => void)[] = [];
   let delivered = false;
@@ -328,6 +330,7 @@ export async function renderArticle(
     releases.splice(0).forEach((release) => release());
   };
   try {
+    signal?.throwIfAborted();
     const codeSources: CodeSource[] = [];
     const assets: Asset[] = [];
     const errors: string[] = [];
@@ -424,6 +427,7 @@ export async function renderArticle(
         }
       }),
     );
+    signal?.throwIfAborted();
     await Promise.all(
       sources.map(async (source, i) => {
         const target = root.querySelector(`[data-diagram-index="${i}"]`)!;
@@ -475,6 +479,15 @@ export async function renderArticle(
         copy.replaceWith(p);
       }),
     );
+    signal?.throwIfAborted();
+    await Promise.all(
+      // Syntax coloring is optional; a failed language download must not block
+      // publication or copying the original code as plain text.
+      codeSources.map((source) =>
+        ensureSyntax(source.language).catch(() => {}),
+      ),
+    );
+    signal?.throwIfAborted();
     inlineStyles(root, s, codeSources);
     inlineStyles(clipboard, s, codeSources);
     addCodeDecorations(root);

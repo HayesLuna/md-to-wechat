@@ -3,7 +3,12 @@ import { Markdown } from '@tiptap/markdown';
 import { serializeHighlightMarkdown } from './highlight';
 import { TableKit } from '@tiptap/extension-table';
 import TaskList from '@tiptap/extension-task-list';
-import { createLowlight, common } from 'lowlight';
+import {
+  lowlight,
+  ensureSyntax,
+  syntaxRevision,
+  onSyntaxReady,
+} from './syntax';
 import DOMPurify from 'dompurify';
 import { useEffect, useMemo, useRef } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -118,7 +123,7 @@ export function EditorPane({
       CleanHeading,
       SizedImage,
       SmartCode.configure({
-        lowlight: createLowlight(common),
+        lowlight,
         defaultLanguage: null,
       }),
       TableKit.configure({
@@ -216,6 +221,44 @@ export function EditorPane({
     onUpdate: ({ editor }) => props.current.onChange(editor.getMarkdown()),
     onSelectionUpdate: () => props.current.onSelection(),
   });
+  useEffect(() => {
+    if (!editor) return;
+    let active = true;
+    let appliedRevision = syntaxRevision;
+    const refresh = () => {
+      if (!active || editor.isDestroyed || appliedRevision === syntaxRevision)
+        return;
+      appliedRevision = syntaxRevision;
+      // Refresh decorations without changing text, selection or undo history.
+      editor.commands.command(({ tr }) => {
+        tr.doc.descendants((node, pos) => {
+          if (node.type.name === 'codeBlock')
+            tr.setNodeMarkup(pos, undefined, node.attrs);
+        });
+        tr.setMeta('addToHistory', false).setMeta('preventUpdate', true);
+        return true;
+      });
+    };
+    const unsubscribe = onSyntaxReady(refresh);
+    const load = () => {
+      const languages = new Set<string>();
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'codeBlock' && node.attrs.language !== 'mermaid')
+          languages.add(node.attrs.language || '');
+      });
+      if (!languages.size) return;
+      void Promise.all(Array.from(languages, ensureSyntax))
+        .then(refresh)
+        .catch(() => {});
+    };
+    editor.on('update', load);
+    load();
+    return () => {
+      active = false;
+      unsubscribe();
+      editor.off('update', load);
+    };
+  }, [editor]);
   useEffect(() => {
     if (editor) {
       editorRef.current = editor;

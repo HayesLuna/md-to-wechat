@@ -31,8 +31,10 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { SAMPLE, DEFAULT_SETTINGS, type Settings } from './sample';
+import { buildInfo, versionLabel, buildTime } from './buildInfo';
 import {
   DraftConflictError,
+  beginImageSession,
   loadDrafts,
   newDraft,
   draftTitle,
@@ -156,9 +158,18 @@ export default function App() {
   const notify = useCallback((s: string) => setNotice(s), []);
   useEffect(() => {
     let active = true;
-    loadDrafts()
+    let releaseImages: (() => void) | undefined;
+    beginImageSession()
+      .then((release) => {
+        releaseImages = release;
+        if (!active) {
+          release();
+          return null;
+        }
+        return loadDrafts();
+      })
       .then((library) => {
-        if (!active) return;
+        if (!active || !library) return;
         library.drafts.forEach((d) =>
           savedVersions.current.set(d.id, d.version),
         );
@@ -188,6 +199,7 @@ export default function App() {
       });
     return () => {
       active = false;
+      releaseImages?.();
     };
   }, [notify]);
   const changed = (text: string) => {
@@ -274,31 +286,41 @@ export default function App() {
   }, [notice]);
   useEffect(() => {
     if (!ready) return;
+    if (outputRef.current?.key === outputKey(markdown, settings)) {
+      setPreparing(false);
+      setRenderError('');
+      return;
+    }
     let active = true;
+    const controller = new AbortController();
     setPreparing(true);
     setRenderError('');
-    const timer = setTimeout(() => {
-      renderArticle(markdown, settings)
-        .then((result) => {
-          if (active) {
-            outputRef.current?.dispose();
-            outputRef.current = result;
-            setOutput(result);
-            setPreparing(false);
-          } else result.dispose();
-        })
-        .catch((e) => {
-          if (active) {
-            setPreparing(false);
-            setRenderError('排版准备失败，请重试：' + e.message);
-          }
-        });
-    }, 250);
+    const timer = setTimeout(
+      () => {
+        renderArticle(markdown, settings, controller.signal)
+          .then((result) => {
+            if (active) {
+              outputRef.current?.dispose();
+              outputRef.current = result;
+              setOutput(result);
+              setPreparing(false);
+            } else result.dispose();
+          })
+          .catch((e) => {
+            if (active) {
+              setPreparing(false);
+              setRenderError('排版准备失败，请重试：' + e.message);
+            }
+          });
+      },
+      preview ? 250 : 600,
+    );
     return () => {
       active = false;
+      controller.abort();
       clearTimeout(timer);
     };
-  }, [markdown, settings, ready]);
+  }, [markdown, settings, ready, preview]);
   useEffect(
     () => () => {
       outputRef.current?.dispose();
@@ -1400,6 +1422,14 @@ export default function App() {
           <LockKeyhole size={12} />
           草稿仅保存在当前浏览器，清除站点数据可能丢失。
         </span>
+        <button
+          className="version-label"
+          title={`版本 ${buildInfo.version} · ${versionLabel}，构建于 ${buildTime}（北京时间）`}
+          aria-label="版本与更新信息"
+          onClick={() => setModal({ type: 'help' })}
+        >
+          版本 {versionLabel}
+        </button>
         <button title="帮助与快捷键" onClick={() => setModal({ type: 'help' })}>
           <HelpCircle size={15} />
         </button>
@@ -1720,6 +1750,15 @@ export default function App() {
           )}
           {modal.type === 'help' && (
             <div className="help-content">
+              <div className="build-info">
+                <strong>
+                  当前版本：{buildInfo.version} · {versionLabel}
+                </strong>
+                <p>构建时间：{buildTime}（北京时间）</p>
+                <small>
+                  此处显示当前页面已加载的版本。发布完成后刷新页面可加载新版本。
+                </small>
+              </div>
               <p>
                 在左侧写作，按需打开公众号预览。复制时仅使用现代 Clipboard
                 API，同时写入 HTML 和纯文本；失败会保留草稿并显示原因。
