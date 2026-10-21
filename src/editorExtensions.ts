@@ -1,5 +1,7 @@
 import {
   Extension,
+  Mark,
+  markInputRule,
   wrappingInputRule,
   type Editor,
   type Attributes,
@@ -29,6 +31,47 @@ import StarterKit from '@tiptap/starter-kit';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
+import { matchHighlight } from './highlight';
+
+export const TyporaHighlight = Mark.create({
+  name: 'highlight',
+  parseHTML: () => [{ tag: 'mark' }],
+  renderHTML: ({ HTMLAttributes }) => ['mark', HTMLAttributes, 0],
+  markdownTokenName: 'highlight',
+  markdownTokenizer: {
+    name: 'highlight',
+    level: 'inline',
+    start: (source) => source.indexOf('=='),
+    tokenize(source, _tokens, lexer) {
+      const match = matchHighlight(source);
+      if (!match) return undefined;
+      return {
+        type: 'highlight',
+        ...match,
+        tokens: lexer.inlineTokens(match.text),
+      };
+    },
+  },
+  parseMarkdown: (token, helpers) =>
+    helpers.applyMark('highlight', helpers.parseInline(token.tokens || [])),
+  renderMarkdown: (node, helpers) => `==${helpers.renderChildren(node)}==`,
+  addInputRules() {
+    return [
+      markInputRule({
+        find: (text) => {
+          for (let i = 0; i < text.length - 3; i++) {
+            if (text[i - 1] === '=' || text[i - 1] === '\\') continue;
+            const match = matchHighlight(text.slice(i));
+            if (match && i + match.raw.length === text.length)
+              return { index: i, text: match.raw, replaceWith: match.text };
+          }
+          return null;
+        },
+        type: this.type,
+      }),
+    ];
+  },
+});
 
 // Markdown permits emphasis around inline code. StarterKit's default code
 // mark excludes all other marks, making valid Markdown fail insertion checks.

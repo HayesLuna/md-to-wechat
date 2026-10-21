@@ -23,7 +23,7 @@ test('native paste renders Markdown while the plain-text paste shortcut stays li
 const producttypeSample=readFileSync(new URL('./fixtures/producttype-markdown-paste.md',import.meta.url),'utf8');
 for(const flavor of ['plain','pre','markdown-code','highlighted'] as const)test(`reported producttype Markdown renders completely when pasted as ${flavor}`,async({page})=>{
  await ready(page);
- const expected=await page.evaluate(text=>{const e=(window as any).__mojian.editor;const parsed=e.markdown.parse(text);e.commands.setContent(parsed);const result=e.getJSON();(window as any).__mojian.setMarkdown('');return result;},producttypeSample);
+ const expected=await page.evaluate(text=>{const e=(window as any).__mojian.editor;const parsed=e.markdown.parse(text);const center=(node:any)=>{if(['tableCell','tableHeader'].includes(node.type)&&!node.attrs?.align)node.attrs={...node.attrs,align:'center'};node.content?.forEach(center);};center(parsed);e.commands.setContent(parsed);const result=e.getJSON();(window as any).__mojian.setMarkdown('');return result;},producttypeSample);
  const escaped=producttypeSample.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
  const html=flavor==='plain'?'':flavor==='pre'?`<pre>${escaped}</pre>`:flavor==='markdown-code'?`<pre><code class="language-markdown">${escaped}</code></pre>`:`<div><code>${escaped.replace(/\n/g,'<br>')}</code></div>`;
  await paste(page,producttypeSample,html);

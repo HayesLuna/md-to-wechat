@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { markdownHighlight } from './highlight';
 
 export type ArticleHeading = { level: number; text: string; line: number };
 type InlineToken = {
@@ -6,7 +7,7 @@ type InlineToken = {
   content: string;
   children?: InlineToken[] | null;
 };
-const parser = new MarkdownIt({ html: false });
+const parser = new MarkdownIt({ html: false }).use(markdownHighlight);
 
 function inlineText(tokens: InlineToken[]): string {
   return tokens

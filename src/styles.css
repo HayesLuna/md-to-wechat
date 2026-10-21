@@ -312,6 +312,10 @@ button.primary:hover {
 .article-editor p {
   margin: 0 0 18px;
 }
+.article-editor mark {
+  background: #fff3a3;
+  color: inherit;
+}
 .article-editor h1,
 .article-editor h2 {
   font-family: 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
@@ -514,6 +518,8 @@ button.primary:hover {
 }
 .code-node pre {
   overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: normal;
   margin: 0;
   padding: 16px 18px;
   font:
@@ -526,6 +532,16 @@ button.primary:hover {
 }
 .code-node code {
   font: inherit;
+}
+.code-node pre::-webkit-scrollbar {
+  height: 8px;
+}
+.code-node pre::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: #727985;
+}
+.code-node pre::-webkit-scrollbar-track {
+  background: transparent;
 }
 .code-node [data-node-view-content] {
   min-height: 23px;

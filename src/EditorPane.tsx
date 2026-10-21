@@ -1,5 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Markdown } from '@tiptap/markdown';
+import { serializeHighlightMarkdown } from './highlight';
 import { TableKit } from '@tiptap/extension-table';
 import TaskList from '@tiptap/extension-task-list';
 import { createLowlight, common } from 'lowlight';
@@ -15,13 +16,26 @@ import {
   StructuredListItem,
   StructuredTaskItem,
   MarkdownStarterKit,
+  TyporaHighlight,
 } from './editorExtensions';
 import { safeURL } from './output';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
   shouldParseMarkdownPaste,
   normalizeTaskClipboardHTML,
+  centerUnalignedPastedTables,
+  normalizePastedTableHTML,
 } from './markdownPaste';
+
+const HighlightMarkdown = Markdown.extend({
+  onBeforeCreate(event) {
+    this.parent?.(event);
+    const manager = this.editor.markdown!;
+    const serialize = manager.serialize.bind(manager);
+    manager.serialize = (document) =>
+      serializeHighlightMarkdown(document, serialize);
+  },
+});
 function modifiedLink(event: MouseEvent, dom: HTMLElement) {
   if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return null;
   const link =
@@ -96,7 +110,10 @@ export function EditorPane({
         },
       }),
       StructuredListItem,
-      Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      TyporaHighlight,
+      HighlightMarkdown.configure({
+        markedOptions: { gfm: true, breaks: false },
+      }),
       CleanParagraph,
       CleanHeading,
       SizedImage,
@@ -131,10 +148,13 @@ export function EditorPane({
         'aria-label': '所见即所得正文',
       },
       transformPastedHTML: (html) =>
-        DOMPurify.sanitize(normalizeTaskClipboardHTML(html), {
-          FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
-          FORBID_ATTR: ['style'],
-        }),
+        DOMPurify.sanitize(
+          normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
+          {
+            FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
+            FORBID_ATTR: ['style'],
+          },
+        ),
       handleDOMEvents: {
         copy: (_view, event) => copyTaskMarkdown(editorRef.current, event),
         cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
@@ -187,7 +207,7 @@ export function EditorPane({
           !shouldParseMarkdownPaste(text, html)
         )
           return false;
-        const parsed = safeDocument(editor, text);
+        const parsed = centerUnalignedPastedTables(safeDocument(editor, text));
         if (!editor.commands.insertContent(parsed.content || [])) return false;
         event.preventDefault();
         return true;

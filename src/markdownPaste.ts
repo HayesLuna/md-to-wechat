@@ -1,3 +1,5 @@
+import type { JSONContent } from '@tiptap/core';
+
 // Prefer structured rich text. Plain-text and plain HTML wrappers may carry
 // Markdown source from Typora, which needs the Markdown parser instead.
 export function shouldParseMarkdownPaste(text: string, html: string) {
@@ -44,7 +46,7 @@ export function shouldParseMarkdownPaste(text: string, html: string) {
   )
     return true;
   return !root.querySelector(
-    '[data-pm-slice],h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,pre,code,strong,b,em,i,s,del,a,img',
+    '[data-pm-slice],h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,pre,code,strong,b,em,i,s,del,mark,a,img',
   );
 }
 
@@ -86,6 +88,34 @@ export function normalizeTaskClipboardHTML(html: string) {
       return replacement;
     });
     list.replaceWith(...lists);
+  }
+  return document.body.innerHTML;
+}
+export function centerUnalignedPastedTables(node: JSONContent): JSONContent {
+  return {
+    ...node,
+    ...(['tableCell', 'tableHeader'].includes(node.type || '') &&
+    !node.attrs?.align
+      ? { attrs: { ...node.attrs, align: 'center' } }
+      : {}),
+    ...(node.content
+      ? { content: node.content.map(centerUnalignedPastedTables) }
+      : {}),
+  };
+}
+
+export function normalizePastedTableHTML(html: string) {
+  if (!/<(?:td|th)\b/i.test(html)) return html;
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  for (const cell of document.querySelectorAll<HTMLElement>('td,th')) {
+    const align = (cell.style.textAlign || cell.getAttribute('align') || '')
+      .trim()
+      .toLowerCase();
+    // Preserve supported explicit alignment through the style sanitizer.
+    cell.setAttribute(
+      'align',
+      ['left', 'center', 'right'].includes(align) ? align : 'center',
+    );
   }
   return document.body.innerHTML;
 }

@@ -403,7 +403,7 @@ export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
       </div>
       <pre style={{ display: folded || !showCode ? 'none' : undefined }}>
         <code>
-          <NodeViewContent />
+          <NodeViewContent style={{ whiteSpace: 'pre' }} />
         </code>
       </pre>
       {folded && showCode && (

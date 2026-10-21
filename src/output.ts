@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { markdownHighlight } from './highlight';
 import DOMPurify from 'dompurify';
 import { acquireImageURL } from './storage';
 import { diagram } from './mermaid';
@@ -65,6 +66,7 @@ function inlineStyles(
     ol: 'padding-left:26px;margin:14px 0 20px;',
     li: 'margin:6px 0;line-height:inherit;',
     strong: 'font-weight:700;',
+    mark: 'background-color:#fff3a3;color:inherit;',
     em: 'font-style:italic;font-synthesis:style;',
     s: 'text-decoration:line-through;',
     a: `color:${color};text-decoration:underline;`,
@@ -332,6 +334,7 @@ export async function renderArticle(
     const sources: string[] = [];
     const images: { src: string; alt: string; width: number }[] = [];
     const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
+    md.use(markdownHighlight);
     md.validateLink = (url) => safeURL(url) || url.startsWith('local-image:');
     md.renderer.rules.image = (tokens, i) => {
       const t = tokens[i];
