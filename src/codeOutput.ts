@@ -140,7 +140,37 @@ export function addCodeDecorations(root: HTMLElement) {
     header.replaceChildren(codeDecoration());
   }
 }
-function highlightColor(className: string, dark: boolean) {
+const JSON_DARK_COLORS = [
+  '#79c0ff',
+  '#7ee787',
+  '#d2a8ff',
+  '#ff7b72',
+  '#8b949e',
+];
+const JSON_LIGHT_COLORS = [
+  '#0550ae',
+  '#116329',
+  '#8250df',
+  '#cf222e',
+  '#6e7781',
+];
+
+function highlightColor(className: string, dark: boolean, json: boolean) {
+  if (json) {
+    const index = /attr/.test(className)
+      ? 0
+      : /string/.test(className)
+        ? 1
+        : /number/.test(className)
+          ? 2
+          : /literal|keyword/.test(className)
+            ? 3
+            : /punctuation/.test(className)
+              ? 4
+              : -1;
+    if (index >= 0)
+      return `color:${(dark ? JSON_DARK_COLORS : JSON_LIGHT_COLORS)[index]};`;
+  }
   const palette = dark
     ? ['#a5d6ff', '#ff7b72', '#a5d6ff', '#d2a8ff', '#79c0ff', '#8b949e']
     : ['#a6493d', '#9a3754', '#31599c', '#7650a8', '#80572a', '#83888f'];
@@ -182,6 +212,7 @@ function* buildCodeCard(
   const lines = content.split('\n');
   const fragments = lines.map(() => document.createDocumentFragment());
   const highlighted = document.createElement('div');
+  const json = source.language.trim().toLowerCase() === 'json';
   // Highlight the complete block before splitting DOM text into lines, so multi-line
   // comments/strings retain context. Only generated spans are copied into output.
   if (source.language && hljs.getLanguage(source.language))
@@ -210,7 +241,7 @@ function* buildCodeCard(
     }
     const next =
       node instanceof Element && node.tagName === 'SPAN'
-        ? [...styles, highlightColor(node.className, dark)]
+        ? [...styles, highlightColor(node.className, dark, json)]
         : styles;
     for (const child of node.childNodes) visit(child, next);
   };

@@ -265,10 +265,10 @@ export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const seq = useRef(0);
-  const mermaid =
-    String(node.attrs.language || '')
-      .trim()
-      .toLowerCase() === 'mermaid';
+  const language = String(node.attrs.language || '')
+    .trim()
+    .toLowerCase();
+  const mermaid = language === 'mermaid';
   const source = node.textContent;
   const [view, setView] = useState<'diagram' | 'code'>('diagram');
   const showCode = !mermaid || view === 'code' || !!error;
@@ -325,6 +325,7 @@ export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
   return (
     <NodeViewWrapper
       className={`code-node ${showCode ? 'code-theme-dark' : ''} ${folded ? 'folded' : ''}`}
+      data-language={language || undefined}
     >
       <div className="code-header" contentEditable={false}>
         <span className="code-traffic-lights" aria-hidden="true">

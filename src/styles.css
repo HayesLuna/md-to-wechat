@@ -307,6 +307,7 @@ button.primary:hover {
   font-size: 16px;
   line-height: 1.9;
   color: #42434a;
+  caret-color: #252528;
   overflow-wrap: anywhere;
 }
 .article-editor p {
@@ -320,8 +321,11 @@ button.primary:hover {
   color: #95969f;
 }
 .article-editor .highlight-delimiter:not(.expanded) {
-  font-size: 0;
-  letter-spacing: 0;
+  /* Keep the native caret full height while collapsing the syntax width. */
+  font-size: inherit;
+  font-family: monospace;
+  color: transparent;
+  letter-spacing: -1ch;
 }
 .article-editor h1,
 .article-editor h2 {
@@ -2244,4 +2248,16 @@ button.primary:hover {
 .code-theme-dark .hljs-title,
 .code-theme-dark .hljs-function {
   color: #d2a8ff;
+}
+.code-theme-dark[data-language='json'] .hljs-attr {
+  color: #79c0ff;
+}
+.code-theme-dark[data-language='json'] .hljs-string {
+  color: #7ee787;
+}
+.code-theme-dark[data-language='json'] .hljs-number {
+  color: #d2a8ff;
+}
+.code-theme-dark[data-language='json'] .hljs-punctuation {
+  color: #8b949e;
 }
