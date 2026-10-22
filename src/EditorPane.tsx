@@ -11,7 +11,7 @@ import {
 } from './syntax';
 import DOMPurify from 'dompurify';
 import { useEffect, useMemo, useRef } from 'react';
-import type { Editor, JSONContent } from '@tiptap/core';
+import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
 import {
   SizedImage,
   SmartCode,
@@ -31,6 +31,8 @@ import {
   centerUnalignedPastedTables,
   normalizePastedTableHTML,
 } from './markdownPaste';
+import { codeHighlightKey } from './codeHighlight';
+import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
 const HighlightMarkdown = Markdown.extend({
   onBeforeCreate(event) {
@@ -71,6 +73,7 @@ export function safeDocument(editor: Editor, markdown: string) {
 }
 export function replaceDocument(editor: Editor, markdown: string) {
   const json = safeDocument(editor, markdown);
+  cancelEditorMarkdown(editor);
   editor
     .chain()
     .command(({ tr }) => {
@@ -84,6 +87,7 @@ export function EditorPane({
   initial,
   onReady,
   onChange,
+  onDirty,
   onSelection,
   onContext,
   onPasteImage,
@@ -91,12 +95,19 @@ export function EditorPane({
   initial: string;
   onReady: (e: Editor) => void;
   onChange: (s: string) => void;
+  onDirty: () => void;
   onSelection: () => void;
   onContext: (event: MouseEvent, editor: Editor) => boolean;
   onPasteImage: (file: File) => void;
 }) {
-  const props = useRef({ onChange, onSelection, onContext, onPasteImage });
-  props.current = { onChange, onSelection, onContext, onPasteImage };
+  const props = useRef({
+    onChange,
+    onDirty,
+    onSelection,
+    onContext,
+    onPasteImage,
+  });
+  props.current = { onChange, onDirty, onSelection, onContext, onPasteImage };
   const editorRef = useRef<Editor | null>(null);
   const plainPaste = useRef(false);
   const extensions = useMemo(
@@ -139,12 +150,10 @@ export function EditorPane({
     ],
     [],
   );
-  const editor = useEditor({
-    extensions,
-    content: initial,
-    contentType: 'markdown',
-    immediatelyRender: false,
-    editorProps: {
+  // A new editorProps object makes Tiptap setOptions/updateState on every
+  // parent render. Handlers read refs, so the view options can stay stable.
+  const editorProps = useMemo<NonNullable<EditorOptions['editorProps']>>(
+    () => ({
       clipboardTextSerializer: (slice) =>
         markdownSelection(editorRef.current, slice),
       attributes: {
@@ -217,46 +226,62 @@ export function EditorPane({
         event.preventDefault();
         return true;
       },
+    }),
+    [],
+  );
+  const editor = useEditor({
+    extensions,
+    content: initial,
+    contentType: 'markdown',
+    immediatelyRender: false,
+    editorProps,
+    onUpdate: ({ editor }) => {
+      props.current.onDirty();
+      scheduleEditorMarkdown(editor, (text) => props.current.onChange(text));
     },
-    onUpdate: ({ editor }) => props.current.onChange(editor.getMarkdown()),
     onSelectionUpdate: () => props.current.onSelection(),
   });
   useEffect(() => {
     if (!editor) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let appliedRevision = syntaxRevision;
     const refresh = () => {
       if (!active || editor.isDestroyed || appliedRevision === syntaxRevision)
         return;
       appliedRevision = syntaxRevision;
       // Refresh decorations without changing text, selection or undo history.
-      editor.commands.command(({ tr }) => {
-        tr.doc.descendants((node, pos) => {
-          if (node.type.name === 'codeBlock')
-            tr.setNodeMarkup(pos, undefined, node.attrs);
-        });
-        tr.setMeta('addToHistory', false).setMeta('preventUpdate', true);
-        return true;
-      });
+      editor.view.dispatch(editor.state.tr.setMeta(codeHighlightKey, true));
     };
     const unsubscribe = onSyntaxReady(refresh);
     const load = () => {
       const languages = new Set<string>();
       editor.state.doc.descendants((node) => {
-        if (node.type.name === 'codeBlock' && node.attrs.language !== 'mermaid')
-          languages.add(node.attrs.language || '');
+        if (
+          node.type.name === 'codeBlock' &&
+          node.attrs.language &&
+          node.attrs.language !== 'mermaid'
+        )
+          languages.add(node.attrs.language);
+        return !node.isTextblock;
       });
       if (!languages.size) return;
       void Promise.all(Array.from(languages, ensureSyntax))
         .then(refresh)
         .catch(() => {});
     };
-    editor.on('update', load);
+    const scheduleLoad = () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 150);
+    };
+    editor.on('update', scheduleLoad);
     load();
     return () => {
       active = false;
       unsubscribe();
-      editor.off('update', load);
+      clearTimeout(timer);
+      cancelEditorMarkdown(editor);
+      editor.off('update', scheduleLoad);
     };
   }, [editor]);
   useEffect(() => {

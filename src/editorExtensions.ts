@@ -33,6 +33,7 @@ import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
 import { matchHighlight } from './highlight';
+import { codeHighlightPlugin } from './codeHighlight';
 
 export const TyporaHighlight = Mark.create({
   name: 'highlight',
@@ -277,6 +278,11 @@ export const SizedImage = Image.extend({
   },
 });
 export const SmartCode = CodeBlockLowlight.extend({
+  addProseMirrorPlugins() {
+    // Keep CodeBlock's editing commands; replace the inherited whole-document
+    // auto-detection plugin with tokenization of changed, explicit languages.
+    return [codeHighlightPlugin()];
+  },
   addAttributes() {
     const attributes: Attributes = this.parent?.() || {};
     const language = attributes.language;

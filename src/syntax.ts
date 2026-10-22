@@ -38,7 +38,8 @@ export function onSyntaxReady(listener: () => void) {
 }
 
 export function ensureSyntax(language: string): Promise<void> {
-  if (language && highlighter.getLanguage(language)) return Promise.resolve();
+  if (!language || language === 'mermaid' || highlighter.getLanguage(language))
+    return Promise.resolve();
   loading ||= import('./syntaxExtras')
     .then(({ common }) => {
       lowlight.register(common);

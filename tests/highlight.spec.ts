@@ -91,7 +91,9 @@ test('adding opening equals after closing equals highlights existing text and su
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(() => (window as any).__mojian.setMarkdown('前面 **重点** 后面'));
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus(6));
+  await expect(page.locator('.article-editor')).toBeFocused();
   await page.keyboard.type('==');
+  await expect(page.locator('.article-editor')).toContainText('重点==');
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus(4));
   await page.keyboard.type('==');
   await expect(page.locator('.article-editor mark')).toHaveText('重点');

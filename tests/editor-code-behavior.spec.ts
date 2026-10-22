@@ -21,6 +21,7 @@ for(const language of ['js','mermaid'])test(`${language}: Ctrl+A in the code vie
 test('code view uses a dark theme and readable highlight colors while Mermaid diagram stays light',async({page})=>{
  await ready(page,'```js\n// 注释\nconst text = "hello";\nconsole.log(text);\n```\n\n```mermaid\ngraph LR\n  A --> B\n```');
  const code=page.locator('.code-node').first();await expect(code).toHaveClass(/code-theme-dark/);
+ await expect(code.locator('.hljs-keyword')).toHaveCSS('color','rgb(255, 123, 114)');
  const colors=await code.evaluate(el=>({background:getComputedStyle(el).backgroundColor,text:getComputedStyle(el.querySelector('pre')!).color,keyword:getComputedStyle(el.querySelector('.hljs-keyword')!).color,string:getComputedStyle(el.querySelector('.hljs-string')!).color,header:getComputedStyle(el.querySelector('.code-header')!).backgroundColor}));
  expect(colors).toEqual({background:'rgb(13, 17, 23)',text:'rgb(201, 209, 217)',keyword:'rgb(255, 123, 114)',string:'rgb(165, 214, 255)',header:'rgb(22, 27, 34)'});
  const mermaid=page.locator('.code-node').nth(1);await expect(mermaid).not.toHaveClass(/code-theme-dark/);await mermaid.getByRole('button',{name:'展示代码',exact:true}).click();await expect(mermaid).toHaveClass(/code-theme-dark/);await mermaid.getByRole('button',{name:'展示图表',exact:true}).click();await expect(mermaid).not.toHaveClass(/code-theme-dark/);

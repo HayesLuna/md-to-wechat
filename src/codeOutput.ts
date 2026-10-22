@@ -1,14 +1,23 @@
 import { highlighter as hljs, syntaxRevision } from './syntax';
+import type { workBudget } from './workBudget';
 
 export type CodeSource = { text: string; language: string };
 const cards = new Map<string, { card: HTMLDivElement; size: number }>();
 let cachedCharacters = 0;
 const MAX_CACHED_CHARACTERS = 200_000;
-const MAX_CACHED_CARDS = 8;
+const MAX_CACHED_CARDS = 64;
 
 export function codeCard(source: CodeSource, index: number, dark: boolean) {
+  return copyCard(cachedCard(source, dark), index);
+}
+
+function cachedCard(
+  source: CodeSource,
+  dark: boolean,
+  prepared?: HTMLDivElement,
+) {
   if (source.text.length > MAX_CACHED_CHARACTERS)
-    return createCodeCard(source, index, dark);
+    return prepared || createCodeCard(source, 0, dark);
   const key = JSON.stringify([
     source.text,
     source.language,
@@ -18,7 +27,10 @@ export function codeCard(source: CodeSource, index: number, dark: boolean) {
   let entry = cards.get(key);
   if (entry) cards.delete(key);
   else {
-    entry = { card: createCodeCard(source, 0, dark), size: source.text.length };
+    entry = {
+      card: prepared || createCodeCard(source, 0, dark),
+      size: source.text.length,
+    };
     cachedCharacters += entry.size;
   }
   cards.set(key, entry);
@@ -30,10 +42,59 @@ export function codeCard(source: CodeSource, index: number, dark: boolean) {
     cachedCharacters -= cards.get(oldest)!.size;
     cards.delete(oldest);
   }
+  return entry.card;
+}
+
+function copyCard(card: HTMLDivElement, index: number) {
   // Consumers add decorations and styles. Never let those mutations enter cache.
-  const copy = entry.card.cloneNode(true) as HTMLDivElement;
+  const copy = card.cloneNode(true) as HTMLDivElement;
   copy.setAttribute('data-code-index', String(index));
   return copy;
+}
+
+export function codeCardRenderer(sources: CodeSource[], dark: boolean) {
+  // Preview and clipboard always share tokenization within one snapshot, even
+  // for documents larger than the bounded cross-snapshot cache.
+  const snapshot = new Map<string, HTMLDivElement>();
+  // Capture hits before any misses can evict them. A sequential scan of an
+  // article larger than the cache must not turn every block into a cache miss.
+  for (const source of sources) {
+    const entry = cards.get(
+      JSON.stringify([source.text, source.language, dark, syntaxRevision]),
+    );
+    if (entry)
+      snapshot.set(
+        JSON.stringify([source.text, source.language, dark]),
+        entry.card,
+      );
+  }
+  return async (
+    source: CodeSource,
+    index: number,
+    dark: boolean,
+    checkpoint: ReturnType<typeof workBudget>,
+  ) => {
+    const key = JSON.stringify([source.text, source.language, dark]);
+    let card = snapshot.get(key);
+    if (!card) {
+      const cached = cards.get(
+        JSON.stringify([source.text, source.language, dark, syntaxRevision]),
+      );
+      if (cached) card = cachedCard(source, dark);
+      else {
+        const builder = buildCodeCard(source, 0, dark);
+        let step = builder.next();
+        while (!step.done) {
+          const pause = checkpoint();
+          if (pause) await pause;
+          step = builder.next();
+        }
+        card = cachedCard(source, dark, step.value);
+      }
+      snapshot.set(key, card);
+    }
+    return copyCard(card, index);
+  };
 }
 // Fixed, local decoration only. No SVG markup, URLs or attributes come from Markdown.
 export function codeDecoration(): SVGSVGElement {
@@ -101,6 +162,17 @@ function createCodeCard(
   index: number,
   dark: boolean,
 ): HTMLDivElement {
+  const builder = buildCodeCard(source, index, dark);
+  let step = builder.next();
+  while (!step.done) step = builder.next();
+  return step.value;
+}
+
+function* buildCodeCard(
+  source: CodeSource,
+  index: number,
+  dark: boolean,
+): Generator<void, HTMLDivElement> {
   const normalized = source.text
     .replace(/\r\n|\r/g, '\n')
     .replace(/\t/g, '    ');
@@ -176,7 +248,7 @@ function createCodeCard(
     'style',
     'display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:pre !important;',
   );
-  lines.forEach((line, i) => {
+  for (const [i, line] of lines.entries()) {
     const section = document.createElement('section');
     section.setAttribute('data-code-line', '');
     section.setAttribute(
@@ -209,7 +281,8 @@ function createCodeCard(
         node.replaceWith(leaf);
       }
     container.append(section);
-  });
+    if (i % 16 === 15) yield;
+  }
   code.append(container);
   scroll.append(code);
   pre.append(header, scroll);

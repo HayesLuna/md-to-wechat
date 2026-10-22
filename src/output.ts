@@ -5,7 +5,12 @@ import DOMPurify from 'dompurify';
 import { acquireImageURL } from './storage';
 import { diagram } from './mermaid';
 import type { Settings } from './sample';
-import { codeCard, addCodeDecorations, type CodeSource } from './codeOutput';
+import {
+  codeCardRenderer,
+  addCodeDecorations,
+  type CodeSource,
+} from './codeOutput';
+import { workBudget } from './workBudget';
 export type Asset = {
   kind: 'image' | 'diagram';
   label: string;
@@ -43,10 +48,10 @@ export function widthFromTitle(title: string) {
 }
 export { headings } from './headings';
 
-function inlineStyles(
+async function inlineStyles(
   root: HTMLElement,
   s: Settings,
-  codeSources: CodeSource[],
+  checkpoint: ReturnType<typeof workBudget>,
 ) {
   const color = /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : '#a6493d';
   const dark = s.codeTheme === 'dark';
@@ -81,6 +86,8 @@ function inlineStyles(
     img: 'height:auto;max-width:100%;display:block;margin:20px auto;',
   };
   for (const el of root.querySelectorAll<HTMLElement>('*')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     if (el.namespaceURI === 'http://www.w3.org/2000/svg') continue;
     const existingAlign = el.style.textAlign;
     const imageWidth =
@@ -127,6 +134,8 @@ function inlineStyles(
   // line-height differently during paste. Every text element carries pixel values,
   // including inline marks and highlight tokens, without changing source Markdown.
   for (const el of root.querySelectorAll<HTMLElement>('*')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     if (
       el.namespaceURI !== 'http://www.w3.org/1999/xhtml' ||
       el.matches('img,hr')
@@ -153,15 +162,10 @@ function inlineStyles(
     if (el.matches('strong,em,s,a,code,span') && !el.matches('pre code'))
       el.style.setProperty('display', 'inline', 'important');
   }
-  // Generated from Markdown token source, never from rendered editor DOM.
-  for (const pre of root.querySelectorAll<HTMLElement>(
-    'pre[data-code-index]',
-  )) {
-    const index = Number(pre.getAttribute('data-code-index'));
-    pre.replaceWith(codeCard(codeSources[index], index, dark));
-  }
   // Empty structural parents represent indentation of a first list item.
   for (const li of root.querySelectorAll<HTMLElement>('li')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     const nested = Array.from(li.children).find((child) =>
       ['UL', 'OL'].includes(child.tagName),
     );
@@ -181,14 +185,19 @@ function inlineStyles(
     }
   }
   // Only remove a single paragraph from genuinely simple list items.
-  for (const li of root.querySelectorAll('li'))
+  for (const li of root.querySelectorAll('li')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     if (li.children.length === 1 && li.firstElementChild?.tagName === 'P')
       li.firstElementChild.replaceWith(...li.firstElementChild.childNodes);
+  }
   // Paste importers can normalize bare link/code text differently from adjacent
   // styled spans. Give their text the same inline leaf structure; keep safe hrefs
   // and never touch block code cards or introduce line breaks.
   for (const mark of root.querySelectorAll<HTMLElement>('a,code')) {
-    if (mark.closest('[data-code-block]')) continue;
+    const pause = checkpoint();
+    if (pause) await pause;
+    if (mark.closest('pre')) continue;
     for (const node of Array.from(mark.childNodes)) {
       if (node.nodeType !== Node.TEXT_NODE) continue;
       const leaf = document.createElement('span');
@@ -205,6 +214,8 @@ function inlineStyles(
   for (const block of root.querySelectorAll<HTMLElement>(
     'p,li,h1,h2,h3,h4,h5,h6,blockquote,th,td',
   )) {
+    const pause = checkpoint();
+    if (pause) await pause;
     if (!block.children.length) continue;
     for (const node of Array.from(block.childNodes)) {
       if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim())
@@ -220,6 +231,8 @@ function inlineStyles(
 
   // Enlarged images scroll locally instead of widening or clipping the article.
   for (const image of root.querySelectorAll<HTMLImageElement>('img')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     if (parseFloat(image.style.width) <= 100) continue;
     image.style.maxWidth = 'none';
     image.setAttribute('data-ignore-width', '');
@@ -236,6 +249,8 @@ function inlineStyles(
   // Keep a real table layout in both preview and pasted HTML. Many columns may
   // deliberately scroll, but the article itself must stay within its viewport.
   for (const table of root.querySelectorAll<HTMLTableElement>('table')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     const columns = Math.max(
       1,
       ...Array.from(table.rows, (row) => row.cells.length),
@@ -258,6 +273,8 @@ function inlineStyles(
   // The quote padding already provides bottom space; avoid stacking its last
   // child's normal paragraph/list/quote margin onto that padding.
   for (const quote of root.querySelectorAll('blockquote')) {
+    const pause = checkpoint();
+    if (pause) await pause;
     const last = quote.lastElementChild as HTMLElement | null;
     if (last) last.style.marginBottom = '0';
   }
@@ -325,6 +342,7 @@ export async function renderArticle(
   signal?: AbortSignal,
 ): Promise<Output> {
   const releases: (() => void)[] = [];
+  const checkpoint = workBudget(signal);
   let delivered = false;
   const dispose = () => {
     releases.splice(0).forEach((release) => release());
@@ -488,22 +506,64 @@ export async function renderArticle(
       ),
     );
     signal?.throwIfAborted();
-    inlineStyles(root, s, codeSources);
-    inlineStyles(clipboard, s, codeSources);
-    addCodeDecorations(root);
-    // Strip every SVG from the sanitized output, then insert only our fixed local
-    // decoration. User/imported SVG and Mermaid SVG never enter clipboard HTML.
-    const sanitized = DOMPurify.sanitize(clipboard.outerHTML, {
+    await inlineStyles(root, s, checkpoint);
+    await inlineStyles(clipboard, s, checkpoint);
+    // Sanitize user-derived content before inserting our code cards. Cards are
+    // built from text nodes, fixed elements, and a local highlight palette, so
+    // thousands of generated spans need not go through the sanitizer again.
+    const sanitizeOptions = {
       FORBID_TAGS: ['script', 'style', 'svg', 'input', 'button', 'iframe'],
       FORBID_ATTR: ['id', 'class'],
       ADD_ATTR: ['style', 'data-code-block'],
-    });
+    };
     const clean = document.createElement('div');
-    clean.innerHTML = sanitized;
+    clean.innerHTML = DOMPurify.sanitize(
+      (clipboard.cloneNode(false) as HTMLElement).outerHTML,
+      sanitizeOptions,
+    );
+    const cleanArticle = clean.firstElementChild!;
+    for (const block of clipboard.childNodes) {
+      const pause = checkpoint();
+      if (pause) await pause;
+      const html =
+        block instanceof Element
+          ? block.outerHTML
+          : escapeHTML(block.textContent || '');
+      cleanArticle.append(
+        DOMPurify.sanitize(html, {
+          ...sanitizeOptions,
+          RETURN_DOM_FRAGMENT: true,
+        }),
+      );
+    }
+    const renderCard = codeCardRenderer(codeSources, s.codeTheme === 'dark');
+    for (const target of [root, clean]) {
+      for (const pre of target.querySelectorAll<HTMLElement>(
+        'pre[data-code-index]',
+      )) {
+        const pause = checkpoint();
+        if (pause) await pause;
+        const index = Number(pre.dataset.codeIndex);
+        pre.replaceWith(
+          await renderCard(
+            codeSources[index],
+            index,
+            s.codeTheme === 'dark',
+            checkpoint,
+          ),
+        );
+      }
+    }
+    signal?.throwIfAborted();
+    const pause = checkpoint();
+    if (pause) await pause;
+    addCodeDecorations(root);
     addCodeDecorations(clean);
     const html = clean.innerHTML;
     // Preview affordances are applied after the clipboard document is finalized.
     for (const image of root.querySelectorAll('img')) {
+      const pause = checkpoint();
+      if (pause) await pause;
       image.setAttribute('data-media-preview', 'image');
       image.setAttribute('role', 'button');
       image.tabIndex = 0;

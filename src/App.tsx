@@ -5,6 +5,7 @@ import {
   useRef,
   useMemo,
   useCallback,
+  useDeferredValue,
 } from 'react';
 import type { Editor } from '@tiptap/core';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
@@ -57,6 +58,7 @@ import {
 } from './output';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument } from './EditorPane';
+import { flushEditorMarkdown } from './editorMarkdown';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
@@ -114,9 +116,12 @@ export default function App() {
   }, []);
   const [ready, setReady] = useState(false);
   const [markdown, setMarkdown] = useState('');
+  const [contentRevision, setContentRevision] = useState(0);
   const [initial, setInitial] = useState('');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const latestEditor = useRef(editor);
+  latestEditor.current = editor;
   const [mode, setMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
   const [preview, setPreview] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -126,6 +131,7 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saving');
   const outputRef = useRef<Output | null>(null);
+  const outputAbort = useRef<AbortController | null>(null);
   const [output, setOutput] = useState<Output | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [renderError, setRenderError] = useState('');
@@ -205,9 +211,22 @@ export default function App() {
   const changed = (text: string) => {
     current.current = { ...current.current, markdown: text };
     version.current++;
+    statusRef.current = 'saving';
     setMarkdown(text);
+    setContentRevision((n) => n + 1);
     setSaveStatus('saving');
   };
+  const editorDirty = () => {
+    version.current++;
+    statusRef.current = 'saving';
+    outputAbort.current?.abort();
+    setPreparing(true);
+    setSaveStatus('saving');
+  };
+  const readCurrent = useCallback(() => {
+    flushEditorMarkdown(latestEditor.current);
+    return current.current;
+  }, []);
   const changeSettings = (s: Settings) => {
     if (
       switchingRef.current ||
@@ -222,13 +241,14 @@ export default function App() {
   const saveNow = useCallback(
     (manual = false) => {
       if (!activeDraft.current) return Promise.resolve();
+      const snapshot = readCurrent();
       const v = version.current;
       const draft = {
         ...activeDraft.current,
-        ...current.current,
+        ...snapshot,
         title: activeDraft.current.customTitle
           ? activeDraft.current.title
-          : draftTitle(current.current.markdown),
+          : draftTitle(snapshot.markdown),
         version: v,
         savedAt: Date.now(),
       };
@@ -265,7 +285,7 @@ export default function App() {
         });
       return pending;
     },
-    [notify],
+    [notify, readCurrent],
   );
   useEffect(() => {
     if (!ready) return;
@@ -293,13 +313,19 @@ export default function App() {
     }
     let active = true;
     const controller = new AbortController();
+    outputAbort.current = controller;
+    const renderVersion = version.current;
     setPreparing(true);
     setRenderError('');
     const timer = setTimeout(
       () => {
         renderArticle(markdown, settings, controller.signal)
           .then((result) => {
-            if (active) {
+            if (
+              active &&
+              !controller.signal.aborted &&
+              renderVersion === version.current
+            ) {
               outputRef.current?.dispose();
               outputRef.current = result;
               setOutput(result);
@@ -307,7 +333,7 @@ export default function App() {
             } else result.dispose();
           })
           .catch((e) => {
-            if (active) {
+            if (active && !controller.signal.aborted) {
               setPreparing(false);
               setRenderError('排版准备失败，请重试：' + e.message);
             }
@@ -318,9 +344,10 @@ export default function App() {
     return () => {
       active = false;
       controller.abort();
+      if (outputAbort.current === controller) outputAbort.current = null;
       clearTimeout(timer);
     };
-  }, [markdown, settings, ready, preview]);
+  }, [markdown, settings, ready, preview, contentRevision]);
   useEffect(
     () => () => {
       outputRef.current?.dispose();
@@ -452,7 +479,7 @@ export default function App() {
     Object.assign(window, {
       __mojian: {
         editor,
-        getMarkdown: () => current.current.markdown,
+        getMarkdown: () => readCurrent().markdown,
         getSettings: () => current.current.settings,
         getOutput: () => output,
         setMarkdown: (text: string) => {
@@ -461,7 +488,7 @@ export default function App() {
         },
       },
     });
-  }, [editor, output]);
+  }, [editor, output, readCurrent]);
   const activateDraft = (d: Draft) => {
     activeDraft.current = d;
     version.current = Math.max(version.current + 1, d.version);
@@ -586,10 +613,14 @@ export default function App() {
       .filter((d) => d.title.toLocaleLowerCase().includes(search))
       .sort(compareDraftCreation);
   }, [drafts, query]);
-  const headingList = useMemo(() => headings(markdown), [markdown]);
+  const deferredMarkdown = useDeferredValue(markdown);
+  const headingList = useMemo(
+    () => headings(deferredMarkdown),
+    [deferredMarkdown],
+  );
   const words = useMemo(
-    () => Array.from(markdown.replace(/\s/g, '')).length,
-    [markdown],
+    () => Array.from(deferredMarkdown.replace(/\s/g, '')).length,
+    [deferredMarkdown],
   );
   const switchMode = (next: 'wysiwyg' | 'source') => {
     if (processing) {
@@ -597,6 +628,7 @@ export default function App() {
       return;
     }
     if (next === mode) return;
+    readCurrent();
     if (next === 'wysiwyg' && editor)
       replaceDocument(editor, current.current.markdown);
     setMode(next);
@@ -843,14 +875,17 @@ export default function App() {
     }
   };
   const exportMD = () => {
-    const title = headingList.find((h) => h.level === 1)?.text || '墨笺草稿';
+    const snapshot = readCurrent();
+    const title =
+      headings(snapshot.markdown).find((h) => h.level === 1)?.text ||
+      '墨笺草稿';
     download(
-      new Blob([current.current.markdown], {
+      new Blob([snapshot.markdown], {
         type: 'text/markdown;charset=utf-8',
       }),
       title.replace(/[<>:"/\\|?*]/g, '').slice(0, 70) + '.md',
     );
-    if (current.current.markdown.includes('local-image:')) {
+    if (snapshot.markdown.includes('local-image:')) {
       setModal({ type: 'downloads' });
       notify(
         '已导出 Markdown。单独的 .md 不包含本地图片，请同时下载图片资源。',
@@ -860,8 +895,7 @@ export default function App() {
   const outputCurrent = () =>
     output &&
     !preparing &&
-    output.key ===
-      outputKey(current.current.markdown, current.current.settings);
+    output.key === outputKey(readCurrent().markdown, current.current.settings);
   const doCopy = async () => {
     if (!outputCurrent() || !output) {
       notify('内容已变化，正在重新准备排版；完成后请再次点击复制。');
@@ -895,7 +929,7 @@ export default function App() {
     else void doCopy();
   };
   const copySource = () =>
-    void copyText(current.current.markdown)
+    void copyText(readCurrent().markdown)
       .then(() => notify('已复制 Markdown 源码'))
       .catch(() => notify('Markdown 复制失败，请检查浏览器剪贴板权限。'));
   const jump = (index: number) => {
@@ -1284,6 +1318,7 @@ export default function App() {
                       initial={initial}
                       onReady={setEditor}
                       onChange={changed}
+                      onDirty={editorDirty}
                       onSelection={() => setSelectionTick((n) => n + 1)}
                       onContext={contextMenu}
                       onPasteImage={(file) => void insertFile(file, true)}
