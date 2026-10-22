@@ -6,7 +6,9 @@ async function expectVisibleText(page: Page, text: string) {
     const clone = element.cloneNode(true) as HTMLElement;
     const original = element.querySelectorAll('.highlight-delimiter');
     clone.querySelectorAll('.highlight-delimiter').forEach((delimiter, index) => {
-      if (!original[index].getBoundingClientRect().width) delimiter.remove();
+      // Collapsed text can retain a subpixel width with Linux font metrics.
+      if (original[index].getBoundingClientRect().width < 1 &&
+          getComputedStyle(original[index]).color === 'rgba(0, 0, 0, 0)') delimiter.remove();
     });
     return clone.textContent;
   })).toBe(text);
@@ -395,6 +397,8 @@ for (const width of [1440, 390]) test(`closing equals stay visible with the care
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width, height: 900 });
   await page.goto('/');
+  await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');
+  await expect(page.locator('vite-error-overlay')).toHaveCount(0);
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(() => { const m = (window as any).__mojian; m.setMarkdown(''); m.editor.commands.focus(); });
   const editor = page.locator('.article-editor');
@@ -437,12 +441,21 @@ for (const width of [1440, 390]) test(`closing equals stay visible with the care
   await expect(editor.locator('.highlight-delimiter.expanded')).toHaveCount(0);
   await expectVisibleText(page, '测试后');
   expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('==测试==后');
+  await editor.locator('p').screenshot({ path: `/tmp/mojian-highlight-following-text-${width}.png`, caret: 'initial' });
   await page.keyboard.press('Backspace');
   await expect(editor.locator('.highlight-delimiter.expanded')).toHaveText(['==', '==']);
   await expectVisibleText(page, '==测试==');
   await page.getByRole('button', { name: 'Markdown 源码', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Markdown 源码正文' })).toHaveValue('==测试==');
   await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+  await expect(editor).toBeFocused();
+  // Mode switching restores focus asynchronously. At the closing edge the
+  // delimiters must still be visible after that focus has actually settled.
+  await expect(editor.locator('.highlight-delimiter.expanded')).toHaveText(['==', '==']);
+  await expectVisibleText(page, '==测试==');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(7);
+  await page.getByRole('button', { name: '版本与更新信息', exact: true }).click();
+  await expect(editor).not.toBeFocused();
   await expect(editor.locator('.highlight-delimiter.expanded')).toHaveCount(0);
   await expectVisibleText(page, '测试');
   expect(errors).toEqual([]);
