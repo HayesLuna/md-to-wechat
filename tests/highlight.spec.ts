@@ -279,7 +279,7 @@ test('arrow entry, deleting a closing delimiter and typing after a pair use the 
   expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(4);
   await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection(7));
   await page.keyboard.press('ArrowLeft');
-  expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(5);
+  expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(6);
   await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection(7));
   await page.keyboard.type('new');
   await expect(page.locator('.article-editor mark')).toHaveText('甲');
@@ -388,4 +388,62 @@ test('imported HTML highlights keep literal equals inside their content', async 
     await page.evaluate(() => { const e=(window as any).__mojian.editor;e.commands.setContent(e.markdown.parse(e.getMarkdown())); });
     expect((await page.locator('.article-editor mark').allTextContents()).join('')).toBe('==字面等号==');
   }
+});
+
+for (const width of [1440, 390]) test(`closing equals stay visible with the caret after them at ${width}px`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => { const m = (window as any).__mojian; m.setMarkdown(''); m.editor.commands.focus(); });
+  const editor = page.locator('.article-editor');
+  await expect(editor).toBeFocused();
+  await page.keyboard.type('==');
+  await page.keyboard.insertText('测试');
+  await page.keyboard.type('=');
+  await expect(editor.locator('mark')).toHaveCount(0);
+  await page.keyboard.type('=');
+  await expect(editor.locator('mark')).toHaveText('测试');
+  await expect(editor.locator('.highlight-delimiter.expanded')).toHaveText(['==', '==']);
+  await expectVisibleText(page, '==测试==');
+  const caret = await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    const selection = window.getSelection()!;
+    const range = selection.getRangeAt(0).getBoundingClientRect();
+    const delimiters = e.view.dom.querySelectorAll('.highlight-delimiter.expanded');
+    const closing = delimiters[delimiters.length - 1].getBoundingClientRect();
+    return {
+      position: e.state.selection.from,
+      empty: e.state.selection.empty,
+      nativePosition: e.view.posAtDOM(selection.focusNode!, selection.focusOffset),
+      height: range.height,
+      closingGap: Math.abs(range.left - closing.right),
+      markdown: e.getMarkdown(),
+    };
+  });
+  expect(caret).toMatchObject({ position: 7, nativePosition: 7, empty: true, markdown: '==测试==' });
+  expect(caret.height).toBeGreaterThan(10);
+  expect(caret.closingGap).toBeLessThan(1);
+  // The caret is outside the highlight: further input must stay unhighlighted.
+  await expect(page.getByRole('toolbar', { name: '正文格式' }).getByRole('button', { name: '高亮', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await editor.locator('p').screenshot({ path: `/tmp/mojian-highlight-closing-caret-${width}.png`, caret: 'initial' });
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(() => page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(6);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(7);
+  await page.keyboard.insertText('后');
+  await expect(editor.locator('mark')).toHaveText('测试');
+  await expect(editor.locator('.highlight-delimiter.expanded')).toHaveCount(0);
+  await expectVisibleText(page, '测试后');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('==测试==后');
+  await page.keyboard.press('Backspace');
+  await expect(editor.locator('.highlight-delimiter.expanded')).toHaveText(['==', '==']);
+  await expectVisibleText(page, '==测试==');
+  await page.getByRole('button', { name: 'Markdown 源码', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Markdown 源码正文' })).toHaveValue('==测试==');
+  await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+  await expect(editor.locator('.highlight-delimiter.expanded')).toHaveCount(0);
+  await expectVisibleText(page, '测试');
+  expect(errors).toEqual([]);
 });

@@ -33,7 +33,11 @@ function pairFromDecoration(decoration: Decoration): HighlightPair {
   return { from: decoration.from - 2, to: decoration.to + 2 };
 }
 
-function activePairs(state: EditorState, base = key.getState(state)?.base) {
+function activePairs(
+  state: EditorState,
+  base = key.getState(state)?.base,
+  includeClosingEdge = false,
+) {
   const { from, to, empty } = state.selection;
   return (
     base?.find(
@@ -45,7 +49,8 @@ function activePairs(state: EditorState, base = key.getState(state)?.base) {
     .map(pairFromDecoration)
     .filter((pair) =>
       empty
-        ? from > pair.from && from < pair.to
+        ? from > pair.from &&
+          (from < pair.to || (includeClosingEdge && from === pair.to))
         : from < pair.to && to > pair.from,
     );
 }
@@ -341,7 +346,9 @@ export const TyporaHighlight = Mark.create({
       if (!focused) return base;
       const hidden: Decoration[] = [],
         visible: Decoration[] = [];
-      for (const pair of activePairs(state, base)) {
+      // Keep the closing syntax visible while the caret rests just after it.
+      // Formatting commands still treat that position as outside the pair.
+      for (const pair of activePairs(state, base, true)) {
         for (const decoration of base.find(
           pair.from,
           pair.to,
@@ -449,7 +456,7 @@ export const TyporaHighlight = Mark.create({
               tr.setSelection(
                 TextSelection.create(
                   tr.doc,
-                  event.key === 'ArrowRight' ? pair.from + 2 : pair.to - 2,
+                  event.key === 'ArrowRight' ? pair.from + 2 : pair.to - 1,
                 ),
               );
             else if (event.key === 'Backspace') tr.delete(pos - 1, pos);
