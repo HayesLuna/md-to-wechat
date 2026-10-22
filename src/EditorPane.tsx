@@ -1,6 +1,9 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Markdown } from '@tiptap/markdown';
-import { serializeHighlightMarkdown } from './highlight';
+import {
+  parseHighlightMarkdown,
+  serializeHighlightMarkdown,
+} from './highlight';
 import { TableKit } from '@tiptap/extension-table';
 import TaskList from '@tiptap/extension-task-list';
 import {
@@ -21,8 +24,8 @@ import {
   StructuredListItem,
   StructuredTaskItem,
   MarkdownStarterKit,
-  TyporaHighlight,
 } from './editorExtensions';
+import { TyporaHighlight, HighlightLiteral } from './sourceHighlight';
 import { safeURL } from './output';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
@@ -38,6 +41,8 @@ const HighlightMarkdown = Markdown.extend({
   onBeforeCreate(event) {
     this.parent?.(event);
     const manager = this.editor.markdown!;
+    const parse = manager.parse.bind(manager);
+    manager.parse = (markdown) => parseHighlightMarkdown(markdown, parse);
     const serialize = manager.serialize.bind(manager);
     manager.serialize = (document) =>
       serializeHighlightMarkdown(document, serialize);
@@ -127,6 +132,7 @@ export function EditorPane({
       }),
       StructuredListItem,
       TyporaHighlight,
+      HighlightLiteral,
       HighlightMarkdown.configure({
         markedOptions: { gfm: true, breaks: false },
       }),

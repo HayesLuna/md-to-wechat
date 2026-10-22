@@ -1,8 +1,5 @@
 import {
   Extension,
-  Mark,
-  InputRule,
-  markInputRule,
   wrappingInputRule,
   type Editor,
   type Attributes,
@@ -17,7 +14,7 @@ import {
   type Selection,
 } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { Fragment, Slice, type Node } from '@tiptap/pm/model';
+import { Slice, type Node } from '@tiptap/pm/model';
 import { ReplaceAroundStep } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { joinBackward } from '@tiptap/pm/commands';
@@ -32,140 +29,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './output';
-import { matchHighlight } from './highlight';
 import { codeHighlightPlugin } from './codeHighlight';
-
-export const TyporaHighlight = Mark.create({
-  name: 'highlight',
-  parseHTML: () => [{ tag: 'mark' }],
-  renderHTML: ({ HTMLAttributes }) => ['mark', HTMLAttributes, 0],
-  markdownTokenName: 'highlight',
-  markdownTokenizer: {
-    name: 'highlight',
-    level: 'inline',
-    start: (source) => source.indexOf('=='),
-    tokenize(source, _tokens, lexer) {
-      const match = matchHighlight(source);
-      if (!match) return undefined;
-      return {
-        type: 'highlight',
-        ...match,
-        tokens: lexer.inlineTokens(match.text),
-      };
-    },
-  },
-  parseMarkdown: (token, helpers) =>
-    helpers.applyMark('highlight', helpers.parseInline(token.tokens || [])),
-  renderMarkdown: (node, helpers) => `==${helpers.renderChildren(node)}==`,
-  addInputRules() {
-    return [
-      markInputRule({
-        find: (text) => {
-          for (let i = 0; i < text.length - 3; i++) {
-            if (text[i - 1] === '=' || text[i - 1] === '\\') continue;
-            const match = matchHighlight(text.slice(i));
-            if (match && i + match.raw.length === text.length)
-              return { index: i, text: match.raw, replaceWith: match.text };
-          }
-          return null;
-        },
-        type: this.type,
-      }),
-      new InputRule({
-        find: /(?<![=\\])==$/,
-        handler: ({ state, range }) => {
-          // Input rules normally look only behind the cursor. The opening
-          // delimiter can also be the last thing typed around existing text.
-          const { tr } = state;
-          const $end = tr.doc.resolve(range.to);
-          const suffix = $end.parent.textBetween(
-            $end.parentOffset,
-            $end.parent.content.size,
-            undefined,
-            '\ufffc',
-          );
-          const match = matchHighlight(`==${suffix}`);
-          if (!match || !state.selection.empty) return null;
-          const end = range.to + match.text.length;
-          tr.delete(end, end + 2).delete(range.from, range.to);
-          tr.addMark(
-            range.from,
-            range.from + match.text.length,
-            this.type.create(),
-          );
-          tr.removeStoredMark(this.type);
-        },
-      }),
-    ];
-  },
-  addProseMirrorPlugins() {
-    const highlight = this.type;
-    return [
-      new Plugin({
-        props: {
-          transformPasted(slice, view, plain) {
-            const { $from } = view.state.selection;
-            if (
-              plain ||
-              $from.parent.type.spec.code ||
-              $from.marks().some((mark) => mark.type.spec.code)
-            )
-              return slice;
-            const transform = (node: Node): Node => {
-              if (node.isLeaf || node.type.spec.code) return node;
-              if (!node.isTextblock)
-                return node.copy(
-                  Fragment.fromArray(
-                    Array.from(node.content.content, transform),
-                  ),
-                );
-              const text = node.textBetween(
-                0,
-                node.content.size,
-                undefined,
-                '\ufffc',
-              );
-              let content = Fragment.empty;
-              let from = 0;
-              for (let i = 0; i < text.length - 3; i++) {
-                if (text[i - 1] === '=' || text[i - 1] === '\\') continue;
-                const match = matchHighlight(text.slice(i));
-                if (!match) continue;
-                const end = i + match.raw.length;
-                let code = false;
-                node.nodesBetween(i, end, (child) => {
-                  code ||= child.marks.some((mark) => mark.type.spec.code);
-                });
-                if (code) {
-                  i = end - 1;
-                  continue;
-                }
-                content = content.append(node.content.cut(from, i));
-                const marked: Node[] = [];
-                node.content.cut(i + 2, end - 2).forEach((child) => {
-                  marked.push(
-                    child.mark(highlight.create().addToSet(child.marks)),
-                  );
-                });
-                content = content.append(Fragment.fromArray(marked));
-                from = end;
-                i = end - 1;
-              }
-              return from
-                ? node.copy(content.append(node.content.cut(from)))
-                : node;
-            };
-            return new Slice(
-              Fragment.fromArray(Array.from(slice.content.content, transform)),
-              slice.openStart,
-              slice.openEnd,
-            );
-          },
-        },
-      }),
-    ];
-  },
-});
 
 // Markdown permits emphasis around inline code. StarterKit's default code
 // mark excludes all other marks, making valid Markdown fail insertion checks.

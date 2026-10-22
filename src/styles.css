@@ -316,6 +316,13 @@ button.primary:hover {
   background: #fff3a3;
   color: inherit;
 }
+.article-editor .highlight-delimiter {
+  color: #95969f;
+}
+.article-editor .highlight-delimiter:not(.expanded) {
+  font-size: 0;
+  letter-spacing: 0;
+}
 .article-editor h1,
 .article-editor h2 {
   font-family: 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;

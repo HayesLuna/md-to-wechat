@@ -1,4 +1,16 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
+
+async function expectVisibleText(page: Page, text: string) {
+  await expect.poll(() => page.locator('.article-editor').evaluate(element => {
+    const clone = element.cloneNode(true) as HTMLElement;
+    const original = element.querySelectorAll('.highlight-delimiter');
+    clone.querySelectorAll('.highlight-delimiter').forEach((delimiter, index) => {
+      if (!original[index].getBoundingClientRect().width) delimiter.remove();
+    });
+    return clone.textContent;
+  })).toBe(text);
+}
 
 test('Typora highlights survive Markdown round trips and publication output', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -97,11 +109,13 @@ test('adding opening equals after closing equals highlights existing text and su
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus(4));
   await page.keyboard.type('==');
   await expect(page.locator('.article-editor mark')).toHaveText('重点');
-  await expect(page.locator('.article-editor strong')).toHaveText('重点');
-  await expect(page.locator('.article-editor')).toHaveText('前面 重点 后面');
+  await expect(page.locator('.article-editor strong mark')).toHaveText('重点');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('前面 ==**重点**== 后面');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
+  await expectVisibleText(page, '前面 重点 后面');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('.article-editor mark')).toHaveCount(0);
-  await expect(page.locator('.article-editor')).toContainText('==重点==');
+  await expect(page.locator('.article-editor')).toContainText('重点==');
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await expect(page.locator('.article-editor mark')).toHaveText('重点');
 });
@@ -162,7 +176,7 @@ for (const width of [1440, 390]) test(`toolbar highlight toggles selection, refl
   await button.click();
   await expect(page.locator('.article-editor mark')).toHaveText('重点');
   await expect(button).toHaveAttribute('aria-pressed', 'true');
-  expect(await page.evaluate(() => { const s = (window as any).__mojian.editor.state.selection; return {from:s.from,to:s.to}; })).toEqual({from:4,to:6});
+  expect(await page.evaluate(() => { const s = (window as any).__mojian.editor.state.selection; return {from:s.from,to:s.to}; })).toEqual({from:6,to:8});
   expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toContain('==重点==');
   await button.click();
   await expect(page.locator('.article-editor mark')).toHaveCount(0);
@@ -171,14 +185,207 @@ for (const width of [1440, 390]) test(`toolbar highlight toggles selection, refl
   await expect(page.locator('.article-editor mark')).toHaveText('重点');
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus(2));
   await expect(button).toHaveAttribute('aria-pressed', 'false');
-  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(5));
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(7));
   await expect(button).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
   await button.click();
   await page.keyboard.type('new');
   await expect(page.locator('.article-editor mark')).toHaveText(['重点', 'new']);
-  await expect(page.locator('.article-editor')).toHaveText('前面 重点 后面new');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(1));
+  await expectVisibleText(page, '前面 重点 后面new');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   expect(errors).toEqual([]);
   await page.screenshot({path:`/tmp/mojian-highlight-toolbar-${width}.png`});
+});
+
+for (const width of [1440, 390]) test(`entering a highlight reveals editable delimiters without changing source or undo at ${width}px`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({width, height:1000});
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const markdown = '前==第一处==中==第二处==后';
+  await page.evaluate(text => {
+    const m = (window as any).__mojian;
+    m.setMarkdown(text);
+    (window as any).__highlightUpdates = 0;
+    m.editor.on('update', () => (window as any).__highlightUpdates++);
+  }, markdown);
+  await expectVisibleText(page, '前第一处中第二处后');
+  await page.locator('.article-editor mark').first().click();
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
+  await expectVisibleText(page, '前==第一处==中第二处后');
+  await expect(page.locator('.highlight-delimiter.expanded').first()).toHaveText('==');
+  // The equals are real editable characters, rather than CSS-generated text.
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    e.commands.setTextSelection({from:2,to:4});
+  });
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.article-editor mark')).toHaveText('中');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('前第一处==中==第二处==后');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveText(['第一处', '第二处']);
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe(markdown);
+  expect(await page.evaluate(() => (window as any).__highlightUpdates)).toBe(2);
+  await page.locator('.article-editor mark').last().click();
+  await expectVisibleText(page, '前第一处中==第二处==后');
+  await page.getByRole('button', {name:'Markdown 源码',exact:true}).click();
+  await expect(page.getByRole('textbox', {name:'Markdown 源码正文'})).toHaveValue(markdown);
+  await page.getByRole('button', {name:'所见即所得',exact:true}).click();
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
+  await expectVisibleText(page, '前第一处中第二处后');
+  expect(errors).toEqual([]);
+  await page.screenshot({path:`/tmp/mojian-highlight-collapsed-${width}.png`});
+  await page.locator('.article-editor mark').first().click();
+  await page.screenshot({path:`/tmp/mojian-highlight-expanded-${width}.png`});
+});
+
+test('highlight pairs match Typora from left to right, including adjacent and repeated equals', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const cases = [
+    ['前==甲==中==乙==后', ['甲','乙'], '前甲中乙后'],
+    ['前==甲====乙==后', ['甲','乙'], '前甲乙后'],
+    ['前===甲===后', ['=甲'], '前=甲=后'],
+    ['前====甲==后', ['==甲'], '前==甲后'],
+    ['前==甲=====乙==后', ['甲','=乙'], '前甲=乙后'],
+    ['前==甲==乙==后', ['甲'], '前甲乙==后'],
+    ['空前== 甲==和==乙 ==后', ['和'], '空前== 甲和乙 ==后'],
+    ['四个====后', [], '四个====后'],
+  ] as const;
+  for (const [markdown, marks, visible] of cases) {
+    await page.evaluate(text => (window as any).__mojian.setMarkdown(text), markdown);
+    expect(await page.locator('.article-editor mark').allTextContents()).toEqual(marks);
+    await expectVisibleText(page, visible);
+    expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe(markdown);
+    await page.waitForFunction(() => { const m = (window as any).__mojian; return m.getOutput()?.key === JSON.stringify([m.getMarkdown(),m.getSettings()]); });
+    const preview = await page.evaluate(() => {
+      const html = (window as any).__mojian.getOutput().previewHTML;
+      const root = new DOMParser().parseFromString(html,'text/html');
+      return Array.from(root.querySelectorAll('mark'), mark => mark.textContent);
+    });
+    expect(preview).toEqual(marks);
+  }
+});
+
+test('arrow entry, deleting a closing delimiter and typing after a pair use the source boundaries', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => {const m=(window as any).__mojian;m.setMarkdown('前==甲==后');m.editor.commands.focus(2);});
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
+  expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(4);
+  await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection(7));
+  await page.keyboard.press('ArrowLeft');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.state.selection.from)).toBe(5);
+  await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection(7));
+  await page.keyboard.type('new');
+  await expect(page.locator('.article-editor mark')).toHaveText('甲');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('前==甲==new后');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection(7));
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.article-editor mark')).toHaveCount(0);
+  await expectVisibleText(page, '前==甲=new后');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveText('甲');
+});
+
+test('soft line breaks can be highlighted while paragraphs, escaped equals and code retain their boundaries', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const markdown = '前==跨行\n第二行==后\n\n独立==未闭合\n\n下一段==尾部\n\n\\=\\=字面\\=\\=\n\n`==代码==`\n\n```txt\n==代码块==\n\\=代码转义\n```';
+  await page.evaluate(text => (window as any).__mojian.setMarkdown(text), markdown);
+  await expect(page.locator('.article-editor mark')).toHaveCount(1);
+  await expect(page.locator('.article-editor mark')).toContainText('跨行');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toContain('\\=\\=字面\\=\\=');
+  const before = await page.evaluate(() => (window as any).__mojian.editor.getMarkdown());
+  await page.evaluate(() => {const e=(window as any).__mojian.editor;e.commands.setContent(e.markdown.parse(e.getMarkdown()));});
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe(before);
+  await expect(page.locator('.article-editor code mark')).toHaveCount(0);
+  await expect(page.locator('.article-editor pre')).toContainText('\\=代码转义');
+});
+
+test('mapped highlights stay editable after earlier blocks shift and inline code formatting changes', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => {
+    const m = (window as any).__mojian;
+    m.setMarkdown('==第一处==\n\n==第二处==\n\n最后');
+    m.editor.commands.setTextSelection(1);
+    m.editor.commands.insertContent('前缀');
+  });
+  await page.locator('.article-editor mark').nth(1).click();
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
+  await page.keyboard.insertText('中文');
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toMatch(/==第?中文/);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveText(['第一处','第二处']);
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    e.commands.setTextSelection({from:3,to:10});
+    e.commands.toggleCode();
+  });
+  await expect(page.locator('.article-editor mark')).toHaveText('第二处');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveText(['第一处','第二处']);
+});
+
+test('typed escapes and highlight mixed with inherited bold serialize without changing publication meaning', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => { const m=(window as any).__mojian;m.setMarkdown('');m.editor.commands.focus(); });
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.type('\\==literal\\==');
+  await expect(page.locator('.article-editor mark')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('\\==literal\\==');
+  await page.evaluate(() => { const m=(window as any).__mojian;m.setMarkdown('**==粗体高亮==**'); });
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toBe('==**粗体高亮**==');
+  await page.evaluate(() => { const e=(window as any).__mojian.editor;e.commands.setContent(e.markdown.parse(e.getMarkdown())); });
+  await expect(page.locator('.article-editor strong mark, .article-editor mark strong')).toHaveText('粗体高亮');
+});
+
+test('dense paragraphs preserve every pair when typing, revealing all syntax and deleting a delimiter', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const markdown = Array.from({length:300}, (_,i) => `前==重点${i}==后`).join('，');
+  await page.evaluate(text => (window as any).__mojian.setMarkdown(text), markdown);
+  await expect(page.locator('.article-editor mark')).toHaveCount(300);
+  await page.locator('.article-editor mark').first().click();
+  await page.keyboard.type('new');
+  await expect(page.locator('.article-editor mark').first()).toContainText('new');
+  await expect(page.locator('.article-editor mark')).toHaveCount(300);
+  await page.evaluate(() => (window as any).__mojian.editor.commands.selectAll());
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(600);
+  await page.evaluate(() => (window as any).__mojian.editor.commands.setTextSelection({from:2,to:4}));
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.article-editor mark')).toHaveCount(299);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveCount(300);
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
+});
+
+test('imported HTML highlights keep literal equals inside their content', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  for (const via of ['markdown','paste']) {
+    await page.evaluate(via => {
+      const m = (window as any).__mojian;
+      const html = '<p><mark><strong>==字面等号==</strong></mark></p>';
+      if (via === 'markdown') m.setMarkdown(html);
+      else {
+        m.setMarkdown('');m.editor.commands.setTextSelection(1);
+        const data = new DataTransfer(); data.setData('text/plain','==字面等号==');data.setData('text/html',html);
+        m.editor.view.dom.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+      }
+    }, via);
+    expect((await page.locator('.article-editor mark').allTextContents()).join('')).toBe('==字面等号==');
+    await expect(page.locator('.article-editor strong')).toHaveText('==字面等号==');
+    const markdown = await page.evaluate(() => (window as any).__mojian.editor.getMarkdown());
+    expect(markdown).toContain('==**\\=\\=字面等号\\=\\=**==');
+    await page.evaluate(() => { const e=(window as any).__mojian.editor;e.commands.setContent(e.markdown.parse(e.getMarkdown())); });
+    expect((await page.locator('.article-editor mark').allTextContents()).join('')).toBe('==字面等号==');
+  }
 });

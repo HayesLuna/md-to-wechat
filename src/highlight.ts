@@ -15,36 +15,142 @@ export function markdownHighlight(md: MarkdownIt) {
   });
 }
 
-// Shared delimiter handling keeps the editor and publication renderer in sync.
-export function matchHighlight(source: string) {
-  if (!source.startsWith('==') || /[=\s]/.test(source[2] || ' ')) return null;
-  for (let i = 2; i < source.length; i++) {
-    if (source[i] === '\n' || source[i] === '\r') return null;
+export type HighlightPair = { from: number; to: number };
+
+// Scan a paragraph from left to right. Code and escapes do not contribute
+// delimiters; soft line breaks are allowed, paragraph breaks are not.
+export function highlightPairs(
+  source: string,
+  markdown = true,
+  limit = Infinity,
+) {
+  const pairs: HighlightPair[] = [];
+  let opening: number | undefined;
+  for (let i = 0; i < source.length; i++) {
+    if (
+      (source[i] === '\n' || source[i] === '\r') &&
+      /^[\r\n][\t ]*[\r\n]/.test(source.slice(i))
+    )
+      opening = undefined;
     if (source[i] === '\\') {
       i++;
       continue;
     }
-    if (source[i] === '`') {
+    if (markdown && source[i] === '`') {
       const run = /^`+/.exec(source.slice(i))![0];
       const end = source.indexOf(run, i + run.length);
-      if (end >= 0 && !/[\r\n]/.test(source.slice(i, end))) {
+      if (end >= 0) {
         i = end + run.length - 1;
         continue;
       }
     }
-    if (
-      source.startsWith('==', i) &&
-      source[i - 1] !== '=' &&
-      !/\s/.test(source[i - 1]) &&
-      source[i + 2] !== '='
-    )
-      return { raw: source.slice(0, i + 2), text: source.slice(2, i) };
+    if (!source.startsWith('==', i)) continue;
+    if (opening !== undefined) {
+      if (i > opening + 2 && !/\s/.test(source[i - 1])) {
+        pairs.push({ from: opening, to: i + 2 });
+        if (pairs.length === limit) return pairs;
+        opening = undefined;
+        i++;
+      }
+    } else if (!/\s/.test(source[i + 2] || ' ')) {
+      opening = i;
+      i++;
+    }
   }
-  return null;
+  return pairs;
+}
+
+// Shared delimiter handling keeps the editor and publication renderer in sync.
+export function matchHighlight(source: string) {
+  const pair = highlightPairs(source, true, 1)[0];
+  return pair?.from === 0
+    ? { raw: source.slice(0, pair.to), text: source.slice(2, pair.to - 2) }
+    : null;
+}
+
+// Preserve the distinction between escaped equals and editable delimiters.
+// The Markdown parser otherwise turns both into the same plain text nodes.
+export function parseHighlightMarkdown(
+  markdown: string,
+  parse: (markdown: string) => JSONContent,
+) {
+  let placeholder = '\uE002';
+  while (markdown.includes(placeholder)) placeholder += '\uE002';
+  const source = markdown.replace(/\\[\\=]/g, (escape) =>
+    escape === '\\=' ? placeholder : escape,
+  );
+  const restore = (node: JSONContent, inCode = false): JSONContent[] => {
+    const code =
+      inCode ||
+      node.type === 'codeBlock' ||
+      !!node.marks?.some((mark) => mark.type === 'code');
+    if (node.text?.includes(placeholder)) {
+      if (code)
+        return [{ ...node, text: node.text.split(placeholder).join('\\=') }];
+      return node.text.split(placeholder).flatMap((text, index) => [
+        ...(index
+          ? [
+              {
+                ...node,
+                text: '=',
+                marks: [...(node.marks || []), { type: 'highlightLiteral' }],
+              },
+            ]
+          : []),
+        ...(text ? [{ ...node, text }] : []),
+      ]);
+    }
+    const content = node.content?.flatMap((child) => restore(child, code));
+    const editable: JSONContent[] = [];
+    let highlighted = false;
+    for (const child of content || []) {
+      const active = !!child.marks?.some((mark) => mark.type === 'highlight');
+      if (active !== highlighted) {
+        editable.push({ type: 'text', text: '==' });
+        highlighted = active;
+      }
+      editable.push({
+        ...child,
+        ...(child.marks
+          ? {
+              marks: [
+                ...child.marks.filter((mark) => mark.type !== 'highlight'),
+                ...(active &&
+                child.text?.includes('=') &&
+                !child.marks.some((mark) => mark.type === 'highlightLiteral')
+                  ? [{ type: 'highlightLiteral' }]
+                  : []),
+              ],
+            }
+          : {}),
+      });
+    }
+    if (highlighted) editable.push({ type: 'text', text: '==' });
+    return [
+      {
+        ...node,
+        ...(node.attrs
+          ? {
+              attrs: Object.fromEntries(
+                Object.entries(node.attrs).map(([key, value]) => [
+                  key,
+                  typeof value === 'string'
+                    ? value.split(placeholder).join('=')
+                    : value,
+                ]),
+              ),
+            }
+          : {}),
+        ...(node.content ? { content: editable } : {}),
+      },
+    ];
+  };
+  return restore(parse(source))[0];
 }
 
 // The default serializer escapes standard Markdown punctuation, but not '='.
-// Protect literal equals separately from delimiters emitted by the mark.
+// Only escaped/plain-pasted equals are literal. Delimiters stay in the document
+// so deleting or inserting any one of them re-pairs the remainder naturally.
 export function serializeHighlightMarkdown(
   document: JSONContent,
   serialize: (document: JSONContent) => string,
@@ -53,18 +159,93 @@ export function serializeHighlightMarkdown(
   const json = JSON.stringify(document);
   if (!json.includes('=')) return serialize(document);
   while (json.includes(placeholder)) placeholder += '\uE000';
+  let escapePlaceholder = '\uE003';
+  while (json.includes(escapePlaceholder)) escapePlaceholder += '\uE003';
   const protect = (node: JSONContent, code = false): JSONContent => {
     code ||=
       node.type === 'codeBlock' || !!node.marks?.some((m) => m.type === 'code');
+    let content = node.content;
+    if (!code && content?.some((child) => child.text?.includes('='))) {
+      const source = content
+        .map((child) => {
+          const text =
+            child.text ?? (child.type === 'hardBreak' ? '\n' : '\ufffc');
+          return child.marks?.some((mark) =>
+            ['code', 'highlightLiteral'].includes(mark.type),
+          )
+            ? text.replace(/=/g, '\ufffc')
+            : text;
+        })
+        .join('');
+      const delimiters = highlightPairs(source, false).flatMap(
+        ({ from, to }) => [
+          { from, to: from + 2 },
+          { from: to - 2, to },
+        ],
+      );
+      if (delimiters.length) {
+        let offset = 0;
+        let delimiterIndex = 0;
+        content = content.flatMap((child) => {
+          const start = offset;
+          offset += child.text?.length ?? 1;
+          if (!child.text || !child.marks?.length) return [child];
+          while (
+            delimiterIndex < delimiters.length &&
+            delimiters[delimiterIndex].to <= start
+          )
+            delimiterIndex++;
+          const overlapping: HighlightPair[] = [];
+          for (
+            let index = delimiterIndex;
+            index < delimiters.length && delimiters[index].from < offset;
+            index++
+          )
+            overlapping.push(delimiters[index]);
+          const cuts = new Set([start, offset]);
+          for (const range of overlapping) {
+            if (range.from > start && range.from < offset) cuts.add(range.from);
+            if (range.to > start && range.to < offset) cuts.add(range.to);
+          }
+          const points = [...cuts].sort((a, b) => a - b);
+          let rangeIndex = 0;
+          return points.slice(0, -1).map((from, index) => {
+            while (
+              rangeIndex < overlapping.length &&
+              overlapping[rangeIndex].to <= from
+            )
+              rangeIndex++;
+            return {
+              ...child,
+              text: child.text!.slice(from - start, points[index + 1] - start),
+              marks:
+                overlapping[rangeIndex] && from >= overlapping[rangeIndex].from
+                  ? []
+                  : child.marks,
+            };
+          });
+        });
+      }
+    }
+    const text =
+      node.text && !code
+        ? node.marks?.some((m) => m.type === 'highlightLiteral')
+          ? node.text.replace(/=/g, placeholder)
+          : node.text.replace(/(\\+)(?==)/g, (slashes) =>
+              slashes.length % 2
+                ? slashes.slice(0, -1) + escapePlaceholder
+                : slashes,
+            )
+        : node.text;
     return {
       ...node,
-      ...(node.text && !code
-        ? { text: node.text.replace(/=/g, placeholder) }
-        : {}),
-      ...(node.content
-        ? { content: node.content.map((n) => protect(n, code)) }
-        : {}),
+      ...(text ? { text } : {}),
+      ...(content ? { content: content.map((n) => protect(n, code)) } : {}),
     };
   };
-  return serialize(protect(document)).split(placeholder).join('\\=');
+  return serialize(protect(document))
+    .split(placeholder)
+    .join('\\=')
+    .split(escapePlaceholder)
+    .join('\\');
 }

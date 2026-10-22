@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core';
+import { highlightActive, toggleSourceHighlight } from './sourceHighlight';
 import {
   Bold,
   Italic,
@@ -111,8 +112,8 @@ export function Toolbar({
       {button(
         '高亮',
         <Highlighter size={17} />,
-        action((e) => e.chain().focus().toggleMark('highlight').run()),
-        editor?.isActive('highlight'),
+        action(toggleSourceHighlight),
+        highlightActive(editor),
       )}
       {button(
         '行内代码',
