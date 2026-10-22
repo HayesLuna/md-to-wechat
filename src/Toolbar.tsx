@@ -3,6 +3,7 @@ import {
   Bold,
   Italic,
   Strikethrough,
+  Highlighter,
   Code,
   Link,
   Quote,
@@ -46,13 +47,14 @@ export function Toolbar({
     title: string,
     icon: React.ReactNode,
     fn: () => void,
-    active = false,
+    active?: boolean,
   ) => (
     <button
       key={title}
       type="button"
       title={title}
       aria-label={title}
+      aria-pressed={active}
       className={active ? 'active' : ''}
       onMouseDown={(e) => e.preventDefault()}
       onClick={fn}
@@ -105,6 +107,12 @@ export function Toolbar({
         <Strikethrough size={17} />,
         action((e) => e.chain().focus().toggleStrike().run()),
         editor?.isActive('strike'),
+      )}
+      {button(
+        '高亮',
+        <Highlighter size={17} />,
+        action((e) => e.chain().focus().toggleMark('highlight').run()),
+        editor?.isActive('highlight'),
       )}
       {button(
         '行内代码',

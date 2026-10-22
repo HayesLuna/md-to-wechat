@@ -85,3 +85,98 @@ test('highlights work in headings, lists and tables on mobile without leaking in
   await page.screenshot({ path: '/tmp/mojian-highlight-mobile.png' });
   expect(errors).toEqual([]);
 });
+
+test('adding opening equals after closing equals highlights existing text and supports undo', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => (window as any).__mojian.setMarkdown('前面 **重点** 后面'));
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(6));
+  await page.keyboard.type('==');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(4));
+  await page.keyboard.type('==');
+  await expect(page.locator('.article-editor mark')).toHaveText('重点');
+  await expect(page.locator('.article-editor strong')).toHaveText('重点');
+  await expect(page.locator('.article-editor')).toHaveText('前面 重点 后面');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveCount(0);
+  await expect(page.locator('.article-editor')).toContainText('==重点==');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(page.locator('.article-editor mark')).toHaveText('重点');
+});
+
+for (const native of [false, true]) test(`pasted equals in rich HTML highlight while preserving formatting (${native ? 'internal' : 'external'})`, async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => { const m = (window as any).__mojian; m.setMarkdown(''); m.editor.commands.focus(); });
+  await page.evaluate(native => {
+    const data = new DataTransfer();
+    data.setData('text/plain', '前面 ==重点== 和 ==另一处== 后面 ==代码==');
+    data.setData('text/html', `<p${native ? ' data-pm-slice="1 1 []"' : ''}>前面 ==<strong>重点</strong>== 和 ==另一处== 后面 <code>==代码==</code></p>`);
+    (window as any).__mojian.editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, native);
+  await expect(page.locator('.article-editor mark')).toHaveText(['重点', '另一处']);
+  await expect(page.locator('.article-editor strong')).toHaveText('重点');
+  await expect(page.locator('.article-editor code')).toHaveText('==代码==');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(page.locator('.article-editor mark')).toHaveText(['重点', '另一处']);
+});
+
+test('highlight paste respects code destinations and the plain-text shortcut', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  for (const mode of ['codeBlock', 'code', 'plain']) {
+    await page.evaluate(mode => {
+      const m = (window as any).__mojian;
+      m.setMarkdown(mode === 'codeBlock' ? '```txt\n内容\n```' : mode === 'code' ? '`内容`' : '');
+      m.editor.commands.focus(mode === 'plain' ? 1 : 2);
+      if (mode === 'plain') m.editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      const data = new DataTransfer();
+      data.setData('text/plain', '==字面文本==');
+      data.setData('text/html', '<p><strong>==字面文本==</strong></p>');
+      m.editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, mode);
+    await expect(page.locator('.article-editor mark')).toHaveCount(0);
+    await expect(page.locator('.article-editor')).toContainText('==字面文本==');
+  }
+});
+
+for (const width of [1440, 390]) test(`toolbar highlight toggles selection, reflects caret state and supports typing at ${width}px`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width, height: 1000 });
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => {
+    const m = (window as any).__mojian;
+    m.setMarkdown('前面 重点 后面');
+    m.editor.commands.setTextSelection({from: 4, to: 6});
+    m.editor.commands.focus();
+  });
+  const button = page.getByRole('toolbar', {name:'正文格式'}).getByRole('button', {name:'高亮', exact:true});
+  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await button.click();
+  await expect(page.locator('.article-editor mark')).toHaveText('重点');
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => { const s = (window as any).__mojian.editor.state.selection; return {from:s.from,to:s.to}; })).toEqual({from:4,to:6});
+  expect(await page.evaluate(() => (window as any).__mojian.editor.getMarkdown())).toContain('==重点==');
+  await button.click();
+  await expect(page.locator('.article-editor mark')).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.article-editor mark')).toHaveText('重点');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(2));
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(5));
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
+  await button.click();
+  await page.keyboard.type('new');
+  await expect(page.locator('.article-editor mark')).toHaveText(['重点', 'new']);
+  await expect(page.locator('.article-editor')).toHaveText('前面 重点 后面new');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  expect(errors).toEqual([]);
+  await page.screenshot({path:`/tmp/mojian-highlight-toolbar-${width}.png`});
+});
