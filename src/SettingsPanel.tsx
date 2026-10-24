@@ -27,7 +27,7 @@ export function SettingsPanel({
       <div className="setting-row">
         <label htmlFor="theme-color">主题色</label>
         <div className="color-options">
-          {['#a6493d', '#303030', '#6f7480', '#8b7765'].map((c) => (
+          {['#2864a8', '#a6493d', '#303030', '#6f7480', '#8b7765'].map((c) => (
             <button
               key={c}
               aria-label={'使用主题色 ' + c}

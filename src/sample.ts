@@ -73,7 +73,7 @@ export type Settings = {
 };
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'default',
-  color: '#a6493d',
+  color: '#2864a8',
   fontSize: 16,
   lineHeight: 1.85,
   codeTheme: 'light',

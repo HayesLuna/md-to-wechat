@@ -4,7 +4,7 @@ import { markdownHighlight } from './highlight';
 import DOMPurify from 'dompurify';
 import { acquireImageURL } from './storage';
 import { diagram } from './mermaid';
-import type { Settings } from './sample';
+import { DEFAULT_SETTINGS, type Settings } from './sample';
 import {
   codeCardRenderer,
   addCodeDecorations,
@@ -43,9 +43,10 @@ async function inlineStyles(
   s: Settings,
   checkpoint: ReturnType<typeof workBudget>,
 ) {
-  const color = /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : '#a6493d';
-  const headingStyle =
-    'color:#2864a8;border-bottom:1px solid #b9d4f3;padding-bottom:8px;';
+  const color = /^#[0-9a-f]{6}$/i.test(s.color)
+    ? s.color
+    : DEFAULT_SETTINGS.color;
+  const headingStyle = `color:${color};border-bottom:1px solid ${color};padding-bottom:8px;`;
   const dark = s.codeTheme === 'dark';
   root.setAttribute(
     'style',
