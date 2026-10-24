@@ -1,4 +1,8 @@
-import { highlighter as hljs, syntaxRevision } from './syntax';
+import {
+  highlighter as hljs,
+  syntaxRevision,
+  MAX_CODE_HIGHLIGHT_CHARACTERS,
+} from './syntax';
 import type { workBudget } from './workBudget';
 
 export type CodeSource = { text: string; language: string };
@@ -215,7 +219,11 @@ function* buildCodeCard(
   const json = source.language.trim().toLowerCase() === 'json';
   // Highlight the complete block before splitting DOM text into lines, so multi-line
   // comments/strings retain context. Only generated spans are copied into output.
-  if (source.language && hljs.getLanguage(source.language))
+  if (
+    content.length <= MAX_CODE_HIGHLIGHT_CHARACTERS &&
+    source.language &&
+    hljs.getLanguage(source.language)
+  )
     highlighted.innerHTML = hljs.highlight(content, {
       language: source.language,
       ignoreIllegals: true,

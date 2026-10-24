@@ -1,7 +1,11 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { lowlight, syntaxRevision } from './syntax';
+import {
+  lowlight,
+  syntaxRevision,
+  MAX_CODE_HIGHLIGHT_CHARACTERS,
+} from './syntax';
 
 export const codeHighlightKey = new PluginKey<DecorationSet>(
   'mojian-code-highlight',
@@ -26,7 +30,12 @@ export function codeHighlightPlugin() {
     doc.descendants((node, pos) => {
       if (node.type.name !== 'codeBlock') return !node.isTextblock;
       const language = String(node.attrs.language || '').toLowerCase();
-      if (!language || language === 'mermaid' || !lowlight.registered(language))
+      if (
+        !language ||
+        language === 'mermaid' ||
+        node.content.size > MAX_CODE_HIGHLIGHT_CHARACTERS ||
+        !lowlight.registered(language)
+      )
         return false;
       let entry = cache.get(node);
       if (!entry || entry.revision !== syntaxRevision) {

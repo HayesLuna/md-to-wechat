@@ -11,6 +11,10 @@ import xml from 'highlight.js/lib/languages/xml';
 import css from 'highlight.js/lib/languages/css';
 import markdown from 'highlight.js/lib/languages/markdown';
 
+// Larger blocks stay editable and exportable as plain code without a long
+// synchronous tokenization pass on the main thread.
+export const MAX_CODE_HIGHLIGHT_CHARACTERS = 50_000;
+
 const initial = {
   javascript,
   typescript,

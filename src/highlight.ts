@@ -3,6 +3,8 @@ import type MarkdownIt from 'markdown-it';
 
 export function markdownHighlight(md: MarkdownIt) {
   md.inline.ruler.before('emphasis', 'highlight', (state, silent) => {
+    if (state.src[state.pos] !== '=' || state.src[state.pos + 1] !== '=')
+      return false;
     const match = matchHighlight(state.src.slice(state.pos, state.posMax));
     if (!match) return false;
     if (!silent) {
@@ -62,6 +64,7 @@ export function highlightPairs(
 
 // Shared delimiter handling keeps the editor and publication renderer in sync.
 export function matchHighlight(source: string) {
+  if (!source.startsWith('==')) return null;
   const pair = highlightPairs(source, true, 1)[0];
   return pair?.from === 0
     ? { raw: source.slice(0, pair.to), text: source.slice(2, pair.to - 2) }

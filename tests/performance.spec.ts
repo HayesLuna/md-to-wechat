@@ -8,6 +8,41 @@ const codeDocument = (count: number, language = 'javascript') =>
       `\`\`\`${language}\nconst value_${i} = ${i};\nconsole.log(value_${i});\n\`\`\`\n\n`,
   ).join('');
 
+test('oversized code remains intact while editor and output skip syntax highlighting', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const source = `{"value":"${'x'.repeat(50_001)}"}`;
+  await page.evaluate(async (text) => {
+    const { lowlight, highlighter } = await import('/src/syntax.ts');
+    const calls = { editor: 0, output: 0 };
+    const originalEditor = lowlight.highlight;
+    const originalOutput = highlighter.highlight;
+    lowlight.highlight = (...args) => {
+      calls.editor++;
+      return originalEditor(...args);
+    };
+    highlighter.highlight = ((...args: Parameters<typeof originalOutput>) => {
+      calls.output++;
+      return originalOutput(...args);
+    }) as typeof originalOutput;
+    (window as any).__largeCodeCalls = calls;
+    (window as any).__mojian.setMarkdown(`\`\`\`json\n${text}\n\`\`\``);
+  }, source);
+  await page.waitForFunction(() => {
+    const m = (window as any).__mojian;
+    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
+  });
+  expect(await page.evaluate(() => (window as any).__largeCodeCalls)).toEqual({
+    editor: 0,
+    output: 0,
+  });
+  await expect(page.locator('.article-editor .code-node code')).toHaveText(source);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper [data-code-block] code')).toContainText(source);
+});
+
 test('editing one code block never detects languages or highlights unchanged blocks', async ({
   page,
 }) => {
