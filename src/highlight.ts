@@ -2,26 +2,42 @@ import type { JSONContent } from '@tiptap/core';
 import type MarkdownIt from 'markdown-it';
 
 export function markdownHighlight(md: MarkdownIt) {
+  const pairsByState = new WeakMap<object, Map<number, HighlightPair>>();
   md.inline.ruler.before('emphasis', 'highlight', (state, silent) => {
     if (state.src[state.pos] !== '=' || state.src[state.pos + 1] !== '=')
       return false;
     if (/\s/.test(state.src[state.pos + 2] || ' ')) return false;
-    const match = matchHighlight(state.src.slice(state.pos, state.posMax));
-    if (!match) return false;
+    let pairs = pairsByState.get(state);
+    if (!pairs) {
+      pairs = new Map(
+        highlightPairs(state.src.slice(0, state.posMax), true).map((pair) => [
+          pair.from,
+          pair,
+        ]),
+      );
+      pairsByState.set(state, pairs);
+    }
+    const pair = pairs.get(state.pos);
+    if (!pair) return false;
     if (!silent) {
       state.push('mark_open', 'mark', 1);
       // Parsing into the growing parent array reruns inline postprocessing over
       // every previous highlight. Process only this fragment, then append through
       // push so parent levels and delimiter metadata stay in step.
       const tokens: typeof state.tokens = [];
-      md.inline.parse(match.text, md, state.env, tokens);
+      md.inline.parse(
+        state.src.slice(state.pos + 2, pair.to - 2),
+        md,
+        state.env,
+        tokens,
+      );
       for (const token of tokens) {
         const appended = state.push(token.type, token.tag, token.nesting);
         Object.assign(appended, token, { level: appended.level });
       }
       state.push('mark_close', 'mark', -1);
     }
-    state.pos += match.raw.length;
+    state.pos = pair.to;
     return true;
   });
 }

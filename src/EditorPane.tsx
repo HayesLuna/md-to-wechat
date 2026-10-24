@@ -26,7 +26,7 @@ import {
   MarkdownStarterKit,
 } from './editorExtensions';
 import { TyporaHighlight, HighlightLiteral } from './sourceHighlight';
-import { safeURL } from './output';
+import { safeURL } from './outputUtils';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
   shouldParseMarkdownPaste,
@@ -284,6 +284,16 @@ export function EditorPane({
       timer = setTimeout(load, 150);
     };
     editor.on('update', scheduleLoad);
+    // setContent with emitUpdate:false is used when returning from source mode.
+    // Transactions still report the replaced document and need language loading.
+    const documentChanged = ({
+      transaction,
+    }: {
+      transaction: { docChanged: boolean };
+    }) => {
+      if (transaction.docChanged) scheduleLoad();
+    };
+    editor.on('transaction', documentChanged);
     scheduleLoad();
     return () => {
       active = false;
@@ -291,6 +301,7 @@ export function EditorPane({
       clearTimeout(timer);
       cancelEditorMarkdown(editor);
       editor.off('update', scheduleLoad);
+      editor.off('transaction', documentChanged);
     };
   }, [editor]);
   useEffect(() => {

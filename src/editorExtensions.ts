@@ -29,7 +29,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import StarterKit from '@tiptap/starter-kit';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
-import { widthFromTitle } from './output';
+import { widthFromTitle } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 
 // Markdown permits emphasis around inline code. StarterKit's default code
@@ -175,10 +175,9 @@ export const SmartCode = CodeBlockLowlight.extend({
   renderMarkdown(node) {
     const source = (node.content || []).map((n) => n.text || '').join('');
     // Choose a fence longer than any source run, preserving code containing backticks.
-    const longest = Math.max(
-      2,
-      ...Array.from(source.matchAll(/`+/g), (m) => m[0].length),
-    );
+    let longest = 2;
+    for (const run of source.matchAll(/`+/g))
+      longest = Math.max(longest, run[0].length);
     const fence = '`'.repeat(longest + 1);
     return fence + (node.attrs?.language || '') + '\n' + source + '\n' + fence;
   },

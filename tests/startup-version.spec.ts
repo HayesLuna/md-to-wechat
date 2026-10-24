@@ -62,3 +62,19 @@ test('a failed optional language download keeps editing and publication availabl
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await expect(page.locator('.preview-paper [data-code-line]')).toHaveText('fn main() {}');
 });
+
+test('switching from source mode loads newly added code language without another edit', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.getByRole('button', { name: 'Markdown 源码', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Markdown 源码正文' }).fill(
+    '# 语言切换\n\n```python\nprint("hello")\n```\n\n' + '正文'.repeat(26_000),
+  );
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  expect(await page.evaluate(async () => (await import('/src/syntax.ts')).lowlight.registered('python'))).toBe(false);
+  await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+  await expect.poll(() => page.evaluate(async () =>
+    (await import('/src/syntax.ts')).lowlight.registered('python'),
+  )).toBe(true);
+  await expect(page.locator('.article-editor .hljs-built_in')).toContainText('print');
+});

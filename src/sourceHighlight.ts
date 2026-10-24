@@ -166,7 +166,10 @@ export const TyporaHighlight = Mark.create({
   markdownTokenizer: {
     name: 'highlight',
     level: 'inline',
-    start: (source) => source.indexOf('=='),
+    start: (source) => {
+      if (!source.includes('==')) return -1;
+      return highlightPairs(source, true, 1)[0]?.from ?? -1;
+    },
     tokenize(source, _tokens, lexer) {
       const match = matchHighlight(source);
       return match
@@ -348,21 +351,22 @@ export const TyporaHighlight = Mark.create({
         visible: Decoration[] = [];
       // Keep the closing syntax visible while the caret rests just after it.
       // Formatting commands still treat that position as outside the pair.
-      for (const pair of activePairs(state, base, true)) {
-        for (const decoration of base.find(
-          pair.from,
-          pair.to,
-          (spec) => !!spec.delimiter,
-        )) {
-          if (decoration.from !== pair.from && decoration.to !== pair.to)
-            continue;
-          hidden.push(decoration);
-          visible.push(
-            Decoration.inline(decoration.from, decoration.to, {
-              class: 'highlight-delimiter expanded',
-            }),
-          );
-        }
+      const pairs = activePairs(state, base, true);
+      if (!pairs.length) return base;
+      const starts = new Set(pairs.map((pair) => pair.from));
+      const ends = new Set(pairs.map((pair) => pair.to));
+      for (const decoration of base.find(
+        pairs[0].from,
+        pairs[pairs.length - 1].to,
+        (spec) => !!spec.delimiter,
+      )) {
+        if (!starts.has(decoration.from) && !ends.has(decoration.to)) continue;
+        hidden.push(decoration);
+        visible.push(
+          Decoration.inline(decoration.from, decoration.to, {
+            class: 'highlight-delimiter expanded',
+          }),
+        );
       }
       if (hidden.length > 128) {
         const expanded = new Map(

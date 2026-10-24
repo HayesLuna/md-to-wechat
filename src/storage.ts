@@ -333,6 +333,9 @@ export function retainImageURL(url: string) {
 export async function imageBlob(src: string): Promise<Blob | undefined> {
   return (await db()).get('images', src.slice(12));
 }
+export async function imageExists(src: string) {
+  return !!(await db()).getKey('images', src.slice(12));
+}
 export function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

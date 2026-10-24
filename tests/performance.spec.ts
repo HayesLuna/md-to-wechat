@@ -33,6 +33,47 @@ test('invalid highlight openings never scan the remaining paragraph', () => {
   expect(scanChecks).toBeLessThan(4000 * 2);
 });
 
+test('unclosed nonempty highlights scan a paragraph only once', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  const source = '==word '.repeat(4000);
+  const original = String.prototype.startsWith;
+  let checks = 0;
+  String.prototype.startsWith = function (search, position) {
+    if (search === '==') checks++;
+    return original.call(this, search, position);
+  };
+  try {
+    expect(parser.renderInline(source)).toBe(source);
+  } finally {
+    String.prototype.startsWith = original;
+  }
+  expect(checks).toBeLessThan(source.length * 3);
+});
+
+test('editor import skips repeated unclosed highlights without rescanning suffixes', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const result = await page.evaluate(() => {
+    const source = '==word '.repeat(4000);
+    const original = String.prototype.startsWith;
+    let checks = 0;
+    String.prototype.startsWith = function (search, position) {
+      if (search === '==') checks++;
+      return original.call(this, search, position);
+    };
+    try {
+      const parsed = (window as any).__mojian.editor.markdown.parse(source);
+      return { checks, text: parsed.content[0].content[0].text };
+    } finally {
+      String.prototype.startsWith = original;
+    }
+  });
+  expect(result.text).toBe('==word '.repeat(4000));
+  expect(result.checks).toBeLessThan(100_000);
+});
+
 test('highlight fragments preserve surrounding formatting and token levels', () => {
   const parser = new MarkdownIt().use(markdownHighlight);
   expect(
@@ -61,6 +102,59 @@ const codeDocument = (count: number, language = 'javascript') =>
     (_, i) =>
       `\`\`\`${language}\nconst value_${i} = ${i};\nconsole.log(value_${i});\n\`\`\`\n\n`,
   ).join('');
+
+test('code containing many backticks serializes without a call stack overflow', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const result = await page.evaluate(() => {
+    const editor = (window as any).__mojian.editor;
+    const source = 'const s = `x`;\n'.repeat(75_000);
+    return editor.markdown.serialize({
+      type: 'doc',
+      content: [
+        {
+          type: 'codeBlock',
+          attrs: { language: 'javascript' },
+          content: [{ type: 'text', text: source }],
+        },
+      ],
+    });
+  });
+  expect(result).toContain('const s = `x`;');
+  expect(result).toContain('```javascript');
+  expect(result.length).toBeGreaterThan(1_125_000);
+});
+
+test('selecting a dense highlight paragraph queries decorations by range', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() =>
+    (window as any).__mojian.setMarkdown('==word== '.repeat(1000)),
+  );
+  await expect(page.locator('.article-editor mark')).toHaveCount(1000);
+  await page.locator('.article-editor mark').first().click();
+  const queries = await page.evaluate(async () => {
+    const { DecorationSet } = await import('/node_modules/.vite/deps/@tiptap_pm_view.js');
+    const original = DecorationSet.prototype.find;
+    let calls = 0;
+    DecorationSet.prototype.find = function (...args) {
+      calls++;
+      return original.apply(this, args);
+    };
+    try {
+      (window as any).__mojian.editor.commands.selectAll();
+      return calls;
+    } finally {
+      DecorationSet.prototype.find = original;
+    }
+  });
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2000);
+  expect(queries).toBeLessThan(50);
+});
 
 test('oversized code remains intact while editor and output skip syntax highlighting', async ({
   page,
@@ -371,4 +465,37 @@ test('large articles save without background output and prepare the latest versi
     const library = await s.loadDraftLibrary();
     return (await s.loadDraft(library.activeId!))!.markdown.endsWith('最新修改');
   })).toBe(true);
+});
+
+test('long articles list current local images when exporting without a preview', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const src = await page.evaluate(async () => {
+    const { storeImage } = await import('/src/storage.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 10;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!), 'image/png'),
+    );
+    return storeImage(blob);
+  });
+  await page.evaluate((image) => {
+    (window as any).__mojian.setMarkdown(
+      '# 长文\n\n![实际图片](' + image + ')\n\n' +
+        '普通正文。'.repeat(10_000) +
+        '\n\n```md\n![代码示例](local-image:fake)\n```',
+    );
+  }, src);
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  expect(await page.evaluate(() => !!(window as any).__mojian.getOutput())).toBe(false);
+  const markdownDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Markdown', exact: true }).click();
+  await markdownDownload;
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('实际图片');
+  await expect(dialog).not.toContainText('代码示例');
+  await expect(dialog).not.toContainText('暂无本地图片');
+  const imageDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: '下载', exact: true }).click();
+  expect((await imageDownload).suggestedFilename()).toBe('实际图片.png');
 });

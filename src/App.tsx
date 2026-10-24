@@ -51,16 +51,13 @@ import {
   storeImage,
   download,
   downloadImage,
+  imageExists,
 } from './storage';
-import {
-  renderArticle,
-  outputKey,
-  headings,
-  safeURL,
-  copyRich,
-  copyText,
-  type Output,
-} from './output';
+import type { Output, Asset } from './output';
+import { outputKey, safeURL } from './outputUtils';
+import { headings } from './headings';
+import { copyRich, copyText } from './clipboard';
+import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument } from './EditorPane';
 import { flushEditorMarkdown } from './editorMarkdown';
@@ -140,6 +137,8 @@ export default function App() {
   const outputRef = useRef<Output | null>(null);
   const outputAbort = useRef<AbortController | null>(null);
   const [output, setOutput] = useState<Output | null>(null);
+  const [downloadAssets, setDownloadAssets] = useState<Asset[]>([]);
+  const downloadRequest = useRef(0);
   const [requestedOutput, setRequestedOutput] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [renderError, setRenderError] = useState('');
@@ -361,9 +360,12 @@ export default function App() {
     setRenderError('');
     const timer = setTimeout(
       () => {
-        renderArticle(markdown, settings, controller.signal, {
-          diagrams: demanded,
-        })
+        import('./output')
+          .then(({ renderArticle }) =>
+            renderArticle(markdown, settings, controller.signal, {
+              diagrams: demanded,
+            }),
+          )
           .then((result) => {
             if (
               active &&
@@ -399,6 +401,7 @@ export default function App() {
     [],
   );
   const closeModal = () => {
+    downloadRequest.current++;
     imageRequest.current++;
     setProcessing(false);
     target.current?.cancel();
@@ -931,12 +934,36 @@ export default function App() {
       }),
       title.replace(/[<>:"/\\|?*]/g, '').slice(0, 70) + '.md',
     );
-    if (snapshot.markdown.includes('local-image:')) {
-      setModal({ type: 'downloads' });
+    const assets = localImageAssets(snapshot.markdown);
+    if (assets.length) {
+      openDownloads(snapshot.markdown, assets);
       notify(
         '已导出 Markdown。单独的 .md 不包含本地图片，请同时下载图片资源。',
       );
     } else notify('已导出 UTF-8 Markdown');
+  };
+  const openDownloads = (
+    markdown = readCurrent().markdown,
+    assets = localImageAssets(markdown),
+  ) => {
+    const request = ++downloadRequest.current;
+    setDownloadAssets(assets);
+    setModal({ type: 'downloads' });
+    void Promise.all(
+      assets.map(async (asset) => ({
+        ...asset,
+        missing: !(await imageExists(asset.src!)),
+      })),
+    )
+      .then((checked) => {
+        if (downloadRequest.current === request) setDownloadAssets(checked);
+      })
+      .catch(() => {
+        if (downloadRequest.current === request)
+          setDownloadAssets(
+            assets.map((asset) => ({ ...asset, missing: true })),
+          );
+      });
   };
   const outputCurrent = () =>
     output &&
@@ -1043,7 +1070,6 @@ export default function App() {
     window.addEventListener('resize', position);
     return () => window.removeEventListener('resize', position);
   }, [context, inTable, imageSelected]);
-  const localAssets = output?.assets.filter((a) => a.kind === 'image') || [];
   useEffect(() => {
     const listener = (e: Event) => {
       const { event, editor } = (e as CustomEvent).detail;
@@ -1540,7 +1566,7 @@ export default function App() {
           </button>
           <button
             onClick={() => {
-              setModal({ type: 'downloads' });
+              openDownloads();
               setMenu(false);
             }}
           >
@@ -1808,7 +1834,7 @@ export default function App() {
                 单独的 .md
                 文件不包含图片二进制。请分别下载图片；在其他浏览器导入时，缺失资源会显示提示。
               </p>
-              <ul className="asset-list">{assetDownloads(localAssets)}</ul>
+              <ul className="asset-list">{assetDownloads(downloadAssets)}</ul>
               <div className="dialog-actions">
                 <button onClick={closeModal}>完成</button>
               </div>

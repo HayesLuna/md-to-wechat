@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
-import { copyText } from './output';
+import { copyText } from './clipboard';
 import { diagram, downloadDiagram } from './mermaid';
 import { indentJSON, compactJSON } from './jsonIndentation';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
