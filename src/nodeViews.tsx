@@ -12,12 +12,13 @@ import {
   Trash2,
   ImageOff,
   IndentIncrease,
+  Minimize2,
 } from 'lucide-react';
 import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
 import { copyText } from './output';
 import { diagram, downloadDiagram } from './mermaid';
-import { indentJSON } from './jsonIndentation';
+import { indentJSON, compactJSON } from './jsonIndentation';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
 const sourceExtensions: Record<string, string> = {
@@ -329,7 +330,7 @@ export function CodeView({
   };
   const asyncAction = (action: () => Promise<unknown>) =>
     action().catch((e) => signal(e.message));
-  const formatJSON = () => {
+  const rewriteJSON = (action: 'format' | 'compact') => {
     if (!editor.isEditable) return;
     const pos = getPos();
     if (pos === undefined) return;
@@ -342,7 +343,10 @@ export function CodeView({
     )
       return;
     try {
-      const formatted = indentJSON(current.textContent);
+      const formatted =
+        action === 'compact'
+          ? compactJSON(current.textContent)
+          : indentJSON(current.textContent);
       if (formatted.text === current.textContent) {
         signal('内容无需调整');
         return;
@@ -378,7 +382,7 @@ export function CodeView({
       editor.view.dispatch(tr);
       editor.view.dispatch(closeHistory(editor.state.tr));
       editor.commands.focus(undefined, { scrollIntoView: false });
-      signal('已格式化 JSON');
+      signal(action === 'compact' ? '已压缩 JSON' : '已格式化 JSON');
     } catch (error) {
       signal(
         error instanceof Error ? error.message : '内容未调整，原文已保留。',
@@ -411,16 +415,28 @@ export function CodeView({
         />
         <div>
           {language === 'json' && (
-            <button
-              aria-label="格式化 JSON"
-              title="格式化 JSON（2 空格缩进）"
-              disabled={!source.length || !editor.isEditable}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={formatJSON}
-            >
-              <IndentIncrease size={14} />
-              <span>格式化</span>
-            </button>
+            <>
+              <button
+                aria-label="压缩 JSON"
+                title="压缩 JSON（仅移除排版空白）"
+                disabled={!source.length || !editor.isEditable}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => rewriteJSON('compact')}
+              >
+                <Minimize2 size={14} />
+                <span>压缩</span>
+              </button>
+              <button
+                aria-label="格式化 JSON"
+                title="格式化 JSON（2 空格缩进）"
+                disabled={!source.length || !editor.isEditable}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => rewriteJSON('format')}
+              >
+                <IndentIncrease size={14} />
+                <span>格式化</span>
+              </button>
+            </>
           )}
           {mermaid && (
             <>

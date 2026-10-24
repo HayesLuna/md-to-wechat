@@ -3,12 +3,22 @@ type TokenPosition = { from: number; to: number; output: number };
 // Only called by the code-block action. Never parse values into JS objects:
 // number spelling, duplicate keys and string escapes must survive unchanged.
 export function indentJSON(source: string) {
+  return layoutJSON(source, false);
+}
+
+export function compactJSON(source: string) {
+  return layoutJSON(source, true);
+}
+
+function layoutJSON(source: string, compact: boolean) {
   const unchanged = { text: source, mapOffset: (offset: number) => offset };
   if (
     source.length > 20_000 ||
     new TextEncoder().encode(source).length > 20_000
   )
-    throw new Error('代码较长，暂不格式化，原文已保留。');
+    throw new Error(
+      `代码较长，暂不${compact ? '压缩' : '格式化'}，原文已保留。`,
+    );
 
   const parts: string[] = [];
   const positions: TokenPosition[] = [];
@@ -26,6 +36,7 @@ export function indentJSON(source: string) {
   };
   const newline = () => {
     space = false;
+    if (compact) return;
     if (lineStart) return;
     if (++lines > 2000)
       throw new Error('展开后的代码行数较多，暂不格式化，原文已保留。');
@@ -64,7 +75,9 @@ export function indentJSON(source: string) {
       previous = 'value';
     } else if (char === '{' || char === '[') {
       if (stack.length >= 64)
-        throw new Error('代码嵌套较深，暂不格式化，原文已保留。');
+        throw new Error(
+          `代码嵌套较深，暂不${compact ? '压缩' : '格式化'}，原文已保留。`,
+        );
       token(index, ++index);
       stack.push(char === '{' ? '}' : ']');
       let next = index;
@@ -83,7 +96,7 @@ export function indentJSON(source: string) {
       previous = 'comma';
     } else if (char === ':') {
       token(index, ++index, false);
-      space = true;
+      space = !compact;
       previous = 'colon';
     } else {
       const from = index++;

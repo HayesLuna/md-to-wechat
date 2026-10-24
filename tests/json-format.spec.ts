@@ -37,9 +37,11 @@ test('formatting is exposed only for explicit JSON and never runs on typing', as
   }, source);
   const blocks=page.locator('.code-node');
   await expect(page.getByRole('button',{name:'格式化 JSON',exact:true})).toHaveCount(1);
+  await expect(page.getByRole('button',{name:'压缩 JSON',exact:true})).toHaveCount(1);
   for (let i=0;i<5;i++) await expect(blocks.nth(i).locator('pre')).toHaveText(source);
   await blocks.last().getByRole('textbox',{name:'代码语言',exact:true}).fill('txt');
   await expect(page.getByRole('button',{name:'格式化 JSON',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'压缩 JSON',exact:true})).toHaveCount(0);
   await blocks.last().getByRole('textbox',{name:'代码语言',exact:true}).fill('json');
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
   await expect(page.locator('.article-editor')).toBeFocused();
@@ -50,6 +52,7 @@ test('formatting is exposed only for explicit JSON and never runs on typing', as
   await expect(blocks.first().locator('pre')).toHaveText(source);
   await page.evaluate(() => { const m=(window as any).__mojian;m.setMarkdown('```json\n\n```'); });
   await expect(page.getByRole('button',{name:'格式化 JSON',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'压缩 JSON',exact:true})).toBeDisabled();
 });
 
 for (const width of [1440,390]) test(`format current JSON block with a stable selection, undo and output at ${width}px`,async({page,context})=>{
@@ -155,4 +158,62 @@ test('formatting re-highlights only the changed JSON block; repeated formatting 
   await page.waitForTimeout(180);
   expect(await page.evaluate(()=>(window as any).__jsonHighlightCalls)).toEqual(['json']);
   expect(await page.evaluate(()=>(window as any).__jsonUpdates)).toBe(1);
+});
+
+
+test('JSON compression preserves literal tokens, maps selections and never repairs syntax', async ({page}) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const {indentJSON, compactJSON} = await import('/src/jsonIndentation.ts');
+    const source = String.raw`{ "id": 9007199254740993, "id": -0, "exp": 1e+09, "decimal": 1.2300, "text": "  a b \\ \" \u4e2d \t \n  ", "list": [ true, false, null, {}, [] ] }`;
+    const formatted=indentJSON(source).text;
+    const compact=compactJSON(formatted);
+    const selections=Array.from(formatted.matchAll(/"(?:\\.|[^"\\])*"|[^\s{}\[\],:]+/g), match => ({
+      before:match[0], after:compact.text.slice(compact.mapOffset(match.index!,1),compact.mapOffset(match.index!+match[0].length,-1)),
+    }));
+    return {source, text:compact.text, again:compactJSON(compact.text).text, selections,
+      opaque:compactJSON('{ unquoted : tru e , "value" : unknown }').text,
+      unfinished:['{"text":"unfinished','{"a":1','[1}'].map(text=>({text,result:compactJSON(text).text})),
+      guards:['"'+'中'.repeat(7000)+'"','['.repeat(65)+'0'+']'.repeat(65)].map(text=>{try{compactJSON(text);return '';}catch(error){return (error as Error).message;}}),
+    };
+  });
+  const tokens=(text:string)=>text.match(/"(?:\\.|[^"\\])*"|[^\s]/g);
+  expect(tokens(result.text)).toEqual(tokens(result.source));
+  expect(result.text).toBe(String.raw`{"id":9007199254740993,"id":-0,"exp":1e+09,"decimal":1.2300,"text":"  a b \\ \" \u4e2d \t \n  ","list":[true,false,null,{},[]]}`);
+  expect(result.again).toBe(result.text);
+  for(const selection of result.selections) expect(selection.after).toBe(selection.before);
+  expect(result.opaque).toBe('{unquoted:tru e,"value":unknown}');
+  for(const entry of result.unfinished) expect(entry.result).toBe(entry.text);
+  for(const message of result.guards) expect(message).toContain('暂不压缩，原文已保留');
+});
+
+for(const width of [1440,390,320]) test(`compress only the clicked JSON block, preserving selection and separate undo at ${width}px`,async({page})=>{
+  await page.setViewportSize({width,height:900});
+  await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);
+  const original=String.raw`{ "id" : 9007199254740993, "id" : -0, "text" : "  测试 \u4e2d  " }`;
+  const compact=String.raw`{"id":9007199254740993,"id":-0,"text":"  测试 \u4e2d  "}`;
+  await page.evaluate(original=>{
+    const m=(window as any).__mojian;m.setMarkdown('```json\n'+original+'\n```\n\n```json\n{ "other" : 1 }\n```');
+    const from=1+original.indexOf('"  测试');const to=1+original.indexOf('"',from)+1;m.editor.commands.setTextSelection({from,to});
+    (window as any).__selected=m.editor.state.doc.textBetween(from,to);
+    (window as any).__jsonUpdates=0;m.editor.on('update',()=>{(window as any).__jsonUpdates++;});
+  },original);
+  const block=page.locator('.code-node').first();
+  const button=block.getByRole('button',{name:'压缩 JSON',exact:true});
+  expect(await block.locator('.code-header button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label')))).toEqual(['压缩 JSON','格式化 JSON','复制代码','折叠代码','下载源码']);
+  await button.click();
+  await expect(block.locator('pre')).toHaveText(compact);
+  await expect.poll(()=>page.evaluate(()=>window.getSelection()?.toString())).toBe(await page.evaluate(()=>(window as any).__selected));
+  await expect(page.locator('.code-node').last().locator('pre')).toHaveText('{ "other" : 1 }');
+  await button.click();expect(await page.evaluate(()=>(window as any).__jsonUpdates)).toBe(1);
+  await page.keyboard.press('ControlOrMeta+z');await expect(block.locator('pre')).toHaveText(original);
+  await page.keyboard.press('ControlOrMeta+Shift+z');await expect(block.locator('pre')).toHaveText(compact);
+  await block.getByRole('button',{name:'格式化 JSON',exact:true}).click();
+  await expect(block.locator('pre')).toContainText('\n  "id": 9007199254740993,');
+  await button.click();await expect(block.locator('pre')).toHaveText(compact);
+  await page.keyboard.press('ControlOrMeta+z');await expect(block.locator('pre')).toContainText('\n  "id": 9007199254740993,');
+  await page.keyboard.press('ControlOrMeta+z');await expect(block.locator('pre')).toHaveText(compact);
+  const bounds=await button.boundingBox();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(width);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+  await page.screenshot({path:`/tmp/mojian-json-compact-${width}.png`});
 });

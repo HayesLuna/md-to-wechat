@@ -1842,17 +1842,29 @@ button.primary:hover {
   align-items: center;
 }
 .code-header button[aria-label='复制代码'] svg,
+.code-header button[aria-label='压缩 JSON'] svg,
 .code-header button[aria-label='格式化 JSON'] svg {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
 }
 .code-header button[aria-label='复制代码'],
+.code-header button[aria-label='压缩 JSON'],
 .code-header button[aria-label='格式化 JSON'] {
   font-size: 13px;
   line-height: 20px;
   padding: 4px 6px;
   gap: 6px;
+}
+@media (max-width: 480px) {
+  .code-header > div {
+    gap: 2px;
+  }
+  .code-header button[aria-label='复制代码'],
+  .code-header button[aria-label='压缩 JSON'],
+  .code-header button[aria-label='格式化 JSON'] {
+    padding-inline: 4px;
+  }
 }
 
 .media-preview-screen .media-preview-close:hover {
