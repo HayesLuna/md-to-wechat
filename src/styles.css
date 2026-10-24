@@ -330,7 +330,6 @@ button.primary:hover {
 .article-editor h1,
 .article-editor h2 {
   font-family: 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
-  color: #252528;
   line-height: 1.5;
   scroll-margin-top: 24px;
 }
@@ -344,18 +343,21 @@ button.primary:hover {
   font-size: 26px;
   margin: 30px 0 18px;
   font-weight: 700;
-  padding-top: 12px;
-  border-top: 1px solid #e5e6e8;
 }
 .article-editor h3 {
   font-size: 19px;
   margin: 25px 0 14px;
-  color: #303038;
   scroll-margin-top: 24px;
 }
+.article-editor h1,
+.article-editor h2,
+.article-editor h3,
 .article-editor h4,
 .article-editor h5,
 .article-editor h6 {
+  color: #2864a8;
+  border-bottom: 1px solid #b9d4f3;
+  padding-bottom: 8px;
   scroll-margin-top: 24px;
 }
 .article-editor blockquote {
@@ -1664,29 +1666,6 @@ button.primary:hover {
     padding: 0 6px;
   }
 }
-.mermaid-preview-controls {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}
-.mermaid-preview-controls button {
-  font:
-    11px/1.4 -apple-system,
-    BlinkMacSystemFont,
-    'PingFang SC',
-    sans-serif;
-  padding: 5px 8px;
-}
-.mermaid-preview-controls button[aria-pressed='true'] {
-  color: var(--accent);
-  background: #faf0ed;
-  border-color: #d8b5ae;
-}
-.mermaid-preview-code[hidden],
-.mermaid-preview-diagram[hidden] {
-  display: none !important;
-}
 .image-preview-trigger {
   display: block;
   width: 100%;
@@ -1759,8 +1738,7 @@ button.primary:hover {
   min-height: 42px;
   padding: 5px 10px;
 }
-.code-header button[aria-pressed],
-.mermaid-preview-controls button[aria-pressed] {
+.code-header button[aria-pressed] {
   min-width: 56px;
   min-height: 32px;
   padding: 4px 10px;
@@ -1770,16 +1748,14 @@ button.primary:hover {
   border-radius: 5px;
   white-space: nowrap;
 }
-.code-header button[aria-pressed='true'],
-.mermaid-preview-controls button[aria-pressed='true'] {
+.code-header button[aria-pressed='true'] {
   background: #e8f2ff;
   color: #2864a8;
   border-color: #b9d4f3;
   font-weight: 600;
 }
 @media (max-width: 600px) {
-  .code-header button[aria-pressed],
-  .mermaid-preview-controls button[aria-pressed] {
+  .code-header button[aria-pressed] {
     min-height: 36px;
   }
   .code-header > div {
@@ -1834,13 +1810,6 @@ button.primary:hover {
   }
 }
 
-.mermaid-preview-controls button[aria-pressed] {
-  font-size: 13px !important;
-  line-height: 20px !important;
-}
-.mermaid-preview-controls {
-  align-items: center;
-}
 .code-header button[aria-label='复制代码'] svg,
 .code-header button[aria-label='压缩 JSON'] svg,
 .code-header button[aria-label='格式化 JSON'] svg {

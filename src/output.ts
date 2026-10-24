@@ -44,6 +44,8 @@ async function inlineStyles(
   checkpoint: ReturnType<typeof workBudget>,
 ) {
   const color = /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : '#a6493d';
+  const headingStyle =
+    'color:#2864a8;border-bottom:1px solid #b9d4f3;padding-bottom:8px;';
   const dark = s.codeTheme === 'dark';
   root.setAttribute(
     'style',
@@ -51,12 +53,12 @@ async function inlineStyles(
   );
   const rules: Record<string, string> = {
     p: 'margin:0 0 20px;line-height:inherit;',
-    h1: `font-size:26px;line-height:1.45;font-weight:700;margin:8px 0 24px;color:${s.theme === 'simple' ? '#242424' : color};`,
-    h2: `font-size:22px;line-height:1.5;font-weight:700;margin:30px 0 18px;color:${color};${s.theme === 'default' ? `border-bottom:1px solid #dedede;padding-bottom:8px;` : ''}`,
-    h3: `font-size:19px;line-height:1.5;margin:24px 0 14px;color:${color};`,
-    h4: 'font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;',
-    h5: 'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',
-    h6: 'font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;',
+    h1: `font-size:26px;line-height:1.45;font-weight:700;margin:8px 0 24px;${headingStyle}`,
+    h2: `font-size:22px;line-height:1.5;font-weight:700;margin:30px 0 18px;${headingStyle}`,
+    h3: `font-size:19px;line-height:1.5;margin:24px 0 14px;${headingStyle}`,
+    h4: `font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;${headingStyle}`,
+    h5: `font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;${headingStyle}`,
+    h6: `font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;${headingStyle}`,
     blockquote: `margin:20px 0;padding:14px 18px;border-left:3px solid ${color};background:#f6f6f5;color:#686868;`,
     ul: 'padding-left:24px;margin:14px 0 20px;',
     ol: 'padding-left:26px;margin:14px 0 20px;',
@@ -463,27 +465,8 @@ export async function renderArticle(
         const diagramContent = document.createElement('div');
         diagramContent.className = 'mermaid-preview-diagram';
         while (target.firstChild) diagramContent.append(target.firstChild);
-        const controls = document.createElement('div');
-        controls.className = 'mermaid-preview-controls';
-        for (const [view, label] of [
-          ['diagram', '图表'],
-          ['code', '代码'],
-          ['copy', '复制代码'],
-        ]) {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.textContent = label;
-          button.setAttribute('data-mermaid-view', view);
-          if (view !== 'copy')
-            button.setAttribute('aria-pressed', String(view === 'diagram'));
-          controls.append(button);
-        }
-        const code = document.createElement('pre');
-        code.className = 'mermaid-preview-code';
-        code.textContent = source;
-        code.hidden = !target.hasAttribute('data-mermaid-error');
         target.setAttribute('data-mermaid-block', '');
-        target.append(controls, diagramContent, code);
+        target.append(diagramContent);
         target.removeAttribute('data-diagram-index');
         const p = document.createElement('p');
         p.textContent = `[请在此处插入 Mermaid 图形 ${i + 1}，先下载 PNG 并上传到公众号]`;

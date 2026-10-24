@@ -1472,46 +1472,6 @@ export default function App() {
                       }
                       return;
                     }
-
-                    const button = (
-                      e.target as HTMLElement
-                    ).closest<HTMLButtonElement>('button[data-mermaid-view]');
-                    const block = button?.closest<HTMLElement>(
-                      '[data-mermaid-block]',
-                    );
-                    if (!button || !block) return;
-                    const view = button.dataset.mermaidView;
-                    if (view === 'copy') {
-                      void copyText(
-                        block.querySelector('.mermaid-preview-code')
-                          ?.textContent || '',
-                      )
-                        .then(() => notify('已复制原始代码'))
-                        .catch(() =>
-                          notify('代码复制失败，请检查浏览器剪贴板权限。'),
-                        );
-                      return;
-                    }
-                    block
-                      .querySelectorAll<HTMLButtonElement>(
-                        'button[data-mermaid-view]',
-                      )
-                      .forEach((b) => {
-                        if (b.dataset.mermaidView !== 'copy')
-                          b.setAttribute(
-                            'aria-pressed',
-                            String(b.dataset.mermaidView === view),
-                          );
-                      });
-                    const code = block.querySelector<HTMLElement>(
-                      '.mermaid-preview-code',
-                    )!;
-                    const diagram = block.querySelector<HTMLElement>(
-                      '.mermaid-preview-diagram',
-                    )!;
-                    code.hidden =
-                      view !== 'code' && !block.dataset.mermaidError;
-                    diagram.hidden = view === 'code';
                   }}
                   dangerouslySetInnerHTML={{
                     __html: output?.previewHTML || '',
