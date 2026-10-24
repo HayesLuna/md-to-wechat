@@ -16,7 +16,8 @@ import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
 import { copyText } from './output';
 import { diagram, downloadDiagram } from './mermaid';
-import { NodeSelection } from '@tiptap/pm/state';
+import { indentJSON } from './jsonIndentation';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
 const sourceExtensions: Record<string, string> = {
   javascript: 'js',
@@ -259,7 +260,12 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
     </NodeViewWrapper>
   );
 }
-export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
+export function CodeView({
+  node,
+  updateAttributes,
+  editor,
+  getPos,
+}: NodeViewProps) {
   const [folded, setFolded] = useState(false);
   const [svg, setSVG] = useState('');
   const [error, setError] = useState('');
@@ -322,6 +328,62 @@ export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
   };
   const asyncAction = (action: () => Promise<unknown>) =>
     action().catch((e) => signal(e.message));
+  const formatJSON = () => {
+    if (!editor.isEditable) return;
+    const pos = getPos();
+    if (pos === undefined) return;
+    const current = editor.state.doc.nodeAt(pos);
+    if (
+      current?.type.name !== 'codeBlock' ||
+      String(current.attrs.language || '')
+        .trim()
+        .toLowerCase() !== 'json'
+    )
+      return;
+    try {
+      const formatted = indentJSON(current.textContent);
+      if (formatted.text === current.textContent) {
+        signal('内容无需调整');
+        return;
+      }
+      const selection = editor.state.selection;
+      const from = pos + 1;
+      const to = pos + current.nodeSize - 1;
+      const tr = closeHistory(editor.state.tr).insertText(
+        formatted.text,
+        from,
+        to,
+      );
+      if (
+        selection instanceof TextSelection &&
+        selection.from >= from &&
+        selection.to <= to
+      )
+        tr.setSelection(
+          TextSelection.create(
+            tr.doc,
+            from +
+              formatted.mapOffset(
+                selection.anchor - from,
+                selection.anchor === selection.from ? 1 : -1,
+              ),
+            from +
+              formatted.mapOffset(
+                selection.head - from,
+                selection.head === selection.from ? 1 : -1,
+              ),
+          ),
+        );
+      editor.view.dispatch(tr);
+      editor.view.dispatch(closeHistory(editor.state.tr));
+      editor.commands.focus(undefined, { scrollIntoView: false });
+      signal('已格式化 JSON');
+    } catch (error) {
+      signal(
+        error instanceof Error ? error.message : '内容未调整，原文已保留。',
+      );
+    }
+  };
   return (
     <NodeViewWrapper
       className={`code-node ${showCode ? 'code-theme-dark' : ''} ${folded ? 'folded' : ''}`}
@@ -343,6 +405,17 @@ export function CodeView({ node, updateAttributes, editor }: NodeViewProps) {
           }
         />
         <div>
+          {language === 'json' && (
+            <button
+              aria-label="格式化 JSON"
+              title="格式化 JSON（2 空格缩进）"
+              disabled={!source.length || !editor.isEditable}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={formatJSON}
+            >
+              格式化
+            </button>
+          )}
           {mermaid && (
             <>
               <button
