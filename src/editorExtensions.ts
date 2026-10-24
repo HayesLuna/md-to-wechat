@@ -220,6 +220,7 @@ export function captureTarget(editor: Editor) {
   };
 }
 const key = new PluginKey<{
+  indentDecorations: DecorationSet;
   progress?: { selections: Selection[]; index: number };
   emptyTable?: number;
 }>('mojian-editing');
@@ -234,6 +235,18 @@ function indentWrapper(node: Node) {
       node.lastChild!.type.name,
     )
   );
+}
+function buildIndentDecorations(doc: Node) {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (indentWrapper(node))
+      decorations.push(
+        Decoration.node(pos, pos + node.nodeSize, {
+          'data-indent-wrapper': 'true',
+        }),
+      );
+  });
+  return DecorationSet.create(doc, decorations);
 }
 function unindentWrapper(editor: Editor, itemType: string) {
   const { state } = editor;
@@ -468,29 +481,30 @@ export const EditingRules = Extension.create({
       new Plugin({
         key,
         state: {
-          init: () => ({}),
+          init: (_, state) => ({
+            indentDecorations: buildIndentDecorations(state.doc),
+          }),
           apply(tr, previous) {
+            const indentDecorations = tr.docChanged
+              ? buildIndentDecorations(tr.doc)
+              : previous.indentDecorations;
             if (tr.getMeta('mojian-progress'))
-              return { ...previous, progress: tr.getMeta('mojian-progress') };
+              return {
+                ...previous,
+                indentDecorations,
+                progress: tr.getMeta('mojian-progress'),
+              };
             if (tr.getMeta('mojian-empty-table') !== undefined)
-              return { emptyTable: tr.getMeta('mojian-empty-table') };
-            if (tr.docChanged || tr.selectionSet) return {};
+              return {
+                indentDecorations,
+                emptyTable: tr.getMeta('mojian-empty-table'),
+              };
+            if (tr.docChanged || tr.selectionSet) return { indentDecorations };
             return previous;
           },
         },
         props: {
-          decorations: (state) => {
-            const decorations: Decoration[] = [];
-            state.doc.descendants((node, pos) => {
-              if (indentWrapper(node))
-                decorations.push(
-                  Decoration.node(pos, pos + node.nodeSize, {
-                    'data-indent-wrapper': 'true',
-                  }),
-                );
-            });
-            return DecorationSet.create(state.doc, decorations);
-          },
+          decorations: (state) => key.getState(state)?.indentDecorations,
           handleKeyDown: (view, event) => {
             if (view.composing || event.isComposing || event.keyCode === 229)
               return false;

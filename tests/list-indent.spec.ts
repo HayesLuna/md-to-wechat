@@ -18,6 +18,36 @@ async function select(page:Page,first:string,last=first,backward=false) {
  await expect(page.locator('.article-editor')).toBeFocused();
 }
 const code='\n\n```js\nconst untouched = true;\n```';
+
+test('cursor movement reuses indent decorations in a long document', async ({ page }) => {
+  await ready(
+    page,
+    '-\n  - 父项\n  - 第二项\n- 末项\n\n' +
+      Array.from({ length: 200 }, (_, i) => `段落 ${i}`).join('\n\n'),
+  );
+  const result = await page.evaluate(() => {
+    const editor = (window as any).__mojian.editor;
+    const plugin = editor.state.plugins.find((item: any) =>
+      item.key.startsWith('mojian-editing$'),
+    );
+    const initial = plugin.props.decorations(editor.state);
+    for (let i = 0; i < 40; i++)
+      editor.commands.setTextSelection(
+        i % 2 ? 1 : editor.state.doc.content.size - 1,
+      );
+    const afterSelection = plugin.props.decorations(editor.state);
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    editor.commands.insertContent('追加');
+    const afterEdit = plugin.props.decorations(editor.state);
+    return {
+      reused: initial === afterSelection,
+      rebuilt: afterSelection !== afterEdit,
+      wrappers: editor.view.dom.querySelectorAll('[data-indent-wrapper]').length,
+    };
+  });
+  expect(result).toEqual({ reused: true, rebuilt: true, wrappers: 1 });
+});
+
 for(const modifier of ['Control','Meta'])for(const [name,doc,text] of [
  ['bullet','- 父项\n- 第二项','第二项'],
  ['ordered','1. 父项\n2. 第二项','第二项'],
