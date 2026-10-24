@@ -11,7 +11,26 @@ export type Draft = {
   createdAt: number;
   savedAt: number;
 };
-export function compareDraftCreation(a: Draft, b: Draft) {
+export type DraftSummary = Omit<Draft, 'markdown' | 'settings'>;
+type DraftInfo = DraftSummary & { imageIds: string[] };
+export function summarizeDraft(draft: DraftSummary): DraftSummary {
+  const { id, title, customTitle, version, createdAt, savedAt } = draft;
+  return { id, title, customTitle, version, createdAt, savedAt };
+}
+function draftInfo(draft: Draft): DraftInfo {
+  return {
+    ...summarizeDraft(draft),
+    imageIds: [
+      ...new Set(
+        Array.from(
+          draft.markdown.matchAll(/local-image:([a-zA-Z0-9-]+)/g),
+          (match) => match[1],
+        ),
+      ),
+    ],
+  };
+}
+export function compareDraftCreation(a: DraftSummary, b: DraftSummary) {
   return a.createdAt === b.createdAt
     ? a.id.localeCompare(b.id)
     : b.createdAt - a.createdAt;
@@ -38,6 +57,7 @@ export function newDraft(markdown: string, settings: Settings): Draft {
 interface StorageSchema extends DBSchema {
   draft: { key: string; value: Draft };
   images: { key: string; value: Blob };
+  draftInfo: { key: string; value: DraftInfo };
   meta: { key: string; value: string };
 }
 export class DraftConflictError extends Error {
@@ -49,28 +69,53 @@ export class DraftConflictError extends Error {
 let connection: Promise<IDBPDatabase<StorageSchema>> | undefined;
 function db() {
   if (connection) return connection;
-  const pending = openDB<StorageSchema>('mojian-v1', 3, {
+  const pending = openDB<StorageSchema>('mojian-v1', 4, {
     upgrade(db, oldVersion, _newVersion, tx) {
       if (oldVersion < 1) {
         db.createObjectStore('draft');
         db.createObjectStore('images');
       }
-      if (oldVersion < 2) {
-        db.createObjectStore('meta');
+      if (oldVersion < 2) db.createObjectStore('meta');
+      if (oldVersion < 4) db.createObjectStore('draftInfo');
+      // Keep migration atomic: metadata and legacy bodies commit together.
+      void (async () => {
         const store = tx.objectStore('draft');
-        void store.get('current').then(async (legacy) => {
-          if (!legacy) return;
-          const draft = {
-            ...legacy,
-            id: crypto.randomUUID(),
-            title: draftTitle(legacy.markdown),
-            createdAt: Date.now(),
-          };
-          await store.put(draft, draft.id);
-          await tx.objectStore('meta').put(draft.id, 'active');
-          await store.delete('current');
-        });
-      }
+        if (oldVersion < 2) {
+          const legacy = await store.get('current');
+          if (legacy) {
+            const draft = {
+              ...legacy,
+              id: crypto.randomUUID(),
+              title: draftTitle(legacy.markdown),
+              createdAt: Date.now(),
+            };
+            await store.put(draft, draft.id);
+            await tx.objectStore('meta').put(draft.id, 'active');
+            await store.delete('current');
+          }
+        }
+        if (oldVersion < 4) {
+          // One migration pass; subsequent library loads never read article bodies.
+          let cursor = await store.openCursor();
+          while (cursor) {
+            const draft = cursor.value;
+            const normalized = draft.customTitle
+              ? draft
+              : { ...draft, title: draftTitle(draft.markdown) };
+            await cursor.update(normalized);
+            await tx
+              .objectStore('draftInfo')
+              .put(draftInfo(normalized), normalized.id);
+            cursor = await cursor.continue();
+          }
+        }
+      })().catch(() => {
+        try {
+          tx.abort();
+        } catch {
+          /* The transaction may already be aborted. */
+        }
+      });
     },
     blocking() {
       // Release the connection when another tab upgrades the database.
@@ -99,31 +144,36 @@ export async function loadDrafts(): Promise<{
   ]);
   await tx.done;
   return {
-    drafts: drafts
-      .map((draft: Draft) =>
-        draft.customTitle
-          ? draft
-          : { ...draft, title: draftTitle(draft.markdown) },
-      )
-      .sort(compareDraftCreation),
+    drafts: drafts.sort(compareDraftCreation),
     activeId,
   };
+}
+
+// UI callers load lightweight summaries, and fetch only the selected body.
+export async function loadDraftLibrary() {
+  const database = await db();
+  const tx = database.transaction(['draftInfo', 'meta']);
+  const [items, activeId] = await Promise.all([
+    tx.objectStore('draftInfo').getAll(),
+    tx.objectStore('meta').get('active'),
+  ]);
+  await tx.done;
+  return {
+    drafts: items.map(summarizeDraft).sort(compareDraftCreation),
+    activeId,
+  };
+}
+export async function loadDraft(id: string) {
+  return (await db()).get('draft', id);
 }
 
 const IMAGE_SESSION_LOCK = 'mojian-image-session';
 
 async function collectUnusedImages() {
   const database = await db();
-  const tx = database.transaction(['draft', 'images'], 'readwrite');
-  const drafts = await tx.objectStore('draft').getAll();
-  const referenced = new Set(
-    drafts.flatMap((draft) =>
-      Array.from(
-        draft.markdown.matchAll(/local-image:([a-zA-Z0-9-]+)/g),
-        (m) => m[1],
-      ),
-    ),
-  );
+  const tx = database.transaction(['draftInfo', 'images'], 'readwrite');
+  const drafts = await tx.objectStore('draftInfo').getAll();
+  const referenced = new Set(drafts.flatMap((draft) => draft.imageIds));
   const images = tx.objectStore('images');
   for (const id of await images.getAllKeys())
     if (!referenced.has(id)) await images.delete(id);
@@ -156,7 +206,7 @@ export async function beginImageSession(): Promise<() => void> {
 }
 export async function saveDraft(draft: Draft, expectedVersion?: number) {
   const d = await db();
-  const tx = d.transaction(['draft', 'meta'], 'readwrite');
+  const tx = d.transaction(['draft', 'draftInfo', 'meta'], 'readwrite');
   const previous = await tx.objectStore('draft').get(draft.id);
   if (
     (expectedVersion !== undefined && previous?.version !== expectedVersion) ||
@@ -172,21 +222,26 @@ export async function saveDraft(draft: Draft, expectedVersion?: number) {
     await tx.done;
     throw new DraftConflictError();
   }
-  await tx
-    .objectStore('draft')
-    .put(
-      { ...draft, createdAt: previous?.createdAt ?? draft.createdAt },
-      draft.id,
-    );
+  const stored = {
+    ...draft,
+    title: draft.customTitle ? draft.title : draftTitle(draft.markdown),
+    createdAt: previous?.createdAt ?? draft.createdAt,
+  };
+  await tx.objectStore('draft').put(stored, draft.id);
+  await tx.objectStore('draftInfo').put(draftInfo(stored), draft.id);
   await tx.objectStore('meta').put(draft.id, 'active');
   await tx.done;
 }
 export async function removeDraft(id: string, next: Draft) {
   const d = await db();
-  const tx = d.transaction(['draft', 'meta'], 'readwrite');
+  const tx = d.transaction(['draft', 'draftInfo', 'meta'], 'readwrite');
   const retained = await tx.objectStore('draft').get(next.id);
   await tx.objectStore('draft').delete(id);
-  if (!retained) await tx.objectStore('draft').put(next, next.id);
+  await tx.objectStore('draftInfo').delete(id);
+  if (!retained) {
+    await tx.objectStore('draft').put(next, next.id);
+    await tx.objectStore('draftInfo').put(draftInfo(next), next.id);
+  }
   await tx.objectStore('meta').put(next.id, 'active');
   await tx.done;
   return retained ?? next;

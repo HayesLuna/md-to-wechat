@@ -237,9 +237,12 @@ export function EditorPane({
   );
   const editor = useEditor({
     extensions,
-    content: initial,
+    // Populate once through safeDocument below, rather than parsing and building
+    // the entire document twice during startup and draft switches.
+    content: '',
     contentType: 'markdown',
     immediatelyRender: false,
+    shouldRerenderOnTransaction: false,
     editorProps,
     onUpdate: ({ editor }) => {
       props.current.onDirty();
@@ -281,7 +284,7 @@ export function EditorPane({
       timer = setTimeout(load, 150);
     };
     editor.on('update', scheduleLoad);
-    load();
+    scheduleLoad();
     return () => {
       active = false;
       unsubscribe();
@@ -291,11 +294,19 @@ export function EditorPane({
     };
   }, [editor]);
   useEffect(() => {
-    if (editor) {
+    if (!editor) return;
+    let active = true;
+    // React NodeViews may flush synchronously. Populate after the effect has
+    // finished, so loading code/image blocks does not flush during a lifecycle.
+    queueMicrotask(() => {
+      if (!active || editor.isDestroyed) return;
       editorRef.current = editor;
       replaceDocument(editor, initial);
       onReady(editor);
-    }
+    });
+    return () => {
+      active = false;
+    };
   }, [editor]);
   return <EditorContent editor={editor} />;
 }

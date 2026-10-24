@@ -279,20 +279,37 @@ export function CodeView({
   const mermaid = language === 'mermaid';
   const source = node.textContent;
   const [view, setView] = useState<'diagram' | 'code'>('diagram');
+  const wrapper = useRef<HTMLDivElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  useEffect(() => {
+    if (!mermaid || nearViewport || !wrapper.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNearViewport(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '300px' },
+    );
+    observer.observe(wrapper.current);
+    return () => observer.disconnect();
+  }, [mermaid, nearViewport]);
   const showCode = !mermaid || view === 'code' || !!error;
   useEffect(() => {
     const n = ++seq.current;
     setSVG('');
     setError('');
     setBusy(false);
-    if (!mermaid) return;
+    if (!mermaid || !nearViewport) return;
     if (!source.trim()) {
       setError('请输入 Mermaid 源码以生成图表。');
       return;
     }
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       setBusy(true);
-      diagram(source)
+      diagram(source, controller.signal)
         .then((s) => {
           if (n === seq.current) {
             setSVG(s);
@@ -308,9 +325,10 @@ export function CodeView({
     }, 250);
     return () => {
       clearTimeout(timer);
+      controller.abort();
       seq.current++;
     };
-  }, [source, mermaid]);
+  }, [source, mermaid, nearViewport]);
   const downloadSource = () => {
     try {
       const language = String(node.attrs.language || '')
@@ -391,6 +409,7 @@ export function CodeView({
   };
   return (
     <NodeViewWrapper
+      ref={wrapper}
       className={`code-node ${showCode ? 'code-theme-dark' : ''} ${folded ? 'folded' : ''}`}
       data-language={language || undefined}
     >

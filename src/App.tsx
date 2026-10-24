@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useState,
   useEffect,
   useLayoutEffect,
@@ -36,7 +38,10 @@ import { buildInfo, versionLabel, buildTime } from './buildInfo';
 import {
   DraftConflictError,
   beginImageSession,
-  loadDrafts,
+  loadDraftLibrary,
+  loadDraft,
+  summarizeDraft,
+  type DraftSummary,
   newDraft,
   draftTitle,
   saveDraft,
@@ -63,7 +68,9 @@ import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
 import { DocumentSidebar } from './DocumentSidebar';
-import { MediaPreview } from './MediaPreview';
+const MediaPreview = lazy(() =>
+  import('./MediaPreview').then((module) => ({ default: module.MediaPreview })),
+);
 import { revealSourcePosition } from './sourceEditor';
 import type { MediaPreviewItem } from './mediaPreviewEvents';
 import {
@@ -77,7 +84,7 @@ import {
 type Modal =
   | { type: 'link' | 'image' | 'assets' | 'downloads' | 'help' }
   | { type: 'confirm'; title: string; message: string; action: () => void }
-  | { type: 'rename'; draft: Draft };
+  | { type: 'rename'; draft: DraftSummary };
 type SaveStatus = 'saving' | 'saved' | 'failed';
 function validSettings(s?: Settings): Settings {
   if (!s) return DEFAULT_SETTINGS;
@@ -94,7 +101,7 @@ function validSettings(s?: Settings): Settings {
 }
 export default function App() {
   const [media, setMedia] = useState<MediaPreviewItem | null>(null);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'drafts' | 'outline'>('outline');
   const [sidebarSearch, setSidebarSearch] = useState(false);
@@ -133,9 +140,26 @@ export default function App() {
   const outputRef = useRef<Output | null>(null);
   const outputAbort = useRef<AbortController | null>(null);
   const [output, setOutput] = useState<Output | null>(null);
+  const [requestedOutput, setRequestedOutput] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [renderError, setRenderError] = useState('');
-  const [selectionTick, setSelectionTick] = useState(0);
+  const [selectionState, setSelectionState] = useState('');
+  const updateSelection = useCallback(() => {
+    const selected = latestEditor.current;
+    const signature = selected
+      ? JSON.stringify([
+          selected.isActive('table'),
+          selected.isActive('image'),
+          selected.isActive('link'),
+          selected.getAttributes('tableCell').align,
+          selected.getAttributes('tableHeader').align,
+          selected.getAttributes('link').href,
+        ])
+      : '';
+    setSelectionState((previous) =>
+      previous === signature ? previous : signature,
+    );
+  }, []);
   const [url, setURL] = useState('');
   const [label, setLabel] = useState('');
   const [dialogError, setDialogError] = useState('');
@@ -172,19 +196,22 @@ export default function App() {
           release();
           return null;
         }
-        return loadDrafts();
+        return loadDraftLibrary();
       })
-      .then((library) => {
+      .then(async (library) => {
         if (!active || !library) return;
         library.drafts.forEach((d) =>
           savedVersions.current.set(d.id, d.version),
         );
-        const d =
+        const selected =
           library.drafts.find((d) => d.id === library.activeId) ||
-          library.drafts[0] ||
+          library.drafts[0];
+        const d =
+          (selected && (await loadDraft(selected.id))) ||
           newDraft(SAMPLE, DEFAULT_SETTINGS);
+        if (!active) return;
         activeDraft.current = d;
-        setDrafts(library.drafts.length ? library.drafts : [d]);
+        setDrafts(library.drafts.length ? library.drafts : [summarizeDraft(d)]);
         setMarkdown(d.markdown);
         setInitial(d.markdown);
         setSettings(validSettings(d.settings));
@@ -196,7 +223,7 @@ export default function App() {
         if (active) {
           const d = newDraft(SAMPLE, DEFAULT_SETTINGS);
           activeDraft.current = d;
-          setDrafts([d]);
+          setDrafts([summarizeDraft(d)]);
           setMarkdown(SAMPLE);
           setInitial(SAMPLE);
           setReady(true);
@@ -264,7 +291,9 @@ export default function App() {
       pending
         .then(() => {
           setDrafts((items) =>
-            items.map((item) => (item.id === draft.id ? draft : item)),
+            items.map((item) =>
+              item.id === draft.id ? summarizeDraft(draft) : item,
+            ),
           );
           if (activeDraft.current?.id === draft.id && v === version.current) {
             activeDraft.current = draft;
@@ -306,9 +335,22 @@ export default function App() {
   }, [notice]);
   useEffect(() => {
     if (!ready) return;
-    if (outputRef.current?.key === outputKey(markdown, settings)) {
+    const key = outputKey(markdown, settings);
+    const demanded = preview || requestedOutput === key;
+    if (
+      outputRef.current?.key === key &&
+      (!demanded || outputRef.current.previewReady)
+    ) {
       setPreparing(false);
       setRenderError('');
+      return;
+    }
+    if (!demanded && markdown.length > 50_000) {
+      // Free a stale snapshot while long articles wait for explicit preview/copy.
+      outputRef.current?.dispose();
+      outputRef.current = null;
+      setOutput(null);
+      setPreparing(true);
       return;
     }
     let active = true;
@@ -319,7 +361,9 @@ export default function App() {
     setRenderError('');
     const timer = setTimeout(
       () => {
-        renderArticle(markdown, settings, controller.signal)
+        renderArticle(markdown, settings, controller.signal, {
+          diagrams: demanded,
+        })
           .then((result) => {
             if (
               active &&
@@ -347,7 +391,7 @@ export default function App() {
       if (outputAbort.current === controller) outputAbort.current = null;
       clearTimeout(timer);
     };
-  }, [markdown, settings, ready, preview, contentRevision]);
+  }, [markdown, settings, ready, preview, contentRevision, requestedOutput]);
   useEffect(
     () => () => {
       outputRef.current?.dispose();
@@ -528,11 +572,11 @@ export default function App() {
       if (editor && !editor.isDestroyed) editor.setEditable(true, false);
     }
   };
-  const selectDraft = (d: Draft) =>
+  const selectDraft = (d: DraftSummary) =>
     void draftOperation(async () => {
       if (d.id !== activeDraft.current?.id) {
-        const library = await loadDrafts();
-        const latest = library.drafts.find((item) => item.id === d.id);
+        const library = await loadDraftLibrary();
+        const latest = await loadDraft(d.id);
         if (!latest) throw new Error('草稿已删除');
         await saveDraft(latest, latest.version);
         savedVersions.current.set(latest.id, latest.version);
@@ -546,7 +590,7 @@ export default function App() {
       const d = newDraft('', current.current.settings);
       await saveDraft(d);
       savedVersions.current.set(d.id, d.version);
-      setDrafts((items) => [d, ...items]);
+      setDrafts((items) => [summarizeDraft(d), ...items]);
       activateDraft(d);
       setQuery('');
       if (window.matchMedia('(max-width:800px)').matches) setSidebarOpen(false);
@@ -556,8 +600,7 @@ export default function App() {
     const selected = modal.draft;
     const title = renameTitle.trim().slice(0, 100);
     void draftOperation(async () => {
-      const library = await loadDrafts();
-      const old = library.drafts.find((d) => d.id === selected.id);
+      const old = await loadDraft(selected.id);
       if (!old) return;
       const renamed = {
         ...old,
@@ -577,27 +620,30 @@ export default function App() {
           activeDraft.current!,
           savedVersions.current.get(activeDraft.current!.id),
         );
-      setDrafts((items) => items.map((d) => (d.id === old.id ? renamed : d)));
+      setDrafts((items) =>
+        items.map((d) => (d.id === old.id ? summarizeDraft(renamed) : d)),
+      );
       setModal(null);
       notify('文章已重命名');
     });
   };
-  const deleteDraft = (d: Draft) =>
+  const deleteDraft = (d: DraftSummary) =>
     setModal({
       type: 'confirm',
       title: '删除草稿',
       message: `确定删除「${d.title}」？删除后无法恢复。`,
       action: () =>
         void draftOperation(async () => {
-          const library = await loadDrafts();
+          const library = await loadDraftLibrary();
           const remaining = library.drafts.filter((item) => item.id !== d.id);
           const deletingCurrent = activeDraft.current?.id === d.id;
           const next = deletingCurrent
-            ? remaining[0] || newDraft('', current.current.settings)
+            ? (remaining[0] && (await loadDraft(remaining[0].id))) ||
+              newDraft('', current.current.settings)
             : activeDraft.current!;
           const retained = await removeDraft(d.id, next);
           savedVersions.current.delete(d.id);
-          const refreshed = await loadDrafts();
+          const refreshed = await loadDraftLibrary();
           setDrafts(refreshed.drafts);
           if (deletingCurrent) {
             savedVersions.current.set(retained.id, retained.version);
@@ -834,7 +880,7 @@ export default function App() {
           );
       }
     }
-    setSelectionTick((n) => n + 1);
+    updateSelection();
     setContext({ x: event.clientX, y: event.clientY });
     return true;
   };
@@ -897,7 +943,7 @@ export default function App() {
     !preparing &&
     output.key === outputKey(readCurrent().markdown, current.current.settings);
   const doCopy = async () => {
-    if (!outputCurrent() || !output) {
+    if (!outputCurrent() || !output || !output.previewReady) {
       notify('内容已变化，正在重新准备排版；完成后请再次点击复制。');
       return;
     }
@@ -917,6 +963,9 @@ export default function App() {
     }
   };
   const requestCopy = () => {
+    setRequestedOutput(
+      outputKey(readCurrent().markdown, current.current.settings),
+    );
     if (!outputCurrent()) {
       notify(renderError || '正在准备最新排版，完成后请再次点击复制。');
       return;
@@ -974,7 +1023,7 @@ export default function App() {
   const inTable = editor?.isActive('table');
   const imageSelected = editor?.isActive('image');
   const linkActive = editor?.isActive('link');
-  void selectionTick;
+  void selectionState;
   useLayoutEffect(() => {
     if (!context) return;
     const position = () => {
@@ -1319,7 +1368,7 @@ export default function App() {
                       onReady={setEditor}
                       onChange={changed}
                       onDirty={editorDirty}
-                      onSelection={() => setSelectionTick((n) => n + 1)}
+                      onSelection={updateSelection}
                       onContext={contextMenu}
                       onPasteImage={(file) => void insertFile(file, true)}
                     />
@@ -1743,7 +1792,9 @@ export default function App() {
                 <button onClick={closeModal}>返回写作</button>
                 <button
                   className="primary"
-                  disabled={copying || !outputCurrent()}
+                  disabled={
+                    copying || !outputCurrent() || !output?.previewReady
+                  }
                   onClick={() => void doCopy()}
                 >
                   {preparing ? '重新准备中…' : '确认复制正文与占位说明'}
@@ -1833,7 +1884,11 @@ export default function App() {
           )}
         </Dialog>
       )}
-      {media && <MediaPreview item={media} onClose={() => setMedia(null)} />}
+      {media && (
+        <Suspense fallback={null}>
+          <MediaPreview item={media} onClose={() => setMedia(null)} />
+        </Suspense>
+      )}
       {notice && (
         <div className="toast" role="status">
           <span>{notice}</span>

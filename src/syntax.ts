@@ -1,15 +1,7 @@
 import highlighter from 'highlight.js/lib/core';
 import { createLowlight } from 'lowlight';
 import javascript from 'highlight.js/lib/languages/javascript';
-import typescript from 'highlight.js/lib/languages/typescript';
-import java from 'highlight.js/lib/languages/java';
-import python from 'highlight.js/lib/languages/python';
-import bash from 'highlight.js/lib/languages/bash';
-import sql from 'highlight.js/lib/languages/sql';
 import json from 'highlight.js/lib/languages/json';
-import xml from 'highlight.js/lib/languages/xml';
-import css from 'highlight.js/lib/languages/css';
-import markdown from 'highlight.js/lib/languages/markdown';
 
 // Larger blocks stay editable and exportable as plain code without a long
 // synchronous tokenization pass on the main thread.
@@ -17,15 +9,7 @@ export const MAX_CODE_HIGHLIGHT_CHARACTERS = 50_000;
 
 const initial = {
   javascript,
-  typescript,
-  java,
-  python,
-  bash,
-  sql,
   json,
-  xml,
-  css,
-  markdown,
 };
 export const lowlight = createLowlight(initial);
 for (const [name, grammar] of Object.entries(initial))

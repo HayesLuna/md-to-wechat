@@ -25,7 +25,10 @@ function inlineText(tokens: InlineToken[]): string {
 // Labels use parsed text, so entities and inline formatting never leak into
 // the outline, automatic draft name, or exported file name. Line positions
 // remain tied to the original Markdown for navigation.
+let cachedMarkdown: string | undefined;
+let cachedHeadings: ArticleHeading[] = [];
 export function headings(markdown: string): ArticleHeading[] {
+  if (markdown === cachedMarkdown) return cachedHeadings;
   const tokens = parser.parse(markdown, {});
   const result: ArticleHeading[] = [];
   for (let index = 0; index < tokens.length; index++) {
@@ -37,5 +40,7 @@ export function headings(markdown: string): ArticleHeading[] {
       line: token.map?.[0] ?? 0,
     });
   }
+  cachedMarkdown = markdown;
+  cachedHeadings = result;
   return result;
 }

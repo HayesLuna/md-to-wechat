@@ -64,3 +64,45 @@ test('Typora-style HTML paste retains Mermaid language and source',async({page})
  await expect(page.locator('.diagram svg')).toBeVisible();await expect(page.getByRole('textbox',{name:'代码语言'})).toHaveValue('mermaid');
  const markdown=await page.evaluate(()=>(window as any).__mojian.getMarkdown());expect(markdown).toContain('```mermaid');expect(markdown).toContain('2024-12-31');
 });
+
+test('obsolete queued diagrams are skipped and a shared caller can finish after another aborts', async ({ page }) => {
+  await page.route('**/diagram-queue', route => route.fulfill({contentType:'text/html',body:'<html></html>'}));
+  await page.route('**/node_modules/.vite/deps/mermaid.js*', route => route.fulfill({
+    contentType:'text/javascript',
+    body: `export default {initialize(){}, async render(id,source){
+      window.__diagramCalls ||= []; window.__diagramCalls.push(source);
+      if(source==='first') await new Promise(resolve=>window.__releaseDiagram=resolve);
+      return {svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>'+source+'</text></svg>'};
+    }}`,
+  }));
+  await page.goto('/diagram-queue');
+  const result = await page.evaluate(async () => {
+    const {diagram} = await import('/src/mermaid.ts');
+    const first = diagram('first');
+    while (!(window as any).__releaseDiagram) await new Promise(resolve=>setTimeout(resolve,0));
+    const obsolete = new AbortController();
+    const discarded = diagram('obsolete',obsolete.signal).catch(error=>error.name);
+    const sharedController = new AbortController();
+    const cancelledShared = diagram('shared',sharedController.signal).catch(error=>error.name);
+    const retained = diagram('shared');
+    const latest = diagram('latest');
+    obsolete.abort(); sharedController.abort();
+    (window as any).__releaseDiagram();
+    await first;
+    return { discarded:await discarded, cancelledShared:await cancelledShared, shared:(await retained).includes('shared'), latest:(await latest).includes('latest'), calls:(window as any).__diagramCalls };
+  });
+  expect(result).toEqual({discarded:'AbortError',cancelledShared:'AbortError',shared:true,latest:true,calls:['first','shared','latest']});
+});
+
+test('offscreen diagrams do not load Mermaid until scrolled near the viewport', async ({ page }) => {
+  const engines:string[]=[];
+  page.on('request',request=>{if(request.url().includes('/node_modules/.vite/deps/mermaid.js'))engines.push(request.url());});
+  await page.goto('/');
+  await page.waitForFunction(()=>!!(window as any).__mojian?.editor);
+  await page.evaluate(()=>(window as any).__mojian.setMarkdown('# 文章\n\n'+'普通正文\n\n'.repeat(100)+'```mermaid\nflowchart LR\nA-->B\n```'));
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  expect(engines).toHaveLength(0);
+  await page.locator('.code-node').scrollIntoViewIfNeeded();
+  await expect(page.locator('.diagram svg')).toBeVisible();
+  expect(engines).toHaveLength(1);
+});

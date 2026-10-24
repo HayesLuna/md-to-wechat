@@ -21,6 +21,7 @@ export type Asset = {
 export type Output = {
   html: string;
   previewHTML: string;
+  previewReady: boolean;
   text: string;
   assets: Asset[];
   errors: string[];
@@ -340,6 +341,7 @@ export async function renderArticle(
   markdown: string,
   s: Settings,
   signal?: AbortSignal,
+  options: { diagrams?: boolean } = {},
 ): Promise<Output> {
   const releases: (() => void)[] = [];
   const checkpoint = workBudget(signal);
@@ -456,13 +458,15 @@ export async function renderArticle(
           source,
         });
         try {
-          target.innerHTML = await diagram(source);
+          if (options.diagrams !== false)
+            target.innerHTML = await diagram(source, signal);
           const svg = target.querySelector('svg');
           if (svg) {
             svg.style.maxWidth = '100%';
             svg.style.height = 'auto';
           }
         } catch {
+          signal?.throwIfAborted();
           errors.push(`Mermaid 图形 ${i + 1} 语法错误，请修正源码。`);
           target.textContent = errors.at(-1)!;
           target.setAttribute('data-mermaid-error', 'true');
@@ -583,6 +587,7 @@ export async function renderArticle(
     const result: Output = {
       html,
       previewHTML: root.outerHTML,
+      previewReady: options.diagrams !== false || sources.length === 0,
       text: readableText(clean, codeSources),
       assets,
       errors,

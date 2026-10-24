@@ -2,7 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import { Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { DraftListIcon, OutlineIcon } from './NavigationIcons';
 import { useSidebarResize } from './useSidebarResize';
-import type { Draft } from './storage';
+import type { DraftSummary } from './storage';
 
 export function DocumentSidebar({
   tab,
@@ -29,14 +29,14 @@ export function DocumentSidebar({
   onSearchToggle: () => void;
   query: string;
   onQuery: (value: string) => void;
-  drafts: Draft[];
+  drafts: DraftSummary[];
   total: number;
   activeId?: string;
   busy: boolean;
   onCreate: () => void;
-  onSelect: (draft: Draft) => void;
-  onRename: (draft: Draft) => void;
-  onDelete: (draft: Draft) => void;
+  onSelect: (draft: DraftSummary) => void;
+  onRename: (draft: DraftSummary) => void;
+  onDelete: (draft: DraftSummary) => void;
   headings: { text: string; level: number; line: number }[];
   activeHeading: number;
   onHeading: (index: number) => void;

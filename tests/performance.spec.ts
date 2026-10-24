@@ -84,6 +84,7 @@ test('oversized code remains intact while editor and output skip syntax highligh
     (window as any).__largeCodeCalls = calls;
     (window as any).__mojian.setMarkdown(`\`\`\`json\n${text}\n\`\`\``);
   }, source);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.waitForFunction(() => {
     const m = (window as any).__mojian;
     return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
@@ -93,7 +94,6 @@ test('oversized code remains intact while editor and output skip syntax highligh
     output: 0,
   });
   await expect(page.locator('.article-editor .code-node code')).toHaveText(source);
-  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await expect(page.locator('.preview-paper [data-code-block] code')).toContainText(source);
 });
 
@@ -344,4 +344,31 @@ test('superseded batched output stops and never produces a mixed snapshot', asyn
   expect(result.cancelled).toBe('AbortError');
   expect(result.html).toContain('最新快照');
   expect(result.html).not.toContain('value_');
+});
+
+
+test('large articles save without background output and prepare the latest version on demand', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const first = '# 大文章\n\n' + '正文内容'.repeat(15_000);
+  await page.evaluate((text) => (window as any).__mojian.setMarkdown(text), first);
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  expect(await page.evaluate(() => {
+    const m = (window as any).__mojian;
+    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
+  })).toBe(false);
+  await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
+  await page.waitForFunction(() => {
+    const m = (window as any).__mojian;
+    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
+  });
+  await page.evaluate((text) => (window as any).__mojian.setMarkdown(text + '\n\n最新修改'), first);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper')).toContainText('最新修改');
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  expect(await page.evaluate(async () => {
+    const s = await import('/src/storage.ts');
+    const library = await s.loadDraftLibrary();
+    return (await s.loadDraft(library.activeId!))!.markdown.endsWith('最新修改');
+  })).toBe(true);
 });

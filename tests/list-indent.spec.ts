@@ -158,3 +158,24 @@ for(const [name,list] of [['bullet','- 首项\n- 次项'],['ordered','1. 首项\
  const text=await page.evaluate(()=>(window as any).__mojian.getMarkdown());await page.evaluate(text=>(window as any).__mojian.setMarkdown(text),text);
  expect(await page.evaluate(()=>(window as any).__mojian.editor.getJSON())).toEqual(after);
 });
+
+test('editing an unrelated paragraph avoids a whole-document indent scan', async ({ page }) => {
+  await ready(page, '-\n  - 开头\n\n' + Array.from({length:2000},(_,i)=>`段落 ${i}`).join('\n\n') + '\n\n-\n  - 结尾');
+  const result = await page.evaluate(() => {
+    const editor = (window as any).__mojian.editor;
+    let position = 0;
+    editor.state.doc.descendants((node:any,pos:number)=>{if(node.type.name==='paragraph'&&node.textContent==='段落 1000')position=pos+1;});
+    editor.commands.setTextSelection(position);
+    const prototype = Object.getPrototypeOf(editor.state.doc);
+    const original = prototype.descendants;
+    let visited = 0;
+    prototype.descendants = function (callback:any) {
+      return original.call(this,(...args:any[])=>{visited++;return callback(...args);});
+    };
+    try { editor.commands.insertContent('修改'); } finally { prototype.descendants = original; }
+    return {visited,wrappers:editor.view.dom.querySelectorAll('[data-indent-wrapper]').length,text:editor.state.doc.textContent.includes('修改段落 1000')};
+  });
+  expect(result.wrappers).toBe(2);
+  expect(result.text).toBe(true);
+  expect(result.visited).toBeLessThan(100);
+});

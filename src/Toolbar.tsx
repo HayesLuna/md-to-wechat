@@ -1,3 +1,4 @@
+import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
 import { highlightActive, toggleSourceHighlight } from './sourceHighlight';
 import {
@@ -31,6 +32,27 @@ export function Toolbar({
   source: boolean;
   onCopySource: () => void;
 }) {
+  useEditorState({
+    editor,
+    selector: ({ editor: selected }) =>
+      selected
+        ? {
+            heading: selected.isActive('heading')
+              ? selected.getAttributes('heading').level
+              : 0,
+            bold: selected.isActive('bold'),
+            italic: selected.isActive('italic'),
+            strike: selected.isActive('strike'),
+            code: selected.isActive('code'),
+            quote: selected.isActive('blockquote'),
+            bullet: selected.isActive('bulletList'),
+            ordered: selected.isActive('orderedList'),
+            task: selected.isActive('taskList'),
+            block: selected.isActive('codeBlock'),
+            highlight: highlightActive(selected),
+          }
+        : null,
+  });
   if (source)
     return (
       <div className="toolbar source-tools">

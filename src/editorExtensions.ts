@@ -12,6 +12,7 @@ import {
   NodeSelection,
   TextSelection,
   type Selection,
+  type Transaction,
 } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { Slice, type Node } from '@tiptap/pm/model';
@@ -247,6 +248,61 @@ function buildIndentDecorations(doc: Node) {
       );
   });
   return DecorationSet.create(doc, decorations);
+}
+function updateIndentDecorations(tr: Transaction, previous: DecorationSet) {
+  const base = previous.map(tr.mapping, tr.doc);
+  const ranges: { from: number; to: number }[] = [];
+  for (let index = 0; index < tr.steps.length; index++) {
+    const after = tr.mapping.slice(index + 1);
+    let mapped = false;
+    tr.steps[index].getMap().forEach((_oldFrom, _oldTo, from, to) => {
+      mapped = true;
+      ranges.push({ from: after.map(from, -1), to: after.map(to, 1) });
+    });
+    if (!mapped) {
+      const step = tr.steps[index].toJSON() as {
+        from?: number;
+        to?: number;
+        pos?: number;
+      };
+      if (step.from !== undefined && step.to !== undefined)
+        ranges.push({
+          from: after.map(step.from, -1),
+          to: after.map(step.to, 1),
+        });
+      else if (step.pos !== undefined)
+        ranges.push({ from: after.map(step.pos), to: after.map(step.pos) });
+      else return buildIndentDecorations(tr.doc);
+    }
+  }
+  const removed = new Map<string, Decoration>();
+  const added = new Map<number, Decoration>();
+  for (const range of ranges) {
+    const from = Math.max(0, range.from - 1);
+    const to = Math.min(tr.doc.content.size, range.to + 1);
+    for (const decoration of base.find(from, to))
+      if (decoration.from < to && decoration.to > from)
+        removed.set(`${decoration.from}:${decoration.to}`, decoration);
+    tr.doc.nodesBetween(from, to, (node, pos) => {
+      if (indentWrapper(node))
+        added.set(
+          pos,
+          Decoration.node(pos, pos + node.nodeSize, {
+            'data-indent-wrapper': 'true',
+          }),
+        );
+    });
+  }
+  if (removed.size > 128)
+    return DecorationSet.create(tr.doc, [
+      ...base
+        .find()
+        .filter(
+          (decoration) => !removed.has(`${decoration.from}:${decoration.to}`),
+        ),
+      ...added.values(),
+    ]);
+  return base.remove([...removed.values()]).add(tr.doc, [...added.values()]);
 }
 function unindentWrapper(editor: Editor, itemType: string) {
   const { state } = editor;
@@ -486,7 +542,7 @@ export const EditingRules = Extension.create({
           }),
           apply(tr, previous) {
             const indentDecorations = tr.docChanged
-              ? buildIndentDecorations(tr.doc)
+              ? updateIndentDecorations(tr, previous.indentDecorations)
               : previous.indentDecorations;
             if (tr.getMeta('mojian-progress'))
               return {
