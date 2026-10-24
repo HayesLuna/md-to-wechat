@@ -1,4 +1,58 @@
 import { test, expect } from './fixtures';
+import MarkdownIt from 'markdown-it';
+import { markdownHighlight, matchHighlight } from '../src/highlight';
+
+test('dense highlights process only their own inline tokens', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  let processedTokens = 0;
+  parser.inline.ruler2.push('measure-highlight-work', (state) => {
+    processedTokens += state.tokens.length;
+  });
+  const html = parser.renderInline('==word== '.repeat(4000));
+  expect(html.match(/<mark>/g)).toHaveLength(4000);
+  expect(processedTokens).toBeLessThan(4000 * 10);
+});
+
+test('invalid highlight openings never scan the remaining paragraph', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  const source = '== word '.repeat(4000);
+  const original = String.prototype.startsWith;
+  let scanChecks = 0;
+  String.prototype.startsWith = function (search, position) {
+    if (search === '==') scanChecks++;
+    return original.call(this, search, position);
+  };
+  let html: string;
+  try {
+    html = parser.renderInline(source);
+    expect(matchHighlight('== unfinished')).toBeNull();
+  } finally {
+    String.prototype.startsWith = original;
+  }
+  expect(html).toBe(source);
+  expect(scanChecks).toBeLessThan(4000 * 2);
+});
+
+test('highlight fragments preserve surrounding formatting and token levels', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  expect(
+    parser.renderInline(
+      '**before ==*inside* [link](https://example.com)== after** ' +
+        '~~before ==**bold**== after~~ ==`a=b`==',
+    ),
+  ).toBe(
+    '<strong>before <mark><em>inside</em> <a href="https://example.com">link</a></mark> after</strong> ' +
+      '<s>before <mark><strong>bold</strong></mark> after</s> <mark><code>a=b</code></mark>',
+  );
+  const inline = parser.parseInline('**before ==*inside*== after**', {})[0];
+  let level = 0;
+  for (const token of inline.children!) {
+    if (token.nesting < 0) level--;
+    expect(token.level).toBe(level);
+    if (token.nesting > 0) level++;
+  }
+  expect(level).toBe(0);
+});
 
 const codeDocument = (count: number, language = 'javascript') =>
   '# 性能回归\n\n' +

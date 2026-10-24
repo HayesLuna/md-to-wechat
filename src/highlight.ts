@@ -5,11 +5,20 @@ export function markdownHighlight(md: MarkdownIt) {
   md.inline.ruler.before('emphasis', 'highlight', (state, silent) => {
     if (state.src[state.pos] !== '=' || state.src[state.pos + 1] !== '=')
       return false;
+    if (/\s/.test(state.src[state.pos + 2] || ' ')) return false;
     const match = matchHighlight(state.src.slice(state.pos, state.posMax));
     if (!match) return false;
     if (!silent) {
       state.push('mark_open', 'mark', 1);
-      md.inline.parse(match.text, md, state.env, state.tokens);
+      // Parsing into the growing parent array reruns inline postprocessing over
+      // every previous highlight. Process only this fragment, then append through
+      // push so parent levels and delimiter metadata stay in step.
+      const tokens: typeof state.tokens = [];
+      md.inline.parse(match.text, md, state.env, tokens);
+      for (const token of tokens) {
+        const appended = state.push(token.type, token.tag, token.nesting);
+        Object.assign(appended, token, { level: appended.level });
+      }
       state.push('mark_close', 'mark', -1);
     }
     state.pos += match.raw.length;
@@ -64,7 +73,7 @@ export function highlightPairs(
 
 // Shared delimiter handling keeps the editor and publication renderer in sync.
 export function matchHighlight(source: string) {
-  if (!source.startsWith('==')) return null;
+  if (!source.startsWith('==') || /\s/.test(source[2] || ' ')) return null;
   const pair = highlightPairs(source, true, 1)[0];
   return pair?.from === 0
     ? { raw: source.slice(0, pair.to), text: source.slice(2, pair.to - 2) }
