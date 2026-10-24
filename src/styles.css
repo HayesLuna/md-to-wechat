@@ -505,7 +505,8 @@ button.primary:hover {
   gap: 6px;
 }
 .code-header input {
-  width: 100px;
+  flex: 0 1 auto;
+  width: auto;
   min-width: 0;
   border: 0;
   background: transparent;
@@ -1367,9 +1368,6 @@ button.primary:hover {
   .context-tools button {
     font-size: 10px;
   }
-  .code-header input {
-    width: 90px;
-  }
   .toast {
     bottom: 40px;
     font-size: 11px;
@@ -1475,9 +1473,6 @@ button.primary:hover {
   .code-header {
     gap: 8px;
   }
-  .code-header input {
-    width: 70px;
-  }
 }
 
 /* Chinese system fonts often need synthesized italic glyphs. */
@@ -1578,10 +1573,6 @@ button.primary:hover {
   padding-left: 24px;
 }
 
-.code-header input {
-  flex: 1;
-  width: auto;
-}
 .code-header > div {
   flex-shrink: 0;
 }
@@ -1668,9 +1659,6 @@ button.primary:hover {
   }
   .header-actions .mobile-save {
     display: none;
-  }
-  .code-header input {
-    width: 65px;
   }
   .code-header {
     padding: 0 6px;
@@ -1853,12 +1841,14 @@ button.primary:hover {
 .mermaid-preview-controls {
   align-items: center;
 }
-.code-header button[aria-label='复制代码'] svg {
+.code-header button[aria-label='复制代码'] svg,
+.code-header button[aria-label='格式化 JSON'] svg {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
 }
-.code-header button[aria-label='复制代码'] {
+.code-header button[aria-label='复制代码'],
+.code-header button[aria-label='格式化 JSON'] {
   font-size: 13px;
   line-height: 20px;
   padding: 4px 6px;

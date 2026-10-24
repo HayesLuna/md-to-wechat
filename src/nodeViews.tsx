@@ -11,6 +11,7 @@ import {
   Download,
   Trash2,
   ImageOff,
+  IndentIncrease,
 } from 'lucide-react';
 import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
@@ -398,6 +399,10 @@ export function CodeView({
         <input
           aria-label="代码语言"
           value={node.attrs.language || ''}
+          size={Math.min(
+            16,
+            Math.max(7, String(node.attrs.language || '').length + 1),
+          )}
           placeholder="纯代码"
           spellCheck={false}
           onChange={(e) =>
@@ -413,7 +418,8 @@ export function CodeView({
               onMouseDown={(e) => e.preventDefault()}
               onClick={formatJSON}
             >
-              格式化
+              <IndentIncrease size={14} />
+              <span>格式化</span>
             </button>
           )}
           {mermaid && (
