@@ -139,7 +139,10 @@ export default function App() {
   const [output, setOutput] = useState<Output | null>(null);
   const [downloadAssets, setDownloadAssets] = useState<Asset[]>([]);
   const downloadRequest = useRef(0);
-  const [requestedOutput, setRequestedOutput] = useState<string | null>(null);
+  const [requestedOutput, setRequestedOutput] = useState<{
+    key: string;
+    attempt: number;
+  } | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [renderError, setRenderError] = useState('');
   const [selectionState, setSelectionState] = useState('');
@@ -335,7 +338,7 @@ export default function App() {
   useEffect(() => {
     if (!ready) return;
     const key = outputKey(markdown, settings);
-    const demanded = preview || requestedOutput === key;
+    const demanded = preview || requestedOutput?.key === key;
     if (
       outputRef.current?.key === key &&
       (!demanded || outputRef.current.previewReady)
@@ -990,8 +993,11 @@ export default function App() {
     }
   };
   const requestCopy = () => {
-    setRequestedOutput(
-      outputKey(readCurrent().markdown, current.current.settings),
+    const key = outputKey(readCurrent().markdown, current.current.settings);
+    setRequestedOutput((previous) =>
+      previous?.key === key && !renderError
+        ? previous
+        : { key, attempt: (previous?.attempt || 0) + 1 },
     );
     if (!outputCurrent()) {
       notify(renderError || '正在准备最新排版，完成后请再次点击复制。');

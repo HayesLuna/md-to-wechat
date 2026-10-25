@@ -95,6 +95,63 @@ test('highlight fragments preserve surrounding formatting and token levels', () 
   expect(level).toBe(0);
 });
 
+test('URL and image attributes do not consume later highlight delimiters', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  expect(
+    parser.renderInline(
+      '[链接](https://example.com/?q==x "a==b") ' +
+        '![图片](https://example.com/a==b.png) ==重点==',
+    ),
+  ).toContain('<mark>重点</mark>');
+  expect(
+    parser.renderInline('[链接 ==标题==](https://example.com) ==正文=='),
+  ).toContain('<a href="https://example.com">链接 <mark>标题</mark></a> <mark>正文</mark>');
+  expect(parser.renderInline('==前 [链接==](https://example.com)')).toBe(
+    '==前 <a href="https://example.com">链接==</a>',
+  );
+  expect(parser.renderInline('[链接 ==前](https://example.com) 后==')).toBe(
+    '<a href="https://example.com">链接 ==前</a> 后==',
+  );
+});
+
+test('unclosed highlights stay in their own tag and do not block other scopes', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  const cases = [
+    [
+      '[==甲](https://a.example) [乙==](https://b.example)',
+      '<a href="https://a.example">==甲</a> <a href="https://b.example">乙==</a>',
+    ],
+    ['**==甲** *乙==*', '<strong>==甲</strong> <em>乙==</em>'],
+    [
+      '[==未闭合](https://a.example) 后面==重点==',
+      '<a href="https://a.example">==未闭合</a> 后面<mark>重点</mark>',
+    ],
+    [
+      '==未闭合 [==重点==](https://a.example)',
+      '==未闭合 <a href="https://a.example"><mark>重点</mark></a>',
+    ],
+    [
+      '==前 [链接](https://a.example) **粗体** 后==',
+      '<mark>前 <a href="https://a.example">链接</a> <strong>粗体</strong> 后</mark>',
+    ],
+  ];
+  for (const [source, html] of cases)
+    expect(parser.renderInline(source), source).toBe(html);
+});
+
+test('long equals runs preserve the original literal content and pairing', () => {
+  const parser = new MarkdownIt().use(markdownHighlight);
+  const cases = [
+    ['前=====后', '前<mark>=</mark>后'],
+    ['======', '<mark>=</mark>='],
+    ['=====甲==', '<mark>=</mark>甲=='],
+    ['=======甲==', '<mark>=</mark><mark>甲</mark>'],
+    ['前====甲==后', '前<mark>==甲</mark>后'],
+  ];
+  for (const [source, html] of cases)
+    expect(parser.renderInline(source), source).toBe(html);
+});
+
 const codeDocument = (count: number, language = 'javascript') =>
   '# 性能回归\n\n' +
   Array.from(

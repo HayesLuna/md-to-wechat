@@ -72,6 +72,34 @@ test('clipboard has actual HTML and plain formats, and refusal never falls back'
  await page.getByRole('button',{name:'复制到公众号',exact:true}).click();await expect(page.locator('.toast')).toContainText('复制失败');expect(await page.evaluate(()=>(window as any).__fallback)).toBe(0);expect(await markdown(page)).toContain('文字 & 中文');
 });
 
+test('copy retries a failed article render without changing the document', async ({ page }) => {
+  await ready(page);
+  const content = '# 重试排版\n\n' + '正文'.repeat(25_100);
+  await setDoc(page, content);
+  await page.waitForFunction(() => (window as any).__mojian.getOutput() === null);
+  await page.evaluate(() => {
+    const create = document.createElement.bind(document);
+    document.createElement = ((tag: string, options?: ElementCreationOptions) => {
+      if (tag === 'section') {
+        document.createElement = create;
+        (window as any).__renderFailed = true;
+        throw new Error('temporary render failure');
+      }
+      return create(tag, options);
+    }) as typeof document.createElement;
+  });
+  const copy = page.getByRole('button', { name: '复制到公众号', exact: true });
+  await copy.click();
+  await page.waitForFunction(() => (window as any).__renderFailed === true);
+  await copy.click();
+  await expect(page.locator('.toast')).toContainText('temporary render failure');
+  await page.waitForFunction(() => {
+    const app = (window as any).__mojian;
+    return app.getOutput()?.key === JSON.stringify([app.getMarkdown(), app.getSettings()]);
+  });
+  expect(await markdown(page)).toBe(content);
+});
+
 test('outline duplicates and code exclusions, full screen and Esc layering; mobile is single pane',async({page})=>{
  await ready(page);await setDoc(page,'# 重复\n\n'+Array(12).fill('段落\n\n').join('')+'## 重复\n\n```\n# 假标题\n```');await page.getByRole('button',{name:'展开侧栏',exact:true}).click();expect(await page.locator('.sidebar-outline>button').count()).toBe(2);await page.locator('.sidebar-outline>button').nth(1).click();expect((await selection(page)).from).toBeGreaterThan(20);
  await page.locator('.pane-actions').getByRole('button',{name:'全屏写作',exact:true}).click();await expect(page.locator('.app')).toHaveClass(/fullscreen/);await page.getByRole('button',{name:'插入链接',exact:true}).click();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.app')).toHaveClass(/fullscreen/);await page.keyboard.press('Escape');await expect(page.locator('.app')).not.toHaveClass(/fullscreen/);

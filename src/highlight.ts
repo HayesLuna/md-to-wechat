@@ -2,42 +2,91 @@ import type { JSONContent } from '@tiptap/core';
 import type MarkdownIt from 'markdown-it';
 
 export function markdownHighlight(md: MarkdownIt) {
-  const pairsByState = new WeakMap<object, Map<number, HighlightPair>>();
   md.inline.ruler.before('emphasis', 'highlight', (state, silent) => {
-    if (state.src[state.pos] !== '=' || state.src[state.pos + 1] !== '=')
+    if (
+      silent ||
+      state.src[state.pos] !== '=' ||
+      state.src[state.pos + 1] !== '='
+    )
       return false;
-    if (/\s/.test(state.src[state.pos + 2] || ' ')) return false;
-    let pairs = pairsByState.get(state);
-    if (!pairs) {
-      pairs = new Map(
-        highlightPairs(state.src.slice(0, state.posMax), true).map((pair) => [
-          pair.from,
-          pair,
-        ]),
-      );
-      pairsByState.set(state, pairs);
+    let end = state.pos + 2;
+    while (end < state.posMax && state.src[end] === '=') end++;
+    // Keep individual characters until pairing. In "=====", the closing pair
+    // starts at the fourth character, leaving one literal '=' inside the mark.
+    for (let at = state.pos; at < end; at++) {
+      const token = state.push('text', '', 0);
+      token.content = '=';
+      token.meta = {
+        highlightDelimiter: true,
+        hasNext: at + 1 < end,
+        canOpen: at + 2 < state.posMax && !/\s/.test(state.src[at + 2]),
+        canClose: at > 0 && !/\s/.test(state.src[at - 1]),
+      };
     }
-    const pair = pairs.get(state.pos);
-    if (!pair) return false;
-    if (!silent) {
-      state.push('mark_open', 'mark', 1);
-      // Parsing into the growing parent array reruns inline postprocessing over
-      // every previous highlight. Process only this fragment, then append through
-      // push so parent levels and delimiter metadata stay in step.
-      const tokens: typeof state.tokens = [];
-      md.inline.parse(
-        state.src.slice(state.pos + 2, pair.to - 2),
-        md,
-        state.env,
-        tokens,
-      );
-      for (const token of tokens) {
-        const appended = state.push(token.type, token.tag, token.nesting);
-        Object.assign(appended, token, { level: appended.level });
+    state.pos = end;
+    return true;
+  });
+  // Link and image destinations never reach the inline token stream. Pair only
+  // delimiter tokens the parser actually emitted, so URL query strings cannot
+  // consume a later highlight. One pass also handles dense or unclosed pairs.
+  md.inline.ruler2.after('emphasis', 'highlight', (state) => {
+    // Each concrete tag owns its unmatched opener. Popping the scope discards
+    // it, so sibling links/marks cannot accidentally close one another.
+    const scopes = [{ opening: -1, hasContent: false }];
+    let changed = false;
+    for (let index = 0; index < state.tokens.length; index++) {
+      const token = state.tokens[index];
+      if (token.nesting < 0) {
+        scopes.pop();
+        continue;
       }
-      state.push('mark_close', 'mark', -1);
+      const scope = scopes[scopes.length - 1];
+      if (token.nesting > 0) {
+        scope.hasContent = true;
+        scopes.push({ opening: -1, hasContent: false });
+        continue;
+      }
+      const marker = token.meta as
+        | {
+            highlightDelimiter?: boolean;
+            hasNext?: boolean;
+            canOpen?: boolean;
+            canClose?: boolean;
+          }
+        | undefined;
+      if (!marker?.highlightDelimiter || !marker.hasNext) {
+        if (token.content || token.type !== 'text') scope.hasContent = true;
+        continue;
+      }
+      if (scope.opening >= 0) {
+        if (marker.canClose && scope.hasContent) {
+          const start = state.tokens[scope.opening];
+          start.type = 'mark_open';
+          start.tag = 'mark';
+          start.nesting = 1;
+          start.content = '';
+          state.tokens[scope.opening + 1].content = '';
+          token.type = 'mark_close';
+          token.tag = 'mark';
+          token.nesting = -1;
+          token.content = '';
+          state.tokens[++index].content = '';
+          scope.opening = -1;
+          scope.hasContent = false;
+          changed = true;
+        } else scope.hasContent = true;
+      } else if (marker.canOpen) {
+        scope.opening = index++;
+        scope.hasContent = false;
+      }
     }
-    state.pos = pair.to;
+    if (!changed) return false;
+    let level = 0;
+    for (const token of state.tokens) {
+      if (token.nesting < 0) level--;
+      token.level = level;
+      if (token.nesting > 0) level++;
+    }
     return true;
   });
 }

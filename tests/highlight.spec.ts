@@ -53,6 +53,21 @@ test('Typora highlights survive Markdown round trips and publication output', as
   await page.screenshot({ path: '/tmp/mojian-highlight-preview.png' });
 });
 
+test('equals in a link URL do not hide later editor and publication highlights', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const markdown = '[链接](https://example.com/?q==x) ==重点==';
+  await page.evaluate(text => (window as any).__mojian.setMarkdown(text), markdown);
+  await expect(page.locator('.article-editor mark')).toHaveText('重点');
+  await page.waitForFunction(() => {
+    const app = (window as any).__mojian;
+    return app.getOutput()?.key === JSON.stringify([app.getMarkdown(), app.getSettings()]);
+  });
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper mark')).toHaveText('重点');
+  expect(await page.evaluate(() => (window as any).__mojian.getOutput().html)).toContain('<mark');
+});
+
 test('typing and pasting double equals creates highlights; code and rich HTML remain intact', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
@@ -255,6 +270,10 @@ test('highlight pairs match Typora from left to right, including adjacent and re
     ['前==甲==乙==后', ['甲'], '前甲乙==后'],
     ['空前== 甲==和==乙 ==后', ['和'], '空前== 甲和乙 ==后'],
     ['四个====后', [], '四个====后'],
+    ['前=====后', ['='], '前=后'],
+    ['======', ['='], '=='],
+    ['=====甲==', ['='], '=甲=='],
+    ['=======甲==', ['=', '甲'], '=甲'],
   ] as const;
   for (const [markdown, marks, visible] of cases) {
     await page.evaluate(text => (window as any).__mojian.setMarkdown(text), markdown);
@@ -268,6 +287,12 @@ test('highlight pairs match Typora from left to right, including adjacent and re
       return Array.from(root.querySelectorAll('mark'), mark => mark.textContent);
     });
     expect(preview).toEqual(marks);
+    const copied = await page.evaluate(() => {
+      const html = (window as any).__mojian.getOutput().html;
+      const root = new DOMParser().parseFromString(html, 'text/html');
+      return Array.from(root.querySelectorAll('mark'), mark => mark.textContent);
+    });
+    expect(copied).toEqual(marks);
   }
 });
 
