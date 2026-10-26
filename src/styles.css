@@ -1996,6 +1996,9 @@ button.primary:hover {
   transform: translateY(var(--draft-drag-y, 0px));
   transition: none;
 }
+.sidebar-drafts .draft-list.settling li {
+  transition: none;
+}
 .sidebar-drafts .draft-list li.drop-before {
   box-shadow: inset 0 2px var(--accent);
 }

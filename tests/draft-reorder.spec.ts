@@ -143,6 +143,67 @@ test('dragging upward makes room before the target and saves that order', async 
   await expect(page.locator('.article-editor h1')).toHaveText('D');
 });
 
+test('released draft rows stay in place instead of flashing past their final slot', async ({ page }) => {
+  await seed(page, true);
+  const source = await page.locator('[data-draft-id="D"] .draft-drag-handle').boundingBox();
+  const sourceRow = await page.locator('[data-draft-id="D"]').boundingBox();
+  const target = await page.locator('[data-draft-id="C"]').boundingBox();
+  expect(source && sourceRow && target).toBeTruthy();
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 30, target!.y + target!.height - 3, { steps: 8 });
+  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-after/);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row, height) =>
+    Math.abs(new DOMMatrixReadOnly(getComputedStyle(row).transform).m42 + height), sourceRow!.height,
+  )).toBeLessThan(1);
+  const before = await page.locator('[data-draft-id="C"]').boundingBox();
+  expect(before).toBeTruthy();
+  await page.evaluate(() => {
+    (window as any).__dropFrames = [];
+    (window as any).__sampleDrop = true;
+    const sample = () => {
+      if (!(window as any).__sampleDrop) return;
+      (window as any).__dropFrames.push({
+        first: document.querySelector('.draft-list li')?.getAttribute('data-draft-id'),
+        top: document.querySelector('[data-draft-id="C"]')!.getBoundingClientRect().top,
+      });
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.mouse.up();
+  await page.waitForFunction(() =>
+    (window as any).__dropFrames.filter((frame: any) => frame.first === 'C').length >= 5,
+  );
+  const committed = await page.evaluate(() => {
+    (window as any).__sampleDrop = false;
+    return (window as any).__dropFrames.filter((frame: any) => frame.first === 'C');
+  });
+  expect(committed.length).toBeGreaterThanOrEqual(5);
+  for (const frame of committed)
+    expect(Math.abs(frame.top - before!.y)).toBeLessThan(2);
+});
+
+test('dropping beside the original slot returns smoothly without changing order', async ({ page }) => {
+  await seed(page);
+  const source = await page.locator('[data-draft-id="C"] .draft-drag-handle').boundingBox();
+  const target = await page.locator('[data-draft-id="B"]').boundingBox();
+  expect(source && target).toBeTruthy();
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 30, target!.y + 3, { steps: 8 });
+  await expect(page.locator('[data-draft-id="B"]')).toHaveClass(/drop-before/);
+  await page.mouse.up();
+  await expect(page.locator('.draft-list')).not.toHaveClass(/settling/);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+  )).toBe(0);
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'A']);
+  await expect.poll(() => page.evaluate(async () =>
+    (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts.map((item) => item.id),
+  )).toEqual(['C', 'B', 'A']);
+});
+
 test('failed reorder keeps the original order and explains the failure', async ({ page }) => {
   await seed(page);
   await page.evaluate(() => {

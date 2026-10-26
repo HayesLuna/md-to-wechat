@@ -5,6 +5,7 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { Search, Plus, Pencil, Trash2, GripVertical } from 'lucide-react';
 import { DraftListIcon, OutlineIcon } from './NavigationIcons';
 import { useSidebarResize } from './useSidebarResize';
@@ -61,6 +62,7 @@ export function DocumentSidebar({
   const canReorder =
     tab === 'drafts' && !busy && !normalizedQuery && drafts.length > 1;
   const scrollArea = useRef<HTMLDivElement>(null);
+  const settleFrame = useRef<number | null>(null);
   const pointerSession = useRef<{
     id: string;
     pointerId: number;
@@ -78,6 +80,13 @@ export function DocumentSidebar({
     onKeyDown?: (event: globalThis.KeyboardEvent) => void;
   } | null>(null);
   const dropRef = useRef<{ id: string; side: 'before' | 'after' } | null>(null);
+  const clearSettling = () => {
+    if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current);
+    settleFrame.current = null;
+    scrollArea.current
+      ?.querySelector('.draft-list')
+      ?.classList.remove('settling');
+  };
   const applyDrop = (next: { id: string; side: 'before' | 'after' } | null) => {
     const session = pointerSession.current;
     if (!session) return;
@@ -124,13 +133,38 @@ export function DocumentSidebar({
     if (session.onKeyDown)
       document.removeEventListener('keydown', session.onKeyDown);
     const target = dropRef.current;
+    const sourceIndex = session.positions.findIndex(
+      (item) => item.id === session.id,
+    );
+    const targetIndex = session.positions.findIndex(
+      (item) => item.id === target?.id,
+    );
+    const insertionIndex = targetIndex + (target?.side === 'after' ? 1 : 0);
+    const destinationIndex =
+      insertionIndex > sourceIndex ? insertionIndex - 1 : insertionIndex;
+    const shouldCommit =
+      commit &&
+      session.active &&
+      !!target &&
+      sourceIndex >= 0 &&
+      targetIndex >= 0 &&
+      destinationIndex !== sourceIndex;
+    const list = scrollArea.current?.querySelector('.draft-list');
+    if (shouldCommit) list?.classList.add('settling');
     applyDrop(null);
     pointerSession.current = null;
     if (session.element.hasPointerCapture(session.pointerId))
       session.element.releasePointerCapture(session.pointerId);
     session.row?.classList.remove('dragging');
-    if (commit && session.active && target)
-      onReorder(session.id, target.id, target.side);
+    if (shouldCommit && target) {
+      try {
+        flushSync(() => onReorder(session.id, target.id, target.side));
+      } finally {
+        settleFrame.current = requestAnimationFrame(() => {
+          settleFrame.current = requestAnimationFrame(clearSettling);
+        });
+      }
+    }
   };
   const updateDrop = (x: number, y: number) => {
     const session = pointerSession.current;
@@ -236,6 +270,7 @@ export function DocumentSidebar({
   useEffect(
     () => () => {
       finishPointer(false);
+      clearSettling();
     },
     [],
   );
@@ -245,6 +280,7 @@ export function DocumentSidebar({
   ) => {
     if (!canReorder || event.button !== 0) return;
     event.preventDefault();
+    clearSettling();
     finishPointer(false);
     const row = event.currentTarget.closest<HTMLLIElement>('[data-draft-id]');
     row?.style.setProperty('--draft-drag-y', '0px');
