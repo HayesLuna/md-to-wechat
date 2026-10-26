@@ -96,8 +96,6 @@ export function DocumentSidebar({
     )
       return;
     const rows = session.positions;
-    const previous = rows.find((item) => item.id === dropRef.current?.id);
-    previous?.element.classList.remove('drop-before', 'drop-after');
     const sourceIndex = rows.findIndex((item) => item.id === session.id);
     const targetIndex = rows.findIndex((item) => item.id === next?.id);
     const insertionIndex = targetIndex + (next?.side === 'after' ? 1 : 0);
@@ -121,8 +119,6 @@ export function DocumentSidebar({
       else if (!shift && value)
         item.element.style.removeProperty('--draft-shift');
     });
-    const target = rows[targetIndex];
-    if (next && target) target.element.classList.add(`drop-${next.side}`);
     dropRef.current = next;
   };
   const finishPointer = (commit: boolean) => {

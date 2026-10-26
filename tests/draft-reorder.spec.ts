@@ -37,7 +37,6 @@ async function drag(page: Page, id: string, targetId: string, side: 'before' | '
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
   await page.mouse.move(target!.x + 30, target!.y + (side === 'after' ? target!.height - 3 : 3), { steps: 8 });
-  await expect(page.locator(`[data-draft-id="${targetId}"]`)).toHaveClass(side === 'after' ? /drop-after/ : /drop-before/);
   await page.mouse.up();
 }
 
@@ -96,10 +95,13 @@ test('drag preview moves neighboring drafts aside and Escape restores their posi
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
   await page.mouse.move(target!.x + 30, target!.y + target!.height - 3, { steps: 8 });
-  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-after/);
   await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
     new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
   )).toBeLessThan(-20);
+  await expect(page.locator('[data-draft-id="C"]')).not.toHaveClass(/drop-/);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    getComputedStyle(row).boxShadow,
+  )).toBe('none');
   await expect.poll(() => page.locator('[data-draft-id="D"]').evaluate((row) =>
     new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
   )).toBeGreaterThan(20);
@@ -130,7 +132,6 @@ test('dragging upward makes room before the target and saves that order', async 
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
   await page.mouse.move(target!.x + 30, target!.y + 3, { steps: 8 });
-  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-before/);
   await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
     new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
   )).toBeGreaterThan(20);
@@ -152,7 +153,6 @@ test('released draft rows stay in place instead of flashing past their final slo
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
   await page.mouse.move(target!.x + 30, target!.y + target!.height - 3, { steps: 8 });
-  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-after/);
   await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row, height) =>
     Math.abs(new DOMMatrixReadOnly(getComputedStyle(row).transform).m42 + height), sourceRow!.height,
   )).toBeLessThan(1);
@@ -192,7 +192,7 @@ test('dropping beside the original slot returns smoothly without changing order'
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
   await page.mouse.move(target!.x + 30, target!.y + 3, { steps: 8 });
-  await expect(page.locator('[data-draft-id="B"]')).toHaveClass(/drop-before/);
+  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/dragging/);
   await page.mouse.up();
   await expect(page.locator('.draft-list')).not.toHaveClass(/settling/);
   await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
@@ -354,7 +354,6 @@ test('touch handle reorders after a long press', async ({ browser }) => {
       type: 'touchMove',
       touchPoints: [{ x: target!.x + 30, y: target!.y + target!.height - 3 }],
     });
-    await expect(page.locator('.draft-list li').filter({ hasText: 'A' })).toHaveClass(/drop-after/);
     await expect.poll(() => page.locator('[data-draft-id="B"]').evaluate((row) =>
       new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
     )).toBeLessThan(-20);
