@@ -161,6 +161,17 @@ export function DocumentSidebar({
   useEffect(() => {
     if (!canReorder) finishPointer(false);
   }, [canReorder]);
+  useEffect(() => {
+    const area = scrollArea.current;
+    if (!area) return;
+    const preventDragScroll = (event: TouchEvent) => {
+      const session = pointerSession.current;
+      if (session?.active && session.element.contains(event.target as Node))
+        event.preventDefault();
+    };
+    area.addEventListener('touchmove', preventDragScroll, { passive: false });
+    return () => area.removeEventListener('touchmove', preventDragScroll);
+  }, [tab]);
   useEffect(
     () => () => {
       const session = pointerSession.current;

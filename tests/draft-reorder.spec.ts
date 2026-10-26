@@ -1,18 +1,19 @@
 import { expect, test } from './fixtures';
 import type { Page } from '@playwright/test';
 
-async function seed(page: Page) {
+async function seed(page: Page, includeD = false) {
   await page.route('**/reorder-seed', (route) =>
     route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
   );
   await page.goto('/reorder-seed');
-  await page.evaluate(async () => {
+  await page.evaluate(async (addD) => {
     const storage = await import('/src/storage.ts');
     const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
     for (const [id, createdAt] of [
       ['A', 100],
       ['B', 200],
       ['C', 300],
+      ...(addD ? ([['D', 400]] as const) : []),
     ] as const) {
       await storage.saveDraft({
         ...storage.newDraft(`# ${id}`, DEFAULT_SETTINGS),
@@ -21,7 +22,7 @@ async function seed(page: Page) {
         version: 1,
       });
     }
-  });
+  }, includeD);
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
@@ -29,14 +30,14 @@ async function seed(page: Page) {
 }
 
 const titles = (page: Page) => page.locator('.draft-select strong').allTextContents();
-async function drag(page: Page, id: string, targetId: string) {
+async function drag(page: Page, id: string, targetId: string, side: 'before' | 'after' = 'after') {
   const source = await page.locator(`[data-draft-id="${id}"] .draft-drag-handle`).boundingBox();
   const target = await page.locator(`[data-draft-id="${targetId}"]`).boundingBox();
   expect(source && target).toBeTruthy();
   await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
   await page.mouse.down();
-  await page.mouse.move(target!.x + 30, target!.y + target!.height - 3, { steps: 8 });
-  await expect(page.locator(`[data-draft-id="${targetId}"]`)).toHaveClass(/drop-after/);
+  await page.mouse.move(target!.x + 30, target!.y + (side === 'after' ? target!.height - 3 : 3), { steps: 8 });
+  await expect(page.locator(`[data-draft-id="${targetId}"]`)).toHaveClass(side === 'after' ? /drop-after/ : /drop-before/);
   await page.mouse.up();
 }
 
@@ -107,6 +108,92 @@ test('failed reorder keeps the original order and explains the failure', async (
   await expect.poll(() => titles(page)).toEqual(['C', 'B', 'A']);
 });
 
+test('a later drag preserves the visible order when the first queued write fails', async ({ page }) => {
+  await seed(page, true);
+  await expect.poll(() => titles(page)).toEqual(['D', 'C', 'B', 'A']);
+  await page.evaluate(async () => {
+    const request = indexedDB.open('mojian-v1');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const blocker = database.transaction(['draftInfo', 'meta'], 'readwrite');
+    (window as any).__releaseOrderBlocker = false;
+    const keepAlive = () => {
+      if (!(window as any).__releaseOrderBlocker)
+        blocker.objectStore('meta').get('active').onsuccess = keepAlive;
+    };
+    keepAlive();
+    const put = IDBObjectStore.prototype.put;
+    let failed = false;
+    IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
+      if (!failed && this.name === 'meta' && args[1] === 'draftOrder') {
+        failed = true;
+        (window as any).__firstOrderWriteFailed = true;
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      return put.apply(this, args);
+    };
+  });
+  await drag(page, 'D', 'C');
+  await expect.poll(() => titles(page)).toEqual(['C', 'D', 'B', 'A']);
+  await drag(page, 'B', 'D', 'before');
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
+  await page.evaluate(() => { (window as any).__releaseOrderBlocker = true; });
+  await page.waitForFunction(() => (window as any).__firstOrderWriteFailed);
+  await expect.poll(() => page.evaluate(async () =>
+    (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts.map((item) => item.id),
+  )).toEqual(['C', 'B', 'D', 'A']);
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
+  await expect(page.locator('.toast')).toHaveCount(0);
+  await expect(page.locator('.article-editor h1')).toHaveText('D');
+  await page.reload();
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
+});
+
+test('an older failed refresh cannot replace a newer optimistic drag', async ({ page }) => {
+  await seed(page, true);
+  await page.evaluate(() => {
+    const transaction = IDBDatabase.prototype.transaction;
+    let intercepted = false;
+    IDBDatabase.prototype.transaction = function (...args: Parameters<typeof transaction>) {
+      if (!intercepted && args[1] !== 'readwrite' && Array.isArray(args[0]) && args[0].includes('draftInfo') && args[0].includes('meta')) {
+        intercepted = true;
+        const blocker = transaction.call(this, ['draftInfo', 'meta'], 'readwrite');
+        (window as any).__releaseRefreshBlocker = false;
+        const keepAlive = () => {
+          if (!(window as any).__releaseRefreshBlocker)
+            blocker.objectStore('meta').get('active').onsuccess = keepAlive;
+        };
+        keepAlive();
+        const refresh = transaction.apply(this, args);
+        (window as any).__firstRefresh = refresh;
+        refresh.addEventListener('abort', () => { (window as any).__firstRefreshAborted = true; });
+        return refresh;
+      }
+      return transaction.apply(this, args);
+    };
+  });
+  await drag(page, 'D', 'C');
+  await page.waitForFunction(() => !!(window as any).__firstRefresh);
+  await drag(page, 'B', 'D', 'before');
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
+  await page.evaluate(() => {
+    (window as any).__firstRefresh.abort();
+  });
+  await page.waitForFunction(() => (window as any).__firstRefreshAborted);
+  await page.waitForTimeout(100);
+  await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
+  await page.evaluate(() => { (window as any).__releaseRefreshBlocker = true; });
+  await expect.poll(() => page.evaluate(async () =>
+    (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts.map((item) => item.id),
+  )).toEqual(['C', 'B', 'D', 'A']);
+  await expect(page.locator('.toast')).toHaveCount(0);
+});
+
 test('a failed list refresh does not misreport a saved move', async ({ page }) => {
   await seed(page);
   await page.evaluate(() => {
@@ -155,6 +242,47 @@ test('touch handle reorders after a long press', async ({ browser }) => {
     await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await expect.poll(() => titles(page)).toEqual(['B', 'A', 'C']);
     await page.screenshot({ path: '/tmp/mojian-draft-reorder-mobile.png' });
+  } finally {
+    await context.close();
+  }
+});
+
+test('a quick vertical swipe beginning on a touch handle scrolls the list', async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+  const page = await context.newPage();
+  try {
+    await seed(page);
+    await page.evaluate(async () => {
+      const storage = await import('/src/storage.ts');
+      const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+      for (let index = 0; index < 28; index++)
+        await storage.saveDraft({
+          ...storage.newDraft(`# 草稿 ${index}`, DEFAULT_SETTINGS),
+          id: `extra-${index}`,
+          createdAt: 301 + index,
+          version: 1,
+        });
+    });
+    await page.reload();
+    await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+    await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+    await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+    const handle = await page.locator('[data-draft-id="extra-27"] .draft-drag-handle').boundingBox();
+    expect(handle).toBeTruthy();
+    const x = handle!.x + handle!.width / 2;
+    const y = handle!.y + handle!.height / 2;
+    const client = await context.newCDPSession(page);
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 8; step++)
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 18 * step }] });
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => page.locator('.sidebar-draft-scroll').evaluate((node) => node.scrollTop)).toBeGreaterThan(50);
+    await expect(page.locator('.draft-list li.dragging')).toHaveCount(0);
+    await expect.poll(() => titles(page).then((items) => items[0])).toBe('草稿 27');
   } finally {
     await context.close();
   }
@@ -211,5 +339,24 @@ test('stored order reconciles new and deleted drafts across tabs', async ({ page
     added: ['D', 'B', 'A', 'C'],
     moved: ['D', 'A', 'C', 'B'],
     deleted: ['D', 'C', 'B'],
+  });
+});
+
+test('saved order snapshots retain unseen drafts and ignore deleted ids', async ({ page }) => {
+  await seed(page);
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    await storage.saveDraft({ ...storage.newDraft('# D', DEFAULT_SETTINGS), id: 'D' });
+    const added = await storage.saveDraftOrder(['C', 'A', 'B']);
+    await storage.removeDraft('B', (await storage.loadDraft('D'))!);
+    const afterDelete = await storage.saveDraftOrder(['A', 'B', 'C']);
+    const loaded = (await storage.loadDraftLibrary()).drafts.map((item) => item.id);
+    return { added, afterDelete, loaded };
+  });
+  expect(result).toEqual({
+    added: ['D', 'C', 'A', 'B'],
+    afterDelete: ['D', 'A', 'C'],
+    loaded: ['D', 'A', 'C'],
   });
 });

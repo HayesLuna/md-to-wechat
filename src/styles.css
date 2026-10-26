@@ -2007,7 +2007,7 @@ button.primary:hover {
   color: #8c929a;
   cursor: grab;
   opacity: 0;
-  touch-action: none;
+  touch-action: pan-y;
 }
 .sidebar-drafts .draft-list li:hover .draft-drag-handle,
 .sidebar-drafts .draft-list li.dragging .draft-drag-handle {

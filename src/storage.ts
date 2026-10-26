@@ -218,6 +218,23 @@ export async function moveDraft(
   await tx.done;
   return next;
 }
+export async function saveDraftOrder(ids: string[]) {
+  const database = await db();
+  const tx = database.transaction(['draftInfo', 'meta'], 'readwrite');
+  const [items, stored] = await Promise.all([
+    tx.objectStore('draftInfo').getAll(),
+    tx.objectStore('meta').get(DRAFT_ORDER_KEY),
+  ]);
+  const current = orderedDrafts(items, stored).map((item) => item.id);
+  const present = new Set(current);
+  const ordered = [...new Set(ids)].filter((id) => present.has(id));
+  const requested = new Set(ordered);
+  // Drafts added in another tab keep their position above this local order.
+  const next = [...current.filter((id) => !requested.has(id)), ...ordered];
+  await tx.objectStore('meta').put(JSON.stringify(next), DRAFT_ORDER_KEY);
+  await tx.done;
+  return next;
+}
 export async function loadDraft(id: string) {
   return (await db()).get('draft', id);
 }

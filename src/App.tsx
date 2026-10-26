@@ -46,7 +46,7 @@ import {
   draftTitle,
   saveDraft,
   removeDraft,
-  moveDraft,
+  saveDraftOrder,
   type Draft,
   storeImage,
   download,
@@ -132,6 +132,8 @@ export default function App() {
   draftOrder.current = drafts;
   const reorderQueue = useRef<Promise<void>>(Promise.resolve());
   const reorderTicket = useRef(0);
+  const reorderPending = useRef(0);
+  const lastSavedOrder = useRef<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'drafts' | 'outline'>('outline');
   const [sidebarSearch, setSidebarSearch] = useState(false);
@@ -700,41 +702,63 @@ export default function App() {
     const before = draftOrder.current;
     const next = placeDraft(before, id, targetId, side);
     if (next === before) return;
+    if (!reorderPending.current)
+      lastSavedOrder.current = before.map((item) => item.id);
     draftOrder.current = next;
     setDrafts((items) => placeDraft(items, id, targetId, side));
+    const desiredIds = next.map((item) => item.id);
     const ticket = ++reorderTicket.current;
+    reorderPending.current++;
     reorderQueue.current = reorderQueue.current.then(async () => {
-      let persistedIds: string[];
       try {
-        persistedIds = await moveDraft(id, targetId, side);
-      } catch (error) {
+        let persistedIds: string[];
+        try {
+          persistedIds = await saveDraftOrder(desiredIds);
+          lastSavedOrder.current = persistedIds;
+        } catch (error) {
+          if (ticket === reorderTicket.current) {
+            try {
+              const library = await loadDraftLibrary();
+              if (ticket !== reorderTicket.current) return;
+              lastSavedOrder.current = library.drafts.map((item) => item.id);
+              draftOrder.current = alignDrafts(
+                draftOrder.current,
+                library.drafts,
+              );
+              setDrafts((items) => alignDrafts(items, library.drafts));
+            } catch {
+              if (ticket !== reorderTicket.current) return;
+              draftOrder.current = alignDraftIds(
+                draftOrder.current,
+                lastSavedOrder.current,
+              );
+              setDrafts((items) =>
+                alignDraftIds(items, lastSavedOrder.current),
+              );
+            }
+            notify(
+              error instanceof Error &&
+                error.message.startsWith('草稿列表已变化')
+                ? error.message
+                : '排序未保存，请重试。',
+            );
+          }
+          return;
+        }
         if (ticket !== reorderTicket.current) return;
         try {
           const library = await loadDraftLibrary();
+          if (ticket !== reorderTicket.current) return;
           draftOrder.current = alignDrafts(draftOrder.current, library.drafts);
           setDrafts((items) => alignDrafts(items, library.drafts));
         } catch {
-          const ids = before.map((item) => item.id);
-          draftOrder.current = alignDraftIds(draftOrder.current, ids);
-          setDrafts((items) => alignDraftIds(items, ids));
+          if (ticket !== reorderTicket.current) return;
+          // The order is already persisted. A failed refresh is not a failed move.
+          draftOrder.current = alignDraftIds(draftOrder.current, persistedIds);
+          setDrafts((items) => alignDraftIds(items, persistedIds));
         }
-        notify(
-          error instanceof Error && error.message.startsWith('草稿列表已变化')
-            ? error.message
-            : '排序未保存，请重试。',
-        );
-        return;
-      }
-      if (ticket !== reorderTicket.current) return;
-      try {
-        const library = await loadDraftLibrary();
-        if (ticket !== reorderTicket.current) return;
-        draftOrder.current = alignDrafts(draftOrder.current, library.drafts);
-        setDrafts((items) => alignDrafts(items, library.drafts));
-      } catch {
-        // The order is already persisted. A failed refresh is not a failed move.
-        draftOrder.current = alignDraftIds(draftOrder.current, persistedIds);
-        setDrafts((items) => alignDraftIds(items, persistedIds));
+      } finally {
+        reorderPending.current--;
       }
     });
   };
