@@ -2,7 +2,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
   type PointerEvent,
 } from 'react';
@@ -10,6 +9,13 @@ import { Search, Plus, Pencil, Trash2, GripVertical } from 'lucide-react';
 import { DraftListIcon, OutlineIcon } from './NavigationIcons';
 import { useSidebarResize } from './useSidebarResize';
 import type { DraftSummary } from './storage';
+
+type DraftPosition = {
+  id: string;
+  top: number;
+  height: number;
+  element: HTMLLIElement;
+};
 
 export function DocumentSidebar({
   tab,
@@ -59,35 +65,79 @@ export function DocumentSidebar({
     id: string;
     pointerId: number;
     element: HTMLSpanElement;
+    row: HTMLLIElement | null;
     x: number;
     y: number;
+    startY: number;
+    scrollStart: number;
+    bounds: DOMRect | null;
+    positions: DraftPosition[];
     active: boolean;
     timer?: ReturnType<typeof setTimeout>;
+    scrollTimer?: number;
+    onKeyDown?: (event: globalThis.KeyboardEvent) => void;
   } | null>(null);
   const dropRef = useRef<{ id: string; side: 'before' | 'after' } | null>(null);
-  const [pointerDragId, setPointerDragId] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{
-    id: string;
-    side: 'before' | 'after';
-  } | null>(null);
+  const applyDrop = (next: { id: string; side: 'before' | 'after' } | null) => {
+    const session = pointerSession.current;
+    if (!session) return;
+    if (
+      dropRef.current?.id === next?.id &&
+      dropRef.current?.side === next?.side
+    )
+      return;
+    const rows = session.positions;
+    const previous = rows.find((item) => item.id === dropRef.current?.id);
+    previous?.element.classList.remove('drop-before', 'drop-after');
+    const sourceIndex = rows.findIndex((item) => item.id === session.id);
+    const targetIndex = rows.findIndex((item) => item.id === next?.id);
+    const insertionIndex = targetIndex + (next?.side === 'after' ? 1 : 0);
+    const destinationIndex =
+      targetIndex < 0
+        ? sourceIndex
+        : insertionIndex > sourceIndex
+          ? insertionIndex - 1
+          : insertionIndex;
+    const height = rows[sourceIndex]?.height ?? 0;
+    rows.forEach((item, index) => {
+      const shift =
+        index > sourceIndex && index <= destinationIndex
+          ? -height
+          : index >= destinationIndex && index < sourceIndex
+            ? height
+            : 0;
+      const value = item.element.style.getPropertyValue('--draft-shift');
+      if (shift && value !== `${shift}px`)
+        item.element.style.setProperty('--draft-shift', `${shift}px`);
+      else if (!shift && value)
+        item.element.style.removeProperty('--draft-shift');
+    });
+    const target = rows[targetIndex];
+    if (next && target) target.element.classList.add(`drop-${next.side}`);
+    dropRef.current = next;
+  };
   const finishPointer = (commit: boolean) => {
     const session = pointerSession.current;
     if (!session) return;
     if (session.timer) clearTimeout(session.timer);
+    if (session.scrollTimer) window.clearInterval(session.scrollTimer);
+    if (session.onKeyDown)
+      document.removeEventListener('keydown', session.onKeyDown);
+    const target = dropRef.current;
+    applyDrop(null);
     pointerSession.current = null;
     if (session.element.hasPointerCapture(session.pointerId))
       session.element.releasePointerCapture(session.pointerId);
-    if (commit && session.active && dropRef.current)
-      onReorder(session.id, dropRef.current.id, dropRef.current.side);
-    dropRef.current = null;
-    setDrop(null);
-    setPointerDragId(null);
+    session.row?.classList.remove('dragging');
+    if (commit && session.active && target)
+      onReorder(session.id, target.id, target.side);
   };
   const updateDrop = (x: number, y: number) => {
     const session = pointerSession.current;
     const area = scrollArea.current;
     if (!session || !area) return;
-    const bounds = area.getBoundingClientRect();
+    const bounds = session.bounds;
+    if (!bounds) return;
     if (
       x < bounds.left ||
       x > bounds.right ||
@@ -95,45 +145,58 @@ export function DocumentSidebar({
       y > bounds.bottom
     ) {
       if (!dropRef.current) return;
-      dropRef.current = null;
-      setDrop(null);
+      applyDrop(null);
       return;
     }
-    let row = document
-      .elementFromPoint(x, y)
-      ?.closest<HTMLLIElement>('[data-draft-id]');
-    let side: 'before' | 'after';
-    if (!row) {
-      const rows = area.querySelectorAll<HTMLLIElement>('[data-draft-id]');
-      row =
-        y < rows[0]?.getBoundingClientRect().top
-          ? rows[0]
-          : rows[rows.length - 1];
-      side = row === rows[0] ? 'before' : 'after';
-    } else {
-      side =
-        y < row.getBoundingClientRect().top + row.offsetHeight / 2
-          ? 'before'
-          : 'after';
-    }
-    const targetId = row?.dataset.draftId;
+    const scrolledY = y + area.scrollTop - session.scrollStart;
+    const rows = session.positions;
+    const row =
+      rows.find((item) => scrolledY < item.top + item.height) ??
+      rows[rows.length - 1];
+    if (!row) return;
+    const side: 'before' | 'after' =
+      scrolledY < row.top + row.height / 2 ? 'before' : 'after';
+    const targetId = row?.id;
     const next =
       targetId && targetId !== session.id ? { id: targetId, side } : null;
-    if (
-      dropRef.current?.id === next?.id &&
-      dropRef.current?.side === next?.side
-    )
-      return;
-    dropRef.current = next;
-    setDrop(next);
+    applyDrop(next);
   };
-  useEffect(() => {
-    if (!pointerDragId) return;
-    const timer = window.setInterval(() => {
-      const session = pointerSession.current;
-      const area = scrollArea.current;
-      if (!session?.active || !area) return;
-      const rect = area.getBoundingClientRect();
+  const positionDraggedRow = () => {
+    const session = pointerSession.current;
+    const area = scrollArea.current;
+    if (!session?.active || !area) return;
+    const offset =
+      session.y - session.startY + area.scrollTop - session.scrollStart;
+    session.row?.style.setProperty('--draft-drag-y', `${offset}px`);
+  };
+  const activatePointer = () => {
+    const session = pointerSession.current;
+    const area = scrollArea.current;
+    if (!session || !area) return;
+    session.scrollStart = area.scrollTop;
+    session.bounds = area.getBoundingClientRect();
+    const rows = Array.from(
+      area.querySelectorAll<HTMLLIElement>('[data-draft-id]'),
+    );
+    const first = rows[0];
+    if (!first) return;
+    const transform = getComputedStyle(first).transform;
+    const shifted =
+      transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+    const firstTop = first.getBoundingClientRect().top - shifted;
+    const firstOffset = first.offsetTop;
+    session.positions = rows.map((row) => ({
+      id: row.dataset.draftId!,
+      top: firstTop + row.offsetTop - firstOffset,
+      height: row.offsetHeight,
+      element: row,
+    }));
+    session.active = true;
+    session.row?.classList.add('dragging');
+    session.scrollTimer = window.setInterval(() => {
+      if (pointerSession.current !== session) return;
+      const rect = session.bounds;
+      if (!rect) return;
       const edge = 34;
       const step =
         session.y < rect.top + edge
@@ -144,20 +207,18 @@ export function DocumentSidebar({
       if (step) {
         area.scrollTop += step;
         updateDrop(session.x, session.y);
+        positionDraggedRow();
       }
     }, 30);
-    const cancel = (event: globalThis.KeyboardEvent) => {
+    session.onKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         finishPointer(false);
       }
     };
-    document.addEventListener('keydown', cancel);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('keydown', cancel);
-    };
-  }, [pointerDragId]);
+    document.addEventListener('keydown', session.onKeyDown);
+    positionDraggedRow();
+  };
   useEffect(() => {
     if (!canReorder) finishPointer(false);
   }, [canReorder]);
@@ -174,8 +235,7 @@ export function DocumentSidebar({
   }, [tab]);
   useEffect(
     () => () => {
-      const session = pointerSession.current;
-      if (session?.timer) clearTimeout(session.timer);
+      finishPointer(false);
     },
     [],
   );
@@ -186,22 +246,31 @@ export function DocumentSidebar({
     if (!canReorder || event.button !== 0) return;
     event.preventDefault();
     finishPointer(false);
+    const row = event.currentTarget.closest<HTMLLIElement>('[data-draft-id]');
+    row?.style.setProperty('--draft-drag-y', '0px');
     event.currentTarget.setPointerCapture(event.pointerId);
     const session = {
       id,
       pointerId: event.pointerId,
       element: event.currentTarget,
+      row,
       x: event.clientX,
       y: event.clientY,
+      startY: event.clientY,
+      scrollStart: 0,
+      bounds: null as DOMRect | null,
+      positions: [] as DraftPosition[],
       active: false,
       timer: undefined as ReturnType<typeof setTimeout> | undefined,
+      scrollTimer: undefined as number | undefined,
+      onKeyDown: undefined as
+        ((event: globalThis.KeyboardEvent) => void) | undefined,
     };
     pointerSession.current = session;
     if (event.pointerType === 'touch')
       session.timer = setTimeout(() => {
         if (pointerSession.current === session) {
-          session.active = true;
-          setPointerDragId(id);
+          activatePointer();
         }
       }, 300);
   };
@@ -218,12 +287,12 @@ export function DocumentSidebar({
         return;
       }
       if (moved < 5) return;
-      session.active = true;
-      setPointerDragId(session.id);
+      activatePointer();
     }
     session.x = event.clientX;
     session.y = event.clientY;
     updateDrop(session.x, session.y);
+    positionDraggedRow();
   };
   const visibleHeadings = useMemo(
     () =>
@@ -306,13 +375,7 @@ export function DocumentSidebar({
                   <li
                     key={d.id}
                     data-draft-id={d.id}
-                    className={[
-                      d.id === activeId ? 'current' : '',
-                      d.id === pointerDragId ? 'dragging' : '',
-                      drop?.id === d.id ? `drop-${drop.side}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
+                    className={d.id === activeId ? 'current' : ''}
                   >
                     <span
                       className="draft-drag-handle"

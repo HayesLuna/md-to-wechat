@@ -88,6 +88,61 @@ test('drag order survives refresh; new drafts join the top without switching art
   expect(errors).toEqual([]);
 });
 
+test('drag preview moves neighboring drafts aside and Escape restores their positions', async ({ page }) => {
+  await seed(page, true);
+  const source = await page.locator('[data-draft-id="D"] .draft-drag-handle').boundingBox();
+  const target = await page.locator('[data-draft-id="C"]').boundingBox();
+  expect(source && target).toBeTruthy();
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 30, target!.y + target!.height - 3, { steps: 8 });
+  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-after/);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+  )).toBeLessThan(-20);
+  await expect.poll(() => page.locator('[data-draft-id="D"]').evaluate((row) =>
+    new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+  )).toBeGreaterThan(20);
+  await expect.poll(() => titles(page)).toEqual(['D', 'C', 'B', 'A']);
+  await page.screenshot({ path: '/tmp/mojian-draft-make-way.png' });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(page.locator('.draft-list li.dragging')).toHaveCount(0);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+  )).toBe(0);
+  await expect.poll(() => titles(page)).toEqual(['D', 'C', 'B', 'A']);
+  await expect.poll(() => page.evaluate(async () =>
+    (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts.map((item) => item.id),
+  )).toEqual(['D', 'C', 'B', 'A']);
+  await expect(page.locator('.article-editor h1')).toHaveText('D');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    getComputedStyle(row).transitionDuration,
+  )).toBe('0s');
+});
+
+test('dragging upward makes room before the target and saves that order', async ({ page }) => {
+  await seed(page, true);
+  const source = await page.locator('[data-draft-id="A"] .draft-drag-handle').boundingBox();
+  const target = await page.locator('[data-draft-id="C"]').boundingBox();
+  expect(source && target).toBeTruthy();
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 30, target!.y + 3, { steps: 8 });
+  await expect(page.locator('[data-draft-id="C"]')).toHaveClass(/drop-before/);
+  await expect.poll(() => page.locator('[data-draft-id="C"]').evaluate((row) =>
+    new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+  )).toBeGreaterThan(20);
+  await expect.poll(() => titles(page)).toEqual(['D', 'C', 'B', 'A']);
+  await page.mouse.up();
+  await expect.poll(() => titles(page)).toEqual(['D', 'A', 'C', 'B']);
+  await expect.poll(() => page.evaluate(async () =>
+    (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts.map((item) => item.id),
+  )).toEqual(['D', 'A', 'C', 'B']);
+  await expect(page.locator('.article-editor h1')).toHaveText('D');
+});
+
 test('failed reorder keeps the original order and explains the failure', async ({ page }) => {
   await seed(page);
   await page.evaluate(() => {
@@ -239,6 +294,10 @@ test('touch handle reorders after a long press', async ({ browser }) => {
       touchPoints: [{ x: target!.x + 30, y: target!.y + target!.height - 3 }],
     });
     await expect(page.locator('.draft-list li').filter({ hasText: 'A' })).toHaveClass(/drop-after/);
+    await expect.poll(() => page.locator('[data-draft-id="B"]').evaluate((row) =>
+      new DOMMatrixReadOnly(getComputedStyle(row).transform).m42,
+    )).toBeLessThan(-20);
+    await page.screenshot({ path: '/tmp/mojian-draft-make-way-mobile.png' });
     await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await expect.poll(() => titles(page)).toEqual(['B', 'A', 'C']);
     await page.screenshot({ path: '/tmp/mojian-draft-reorder-mobile.png' });
