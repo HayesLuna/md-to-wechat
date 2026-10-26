@@ -113,6 +113,11 @@ function placeDraft(
     : next;
 }
 function alignDrafts(items: DraftSummary[], ordered: DraftSummary[]) {
+  if (
+    items.length === ordered.length &&
+    ordered.every((item, index) => item.id === items[index].id)
+  )
+    return items;
   const byId = new Map(items.map((item) => [item.id, item]));
   return ordered.map((item) => byId.get(item.id) ?? item);
 }
