@@ -35,6 +35,34 @@ export function compareDraftCreation(a: DraftSummary, b: DraftSummary) {
     ? a.id.localeCompare(b.id)
     : b.createdAt - a.createdAt;
 }
+const DRAFT_ORDER_KEY = 'draftOrder';
+function parseDraftOrder(stored?: string): string[] {
+  if (!stored) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) && parsed.every((id) => typeof id === 'string')
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
+function orderedDrafts<T extends DraftSummary>(
+  items: T[],
+  stored?: string,
+): T[] {
+  const newest = [...items].sort(compareDraftCreation);
+  if (!stored) return newest;
+  const ids = parseDraftOrder(stored);
+  const byId = new Map(newest.map((item) => [item.id, item]));
+  const known = ids.flatMap((id) => {
+    const item = byId.get(id);
+    byId.delete(id);
+    return item ? [item] : [];
+  });
+  // Drafts created in another tab, or since the last reorder, join at the top.
+  return [...newest.filter((item) => byId.has(item.id)), ...known];
+}
 export function draftTitle(markdown: string) {
   return (
     headings(markdown)
@@ -138,13 +166,14 @@ export async function loadDrafts(): Promise<{
 }> {
   const d = await db();
   const tx = d.transaction(['draft', 'meta']);
-  const [drafts, activeId] = await Promise.all([
+  const [drafts, activeId, order] = await Promise.all([
     tx.objectStore('draft').getAll(),
     tx.objectStore('meta').get('active'),
+    tx.objectStore('meta').get(DRAFT_ORDER_KEY),
   ]);
   await tx.done;
   return {
-    drafts: drafts.sort(compareDraftCreation),
+    drafts: orderedDrafts(drafts, order),
     activeId,
   };
 }
@@ -153,15 +182,41 @@ export async function loadDrafts(): Promise<{
 export async function loadDraftLibrary() {
   const database = await db();
   const tx = database.transaction(['draftInfo', 'meta']);
-  const [items, activeId] = await Promise.all([
+  const [items, activeId, order] = await Promise.all([
     tx.objectStore('draftInfo').getAll(),
     tx.objectStore('meta').get('active'),
+    tx.objectStore('meta').get(DRAFT_ORDER_KEY),
   ]);
   await tx.done;
   return {
-    drafts: items.map(summarizeDraft).sort(compareDraftCreation),
+    drafts: orderedDrafts(items.map(summarizeDraft), order),
     activeId,
   };
+}
+export async function moveDraft(
+  id: string,
+  targetId: string,
+  side: 'before' | 'after',
+) {
+  if (id === targetId)
+    return (await loadDraftLibrary()).drafts.map((item) => item.id);
+  const database = await db();
+  const tx = database.transaction(['draftInfo', 'meta'], 'readwrite');
+  const [items, stored] = await Promise.all([
+    tx.objectStore('draftInfo').getAll(),
+    tx.objectStore('meta').get(DRAFT_ORDER_KEY),
+  ]);
+  const ids = orderedDrafts(items, stored).map((item) => item.id);
+  if (!ids.includes(id) || !ids.includes(targetId)) {
+    await tx.done;
+    throw new Error('草稿列表已变化，请刷新后重试排序。');
+  }
+  const next = ids.filter((item) => item !== id);
+  const target = next.indexOf(targetId);
+  next.splice(target + (side === 'after' ? 1 : 0), 0, id);
+  await tx.objectStore('meta').put(JSON.stringify(next), DRAFT_ORDER_KEY);
+  await tx.done;
+  return next;
 }
 export async function loadDraft(id: string) {
   return (await db()).get('draft', id);
@@ -229,7 +284,15 @@ export async function saveDraft(draft: Draft, expectedVersion?: number) {
   };
   await tx.objectStore('draft').put(stored, draft.id);
   await tx.objectStore('draftInfo').put(draftInfo(stored), draft.id);
-  await tx.objectStore('meta').put(draft.id, 'active');
+  const meta = tx.objectStore('meta');
+  if (!previous) {
+    const order = await meta.get(DRAFT_ORDER_KEY);
+    if (order) {
+      const ids = parseDraftOrder(order).filter((id) => id !== draft.id);
+      await meta.put(JSON.stringify([draft.id, ...ids]), DRAFT_ORDER_KEY);
+    }
+  }
+  await meta.put(draft.id, 'active');
   await tx.done;
 }
 export async function removeDraft(id: string, next: Draft) {
@@ -238,11 +301,18 @@ export async function removeDraft(id: string, next: Draft) {
   const retained = await tx.objectStore('draft').get(next.id);
   await tx.objectStore('draft').delete(id);
   await tx.objectStore('draftInfo').delete(id);
+  const meta = tx.objectStore('meta');
+  const order = await meta.get(DRAFT_ORDER_KEY);
+  if (order)
+    await meta.put(
+      JSON.stringify(parseDraftOrder(order).filter((item) => item !== id)),
+      DRAFT_ORDER_KEY,
+    );
   if (!retained) {
     await tx.objectStore('draft').put(next, next.id);
     await tx.objectStore('draftInfo').put(draftInfo(next), next.id);
   }
-  await tx.objectStore('meta').put(next.id, 'active');
+  await meta.put(next.id, 'active');
   await tx.done;
   return retained ?? next;
 }

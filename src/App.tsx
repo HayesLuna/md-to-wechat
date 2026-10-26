@@ -46,7 +46,7 @@ import {
   draftTitle,
   saveDraft,
   removeDraft,
-  compareDraftCreation,
+  moveDraft,
   type Draft,
   storeImage,
   download,
@@ -96,9 +96,42 @@ function validSettings(s?: Settings): Settings {
     codeTheme: s.codeTheme === 'dark' ? 'dark' : 'light',
   };
 }
+function placeDraft(
+  items: DraftSummary[],
+  id: string,
+  targetId: string,
+  side: 'before' | 'after',
+) {
+  const moved = items.find((item) => item.id === id);
+  if (!moved || id === targetId) return items;
+  const next = items.filter((item) => item.id !== id);
+  const target = next.findIndex((item) => item.id === targetId);
+  if (target < 0) return items;
+  next.splice(target + (side === 'after' ? 1 : 0), 0, moved);
+  return next.every((item, index) => item.id === items[index].id)
+    ? items
+    : next;
+}
+function alignDrafts(items: DraftSummary[], ordered: DraftSummary[]) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return ordered.map((item) => byId.get(item.id) ?? item);
+}
+function alignDraftIds(items: DraftSummary[], ids: string[]) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const known = ids.flatMap((id) => {
+    const item = byId.get(id);
+    byId.delete(id);
+    return item ? [item] : [];
+  });
+  return [...items.filter((item) => byId.has(item.id)), ...known];
+}
 export default function App() {
   const [media, setMedia] = useState<MediaPreviewItem | null>(null);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const draftOrder = useRef(drafts);
+  draftOrder.current = drafts;
+  const reorderQueue = useRef<Promise<void>>(Promise.resolve());
+  const reorderTicket = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'drafts' | 'outline'>('outline');
   const [sidebarSearch, setSidebarSearch] = useState(false);
@@ -659,11 +692,55 @@ export default function App() {
           notify('草稿已删除');
         }),
     });
+  const reorderDraft = (
+    id: string,
+    targetId: string,
+    side: 'before' | 'after',
+  ) => {
+    const before = draftOrder.current;
+    const next = placeDraft(before, id, targetId, side);
+    if (next === before) return;
+    draftOrder.current = next;
+    setDrafts((items) => placeDraft(items, id, targetId, side));
+    const ticket = ++reorderTicket.current;
+    reorderQueue.current = reorderQueue.current.then(async () => {
+      let persistedIds: string[];
+      try {
+        persistedIds = await moveDraft(id, targetId, side);
+      } catch (error) {
+        if (ticket !== reorderTicket.current) return;
+        try {
+          const library = await loadDraftLibrary();
+          draftOrder.current = alignDrafts(draftOrder.current, library.drafts);
+          setDrafts((items) => alignDrafts(items, library.drafts));
+        } catch {
+          const ids = before.map((item) => item.id);
+          draftOrder.current = alignDraftIds(draftOrder.current, ids);
+          setDrafts((items) => alignDraftIds(items, ids));
+        }
+        notify(
+          error instanceof Error && error.message.startsWith('草稿列表已变化')
+            ? error.message
+            : '排序未保存，请重试。',
+        );
+        return;
+      }
+      if (ticket !== reorderTicket.current) return;
+      try {
+        const library = await loadDraftLibrary();
+        if (ticket !== reorderTicket.current) return;
+        draftOrder.current = alignDrafts(draftOrder.current, library.drafts);
+        setDrafts((items) => alignDrafts(items, library.drafts));
+      } catch {
+        // The order is already persisted. A failed refresh is not a failed move.
+        draftOrder.current = alignDraftIds(draftOrder.current, persistedIds);
+        setDrafts((items) => alignDraftIds(items, persistedIds));
+      }
+    });
+  };
   const shownDrafts = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
-    return drafts
-      .filter((d) => d.title.toLocaleLowerCase().includes(search))
-      .sort(compareDraftCreation);
+    return drafts.filter((d) => d.title.toLocaleLowerCase().includes(search));
   }, [drafts, query]);
   const deferredMarkdown = useDeferredValue(markdown);
   const headingList = useMemo(
@@ -1282,6 +1359,7 @@ export default function App() {
                     setModal({ type: 'rename', draft: d });
                   }}
                   onDelete={deleteDraft}
+                  onReorder={reorderDraft}
                   headings={headingList}
                   activeHeading={activeHeading}
                   onHeading={jump}

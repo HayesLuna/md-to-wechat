@@ -1950,6 +1950,10 @@ button.primary:hover {
   color: #969aa2;
   flex-shrink: 0;
 }
+.sidebar-draft-count span {
+  display: block;
+  margin-top: 4px;
+}
 .sidebar-draft-scroll {
   flex: 1;
   min-height: 0;
@@ -1980,6 +1984,47 @@ button.primary:hover {
   border-radius: 0;
   padding: 6px 10px;
   gap: 0;
+  position: relative;
+}
+.sidebar-drafts .draft-list li.dragging {
+  opacity: 0.42;
+}
+.sidebar-drafts .draft-list li.drop-before {
+  box-shadow: inset 0 2px var(--accent);
+}
+.sidebar-drafts .draft-list li.drop-after {
+  box-shadow: inset 0 -2px var(--accent);
+}
+.sidebar-drafts .draft-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-width: 22px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8c929a;
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+}
+.sidebar-drafts .draft-list li:hover .draft-drag-handle,
+.sidebar-drafts .draft-list li.dragging .draft-drag-handle {
+  opacity: 1;
+}
+.sidebar-drafts .draft-drag-handle:active {
+  cursor: grabbing;
+}
+.sidebar-drafts .draft-drag-handle[data-disabled='true'] {
+  cursor: default;
+}
+@media (hover: none) {
+  .sidebar-drafts .draft-drag-handle {
+    opacity: 1;
+    width: 28px;
+    min-width: 28px;
+  }
 }
 .sidebar-drafts .draft-list li.current {
   background: #eaeaec;
