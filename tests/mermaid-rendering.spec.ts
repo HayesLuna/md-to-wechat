@@ -61,7 +61,7 @@ test('Typora-style HTML paste retains Mermaid language and source',async({page})
   const data=new DataTransfer();data.setData('text/html','<ol start="2"><li><p>日期范围</p><pre lang="mermaid">gantt\n  dateFormat YYYY-MM-DD\n  section 产品\n  生效日期 :p1, 2024-01-01, 2024-12-31</pre></li></ol>');
   data.setData('text/plain','日期范围');el.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));
  });
- await expect(page.locator('.diagram svg')).toBeVisible();await expect(page.getByRole('textbox',{name:'代码语言'})).toHaveValue('mermaid');
+ await expect(page.locator('.diagram svg')).toBeVisible();await expect(page.getByRole('combobox',{name:'代码语言'})).toHaveValue('mermaid');
  const markdown=await page.evaluate(()=>(window as any).__mojian.getMarkdown());expect(markdown).toContain('```mermaid');expect(markdown).toContain('2024-12-31');
 });
 

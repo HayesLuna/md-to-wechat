@@ -39,10 +39,12 @@ test('formatting is exposed only for explicit JSON and never runs on typing', as
   await expect(page.getByRole('button',{name:'格式化 JSON',exact:true})).toHaveCount(1);
   await expect(page.getByRole('button',{name:'压缩 JSON',exact:true})).toHaveCount(1);
   for (let i=0;i<5;i++) await expect(blocks.nth(i).locator('pre')).toHaveText(source);
-  await blocks.last().getByRole('textbox',{name:'代码语言',exact:true}).fill('txt');
+  await blocks.last().getByRole('combobox',{name:'代码语言',exact:true}).fill('txt');
+  await blocks.last().getByRole('combobox',{name:'代码语言',exact:true}).press('Enter');
   await expect(page.getByRole('button',{name:'格式化 JSON',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'压缩 JSON',exact:true})).toHaveCount(0);
-  await blocks.last().getByRole('textbox',{name:'代码语言',exact:true}).fill('json');
+  await blocks.last().getByRole('combobox',{name:'代码语言',exact:true}).fill('json');
+  await blocks.last().getByRole('combobox',{name:'代码语言',exact:true}).press('Enter');
   await page.evaluate(() => (window as any).__mojian.editor.commands.focus('end'));
   await expect(page.locator('.article-editor')).toBeFocused();
   await page.keyboard.type(' ');

@@ -4,6 +4,7 @@ import {
   MAX_CODE_HIGHLIGHT_CHARACTERS,
 } from './syntax';
 import type { workBudget } from './workBudget';
+import { githubHighlightStyle } from './githubCodeTheme';
 
 export type CodeSource = { text: string; language: string };
 const cards = new Map<string, { card: HTMLDivElement; size: number }>();
@@ -151,15 +152,9 @@ const JSON_DARK_COLORS = [
   '#ff7b72',
   '#8b949e',
 ];
-const JSON_LIGHT_COLORS = [
-  '#0550ae',
-  '#116329',
-  '#8250df',
-  '#cf222e',
-  '#6e7781',
-];
 
 function highlightColor(className: string, dark: boolean, json: boolean) {
+  if (!dark) return githubHighlightStyle(className);
   if (json) {
     const index = /attr/.test(className)
       ? 0
@@ -172,8 +167,7 @@ function highlightColor(className: string, dark: boolean, json: boolean) {
             : /punctuation/.test(className)
               ? 4
               : -1;
-    if (index >= 0)
-      return `color:${(dark ? JSON_DARK_COLORS : JSON_LIGHT_COLORS)[index]};`;
+    if (index >= 0) return `color:${JSON_DARK_COLORS[index]};`;
   }
   const palette = dark
     ? ['#a5d6ff', '#ff7b72', '#a5d6ff', '#d2a8ff', '#79c0ff', '#8b949e']
@@ -264,7 +258,7 @@ function* buildCodeCard(
   const pre = document.createElement('pre');
   pre.setAttribute(
     'style',
-    `display:block;width:100%;max-width:100%;border-radius:8px;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#dbe3ef'};background:${dark ? '#0d1117' : '#f8fafc'};color:${dark ? '#c9d1d9' : '#111827'};font-size:14px;line-height:1.75;white-space:normal;`,
+    `display:block;width:100%;max-width:100%;border-radius:8px;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#d0d7de'};background:${dark ? '#0d1117' : '#ffffff'};color:${dark ? '#c9d1d9' : '#24292e'};font-size:14px;line-height:1.75;white-space:normal;`,
   );
   const header = document.createElement('span');
   header.setAttribute('data-code-chrome', '');

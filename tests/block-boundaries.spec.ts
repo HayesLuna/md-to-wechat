@@ -464,6 +464,7 @@ test('a side caret follows its block while the writing area scrolls', async ({
 test('clicking beside a partially scrolled code block keeps the writing position', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 500 });
   await ready(
     page,
     '```js\n' +
@@ -473,7 +474,7 @@ test('clicking beside a partially scrolled code block keeps the writing position
       '\n```',
   );
   await page.locator('.writing-scroll').evaluate((el) => {
-    el.scrollTop = 500;
+    el.scrollTop = 40;
   });
   const box = await page.locator('.code-node').boundingBox();
   const scroll = await page
@@ -1036,7 +1037,7 @@ test('code editing retains a contrasting native caret without a floating overlay
     caret: getComputedStyle(el).caretColor,
     color: getComputedStyle(el).color,
   }));
-  expect(styles.caret).toBe('rgb(230, 237, 243)');
+  expect(styles.caret).toBe('rgb(36, 41, 46)');
   expect(styles.caret).not.toBe('rgba(0, 0, 0, 0)');
   await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
   const before = await doc(page);
@@ -1044,14 +1045,14 @@ test('code editing retains a contrasting native caret without a floating overlay
   expect(JSON.stringify(await doc(page))).toContain('native');
   await page.keyboard.press('ControlOrMeta+z');
   expect(await doc(page)).toEqual(before);
-  const language = page.getByRole('textbox', { name: '代码语言' });
+  const language = page.getByRole('combobox', { name: '代码语言' });
   await language.focus();
   const inputStyles = await language.evaluate((el) => ({
     caret: getComputedStyle(el).caretColor,
     color: getComputedStyle(el).color,
   }));
   expect(inputStyles.caret).toBe(inputStyles.color);
-  expect(inputStyles.caret).toBe('rgb(201, 209, 217)');
+  expect(inputStyles.caret).toBe('rgb(87, 96, 106)');
   await code.click({ position: { x: 40, y: 25 } });
   await page.screenshot({
     path: '/tmp/mojian-native-code-caret.png',

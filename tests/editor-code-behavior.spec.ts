@@ -18,13 +18,13 @@ for(const language of ['js','mermaid'])test(`${language}: Ctrl+A in the code vie
  await page.keyboard.press('ControlOrMeta+x');expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(source);await expect(page.locator('.article-editor pre')).toHaveText('');await expect(page.locator('.article-editor')).toContainText('前面的正文');await page.keyboard.press('ControlOrMeta+z');await expect(page.locator('.article-editor pre')).toHaveText(source);
  await page.evaluate(()=>(window as any).__mojian.editor.commands.selectAll());await page.keyboard.press('ControlOrMeta+c');const article=await page.evaluate(()=>navigator.clipboard.readText());expect(article).toContain('```'+language);expect(article).toContain('前面的正文');expect(article).toContain('后面的正文');
 });
-test('code view uses a dark theme and readable highlight colors while Mermaid diagram stays light',async({page})=>{
+test('code view uses GitHub light highlighting while Mermaid diagram stays light',async({page})=>{
  await ready(page,'```js\n// 注释\nconst text = "hello";\nconsole.log(text);\n```\n\n```mermaid\ngraph LR\n  A --> B\n```');
- const code=page.locator('.code-node').first();await expect(code).toHaveClass(/code-theme-dark/);
- await expect(code.locator('.hljs-keyword')).toHaveCSS('color','rgb(255, 123, 114)');
+ const code=page.locator('.code-node').first();await expect(code).toHaveClass(/code-theme-github/);
+ await expect(code.locator('.hljs-keyword')).toHaveCSS('color','rgb(215, 58, 73)');
  const colors=await code.evaluate(el=>({background:getComputedStyle(el).backgroundColor,text:getComputedStyle(el.querySelector('pre')!).color,keyword:getComputedStyle(el.querySelector('.hljs-keyword')!).color,string:getComputedStyle(el.querySelector('.hljs-string')!).color,header:getComputedStyle(el.querySelector('.code-header')!).backgroundColor}));
- expect(colors).toEqual({background:'rgb(13, 17, 23)',text:'rgb(201, 209, 217)',keyword:'rgb(255, 123, 114)',string:'rgb(165, 214, 255)',header:'rgb(22, 27, 34)'});
- const mermaid=page.locator('.code-node').nth(1);await expect(mermaid).not.toHaveClass(/code-theme-dark/);await mermaid.getByRole('button',{name:'展示代码',exact:true}).click();await expect(mermaid).toHaveClass(/code-theme-dark/);await mermaid.getByRole('button',{name:'展示图表',exact:true}).click();await expect(mermaid).not.toHaveClass(/code-theme-dark/);
+ expect(colors).toEqual({background:'rgb(255, 255, 255)',text:'rgb(36, 41, 46)',keyword:'rgb(215, 58, 73)',string:'rgb(3, 47, 98)',header:'rgb(246, 248, 250)'});
+ const mermaid=page.locator('.code-node').nth(1);await expect(mermaid).not.toHaveClass(/code-theme-github/);await mermaid.getByRole('button',{name:'展示代码',exact:true}).click();await expect(mermaid).toHaveClass(/code-theme-github/);await mermaid.getByRole('button',{name:'展示图表',exact:true}).click();await expect(mermaid).not.toHaveClass(/code-theme-github/);
 });
 for(const [name,markdown,from,to,expected] of [
  ['empty paragraph','',1,1,'\tX'],

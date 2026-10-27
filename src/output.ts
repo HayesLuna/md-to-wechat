@@ -1,3 +1,4 @@
+import { githubHighlightStyle } from './githubCodeTheme';
 import MarkdownIt from 'markdown-it';
 import { ensureSyntax } from './syntax';
 import { markdownHighlight } from './highlight';
@@ -117,7 +118,9 @@ async function inlineStyles(
                 : 4;
       el.setAttribute(
         'style',
-        `color:${palette[index]};${index === 5 ? 'font-style:italic;' : ''}`,
+        dark
+          ? `color:${palette[index]};${index === 5 ? 'font-style:italic;' : ''}`
+          : githubHighlightStyle(c),
       );
     }
     if (!el.className.startsWith('mermaid-preview-'))

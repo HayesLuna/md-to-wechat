@@ -5,7 +5,7 @@ async function proseTabs(page:Page){return page.evaluate(()=>{let count=0;(windo
 test('Tab in a bold numbered paragraph keeps focus in the editor before a nested Mermaid block',async({page})=>{
  await page.goto('/');await page.waitForFunction(()=>!!(window as any).__mojian?.editor);
  await page.evaluate(()=>{const editor=(window as any).__mojian.editor;(window as any).__mojian.setMarkdown('# 新开航线简要需求理解\n\n以下是最新精简稿，仅在对话中输出，供你核对。\n\n**1. 签注与日期**\n\n- 批量添加将舱位行 EI 项写入详情签注，空值保持为空。\n- 批量添加六日期按表单原值落库。\n  ```mermaid\n  gantt\n      title 日期约束\n      dateFormat YYYY-MM-DD\n      section 产品\n      产品有效期 :active, p1, 2024-01-01, 2024-12-31\n  ```\n\n**2. 儿童、婴儿策略**');let at=0;editor.state.doc.descendants((node:any,pos:number)=>{if(node.isText&&node.text.includes('1. 签注与日期'))at=pos+3;});editor.commands.setTextSelection(at);editor.commands.focus();});
- await expect(page.locator('.article-editor')).toBeFocused();await page.keyboard.press('Tab');await expect(page.locator('.article-editor')).toBeFocused();await expect(page.getByRole('textbox',{name:'代码语言'})).not.toBeFocused();await expect(page.locator('.article-editor strong').first()).toHaveText('1. \t签注与日期');
+ await expect(page.locator('.article-editor')).toBeFocused();await page.keyboard.press('Tab');await expect(page.locator('.article-editor')).toBeFocused();await expect(page.getByRole('combobox',{name:'代码语言'})).not.toBeFocused();await expect(page.locator('.article-editor strong').first()).toHaveText('1. \t签注与日期');
 });
 
 test('plain paragraphs insert a literal Tab at the caret, preserving marks, undo and Markdown roundtrip',async({page})=>{

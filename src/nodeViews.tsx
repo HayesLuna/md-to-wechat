@@ -3,7 +3,7 @@ import {
   NodeViewContent,
   type NodeViewProps,
 } from '@tiptap/react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Copy,
   ChevronDown,
@@ -21,6 +21,9 @@ import { diagram, downloadDiagram } from './mermaid';
 import { indentJSON, compactJSON } from './jsonIndentation';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
+import { CodeGutter, CODE_LINE_HEIGHT } from './CodeGutter';
+import { codeLines, getCodeFolds, toggleCodeFold } from './codeFolding';
+import { CodeLanguagePicker } from './CodeLanguagePicker';
 const sourceExtensions: Record<string, string> = {
   javascript: 'js',
   js: 'js',
@@ -278,11 +281,19 @@ export function CodeView({
     .toLowerCase();
   const mermaid = language === 'mermaid';
   const source = node.textContent;
+  const { starts } = useMemo(() => codeLines(source), [source]);
+  const folds = getCodeFolds(editor.state, getPos() ?? -1);
+  const viewport = useRef<HTMLDivElement>(null);
+  const [codeHeight, setCodeHeight] = useState<number | null>(null);
+  const [codeWindow, setCodeWindow] = useState({ first: 0, height: 360 });
+  const windowHeight = useRef(360);
+  const resizeCleanup = useRef<() => void>(() => {});
+  useEffect(() => () => resizeCleanup.current(), []);
   const [view, setView] = useState<'diagram' | 'code'>('diagram');
   const wrapper = useRef<HTMLDivElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
   useEffect(() => {
-    if (!mermaid || nearViewport || !wrapper.current) return;
+    if (nearViewport || !wrapper.current) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -296,6 +307,66 @@ export function CodeView({
     return () => observer.disconnect();
   }, [mermaid, nearViewport]);
   const showCode = !mermaid || view === 'code' || !!error;
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element || folded || !showCode) return;
+    const observer = new ResizeObserver(([entry]) => {
+      windowHeight.current = entry.contentRect.height;
+      setCodeWindow((previous) =>
+        previous.height === entry.contentRect.height
+          ? previous
+          : { ...previous, height: entry.contentRect.height },
+      );
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [folded, showCode]);
+  const maximumHeight = Math.max(
+    96,
+    Math.min(720, Math.floor(window.innerHeight * 0.7)),
+  );
+  const resizeCode = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!viewport.current || event.button !== 0) return;
+    event.preventDefault();
+    resizeCleanup.current();
+    const element = viewport.current,
+      handle = event.currentTarget;
+    const start = event.clientY,
+      base = element.getBoundingClientRect().height;
+    let height = base,
+      frame = 0;
+    handle.setPointerCapture(event.pointerId);
+    const move = (event: PointerEvent) => {
+      height = Math.round(
+        Math.max(96, Math.min(maximumHeight, base + event.clientY - start)),
+      );
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        element.style.height = `${height}px`;
+      });
+    };
+    const cleanup = () => {
+      cancelAnimationFrame(frame);
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', cancel);
+    };
+    const up = () => {
+      cleanup();
+      resizeCleanup.current = () => {};
+      element.style.height = `${height}px`;
+      setCodeHeight(height);
+    };
+    const cancel = () => {
+      cleanup();
+      resizeCleanup.current = () => {};
+      element.style.height = codeHeight === null ? '' : `${codeHeight}px`;
+    };
+    resizeCleanup.current = cancel;
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', cancel);
+  };
   useEffect(() => {
     const n = ++seq.current;
     setSVG('');
@@ -410,7 +481,7 @@ export function CodeView({
   return (
     <NodeViewWrapper
       ref={wrapper}
-      className={`code-node ${showCode ? 'code-theme-dark' : ''} ${folded ? 'folded' : ''}`}
+      className={`code-node ${showCode ? 'code-theme-github' : ''} ${folded ? 'folded' : ''}`}
       data-language={language || undefined}
     >
       <div className="code-header" contentEditable={false}>
@@ -419,19 +490,12 @@ export function CodeView({
           <i />
           <i />
         </span>
-        <input
-          aria-label="代码语言"
-          value={node.attrs.language || ''}
-          size={Math.min(
-            16,
-            Math.max(7, String(node.attrs.language || '').length + 1),
-          )}
-          placeholder="纯代码"
-          spellCheck={false}
-          onChange={(e) =>
-            updateAttributes({ language: e.target.value.trim() || null })
-          }
+        <CodeLanguagePicker
+          language={String(node.attrs.language || '')}
+          disabled={!editor.isEditable}
+          change={(value) => updateAttributes({ language: value })}
         />
+
         <div>
           {language === 'json' && (
             <>
@@ -516,11 +580,82 @@ export function CodeView({
           )}
         </div>
       </div>
-      <pre style={{ display: folded || !showCode ? 'none' : undefined }}>
-        <code>
-          <NodeViewContent style={{ whiteSpace: 'pre' }} />
-        </code>
-      </pre>
+      <div
+        ref={viewport}
+        className="code-viewport"
+        style={{
+          display: folded || !showCode ? 'none' : undefined,
+          height: codeHeight ?? undefined,
+        }}
+        onScroll={(event) => {
+          const first = Math.floor(
+            event.currentTarget.scrollTop / CODE_LINE_HEIGHT,
+          );
+          setCodeWindow((previous) =>
+            previous.first === first
+              ? previous
+              : { first, height: windowHeight.current },
+          );
+        }}
+      >
+        <div className="code-editor-body">
+          <CodeGutter
+            source={source}
+            language={language}
+            starts={starts}
+            folds={folds}
+            nearViewport={nearViewport}
+            first={codeWindow.first}
+            height={codeWindow.height}
+            toggle={(range) => {
+              const pos = getPos();
+              if (
+                pos !== undefined &&
+                editor.state.doc.nodeAt(pos)?.textContent === source
+              )
+                toggleCodeFold(editor, pos, range);
+            }}
+          />
+          <pre>
+            <code>
+              <NodeViewContent style={{ whiteSpace: 'pre' }} />
+            </code>
+          </pre>
+        </div>
+      </div>
+      {!folded && showCode && (
+        <div
+          className="code-height-handle"
+          role="separator"
+          aria-label="调整代码块高度"
+          aria-orientation="horizontal"
+          aria-valuemin={96}
+          aria-valuemax={maximumHeight}
+          aria-valuenow={Math.round(codeWindow.height)}
+          tabIndex={0}
+          contentEditable={false}
+          onPointerDown={resizeCode}
+          onDoubleClick={() => setCodeHeight(null)}
+          onKeyDown={(event) => {
+            const next =
+              event.key === 'ArrowDown'
+                ? codeWindow.height + 24
+                : event.key === 'ArrowUp'
+                  ? codeWindow.height - 24
+                  : event.key === 'Home'
+                    ? 96
+                    : event.key === 'End'
+                      ? maximumHeight
+                      : null;
+            if (next === null) return;
+            event.preventDefault();
+            setCodeHeight(Math.max(96, Math.min(maximumHeight, next)));
+          }}
+          title="拖动调整高度，双击恢复默认"
+        >
+          <span />
+        </div>
+      )}
       {folded && showCode && (
         <div className="fold-summary" contentEditable={false}>
           {source.split('\n').length} 行代码 · 已折叠

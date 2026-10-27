@@ -31,6 +31,7 @@ import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
 import { widthFromTitle } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
+import { codeFoldingPlugin } from './codeFolding';
 
 // Markdown permits emphasis around inline code. StarterKit's default code
 // mark excludes all other marks, making valid Markdown fail insertion checks.
@@ -146,7 +147,7 @@ export const SmartCode = CodeBlockLowlight.extend({
   addProseMirrorPlugins() {
     // Keep CodeBlock's editing commands; replace the inherited whole-document
     // auto-detection plugin with tokenization of changed, explicit languages.
-    return [codeHighlightPlugin()];
+    return [codeHighlightPlugin(), codeFoldingPlugin()];
   },
   addAttributes() {
     const attributes: Attributes = this.parent?.() || {};
@@ -182,7 +183,27 @@ export const SmartCode = CodeBlockLowlight.extend({
     return fence + (node.attrs?.language || '') + '\n' + source + '\n' + fence;
   },
   addNodeView() {
-    return ReactNodeViewRenderer(CodeView);
+    return ReactNodeViewRenderer(CodeView, {
+      update({
+        oldNode,
+        newNode,
+        oldDecorations,
+        newDecorations,
+        updateProps,
+      }) {
+        if (oldNode.type !== newNode.type) return false;
+        const folds = (decorations: typeof oldDecorations) =>
+          decorations
+            .map((decoration) => decoration.spec.codeFolds || '')
+            .join(',');
+        if (
+          oldNode !== newNode ||
+          folds(oldDecorations) !== folds(newDecorations)
+        )
+          updateProps();
+        return true;
+      },
+    });
   },
 });
 export function ancestor(editor: Editor, name: string) {
