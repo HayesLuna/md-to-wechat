@@ -2309,3 +2309,14 @@ button.primary:hover {
   width: 1px;
   height: 18px;
 }
+
+.writing-scroll {
+  cursor: text;
+}
+.article-editor .ProseMirror-gapcursor.block-side-cursor {
+  position: fixed;
+  z-index: 20;
+}
+.article-editor .block-side-cursor::after {
+  top: 0;
+}

@@ -9,7 +9,7 @@ import {
   TextSelection,
 } from '@tiptap/pm/state';
 import { ReplaceStep, type Mappable } from '@tiptap/pm/transform';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 
 const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
@@ -36,30 +36,65 @@ function removableEmptyParagraph(doc: Node, pos: number) {
 // Unlike the standard gap cursor, these boundaries also include editable code
 // blocks and blocks beside ordinary paragraphs. No document node is inserted.
 class BlockBookmark {
-  constructor(readonly pos: number) {}
+  constructor(
+    readonly pos: number,
+    readonly edge: 'left' | 'right' | null = null,
+    readonly ratio = 0.5,
+  ) {}
   map(mapping: Mappable) {
-    return new BlockBookmark(mapping.map(this.pos));
+    return new BlockBookmark(mapping.map(this.pos), this.edge, this.ratio);
   }
   resolve(doc: Node): Selection {
     const $pos = doc.resolve(Math.min(this.pos, doc.content.size));
-    return isBoundary($pos) ? new BlockCursor($pos) : Selection.near($pos);
+    return isBoundary($pos)
+      ? new BlockCursor($pos, this.edge, this.ratio)
+      : Selection.near($pos);
   }
 }
-class BlockCursor extends GapCursor {
+class BlockCursorSelection extends GapCursor {
+  constructor(
+    $pos: ResolvedPos,
+    readonly edge: 'left' | 'right' | null = null,
+    readonly ratio = 0.5,
+  ) {
+    super($pos);
+  }
+  eq(other: Selection) {
+    return (
+      other instanceof BlockCursor &&
+      other.head === this.head &&
+      other.edge === this.edge &&
+      other.ratio === this.ratio
+    );
+  }
   map(doc: Node, mapping: Mappable): Selection {
     return this.getBookmark().map(mapping).resolve(doc);
   }
   getBookmark() {
-    return new BlockBookmark(this.head);
+    return new BlockBookmark(this.head, this.edge, this.ratio);
   }
   toJSON() {
-    return { type: 'blockCursor', pos: this.head };
+    return {
+      type: 'blockCursor',
+      pos: this.head,
+      edge: this.edge,
+      ratio: this.ratio,
+    };
   }
-  static fromJSON(doc: Node, json: { pos: number }) {
-    return new BlockCursor(doc.resolve(json.pos));
+  static fromJSON(
+    doc: Node,
+    json: { pos: number; edge?: 'left' | 'right' | null; ratio?: number },
+  ) {
+    return new BlockCursor(doc.resolve(json.pos), json.edge, json.ratio);
   }
 }
-Selection.jsonID('blockCursor', BlockCursor);
+// ProseMirror keeps a global selection registry. Preserve the constructor
+// during Vite hot updates so existing selections and history keep their type.
+const BlockCursor = (import.meta.hot?.data.BlockCursor ||
+  BlockCursorSelection) as typeof BlockCursorSelection;
+if (!import.meta.hot?.data.BlockCursor)
+  Selection.jsonID('blockCursor', BlockCursor);
+if (import.meta.hot) import.meta.hot.data.BlockCursor = BlockCursor;
 
 type BoundaryState = { points: DecorationSet; paragraph: number | null };
 const key = new PluginKey<BoundaryState>('blockBoundaries');
@@ -102,6 +137,70 @@ function insertionPoints(doc: Node) {
       ),
     ),
   );
+}
+
+function paintedBlock(view: EditorView, pos: number) {
+  const dom = view.nodeDOM(pos);
+  if (!(dom instanceof HTMLElement)) return null;
+  return view.state.doc.nodeAt(pos)?.type.name === 'image'
+    ? dom.querySelector<HTMLElement>('.image-box') || dom
+    : dom;
+}
+
+function lateralCursor(view: EditorView, event: MouseEvent) {
+  const bounds = view.dom.getBoundingClientRect();
+  const hit = view.posAtCoords({
+    left: Math.max(bounds.left + 1, Math.min(bounds.right - 1, event.clientX)),
+    top: event.clientY,
+  });
+  if (!hit) return null;
+  const $hit = view.state.doc.resolve(hit.pos);
+  const candidates = new Set<number>();
+  if (hit.inside >= 0) candidates.add(hit.inside);
+  if ($hit.nodeAfter) candidates.add($hit.pos);
+  if ($hit.nodeBefore) candidates.add($hit.pos - $hit.nodeBefore.nodeSize);
+  for (let depth = $hit.depth; depth > 0; depth--)
+    candidates.add($hit.before(depth));
+  for (const pos of candidates) {
+    const node = view.state.doc.nodeAt(pos);
+    if (!isBlock(node)) continue;
+    const rect = paintedBlock(view, pos)?.getBoundingClientRect();
+    if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
+      continue;
+    const edge =
+      event.clientX < rect.left
+        ? 'left'
+        : event.clientX > rect.right
+          ? 'right'
+          : null;
+    if (!edge) continue;
+    const $pos = view.state.doc.resolve(
+      edge === 'left' ? pos : pos + node!.nodeSize,
+    );
+    if (isBoundary($pos))
+      return new BlockCursor(
+        $pos,
+        edge,
+        Math.max(
+          0,
+          Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)),
+        ),
+      );
+  }
+  return null;
+}
+
+function insertBoundaryText(view: EditorView, text: string) {
+  const { selection, schema } = view.state;
+  if (!(selection instanceof BlockCursor) || !text) return false;
+  const pos = selection.from;
+  const tr = view.state.tr.insert(
+    pos,
+    schema.nodes.paragraph.create(null, schema.text(text)),
+  );
+  tr.setSelection(TextSelection.create(tr.doc, pos + 1 + text.length));
+  view.dispatch(tr.scrollIntoView());
+  return true;
 }
 
 export function clearEmptyBlockParagraph(editor: Editor) {
@@ -175,9 +274,118 @@ export const BlockBoundaries = Extension.create({
             };
           },
         },
+        view(view) {
+          const doc = view.dom.ownerDocument;
+          let frame = 0;
+          const update = () => {
+            if (!(view.state.selection instanceof GapCursor)) return;
+            const caret = view.dom.querySelector<HTMLElement>(
+              '.ProseMirror-gapcursor',
+            );
+            if (!caret) return;
+            const selection = view.state.selection;
+            const lateral =
+              selection instanceof BlockCursor && !!selection.edge;
+            caret.classList.toggle('block-side-cursor', lateral);
+            if (!lateral || !(selection instanceof BlockCursor)) {
+              caret.style.removeProperty('left');
+              caret.style.removeProperty('top');
+              caret.style.removeProperty('visibility');
+              return;
+            }
+            const pos =
+              selection.edge === 'left'
+                ? selection.from
+                : selection.from - (selection.$from.nodeBefore?.nodeSize || 0);
+            const rect = paintedBlock(view, pos)?.getBoundingClientRect();
+            const scroll = view.dom
+              .closest('.writing-scroll')
+              ?.getBoundingClientRect();
+            if (!rect) return;
+            const inset = Math.min(9, rect.height / 2);
+            const y = Math.max(
+              rect.top + inset,
+              Math.min(
+                rect.bottom - inset,
+                rect.top + rect.height * selection.ratio,
+              ),
+            );
+            caret.style.visibility =
+              scroll && (y < scroll.top || y > scroll.bottom) ? 'hidden' : '';
+            caret.style.left = `${selection.edge === 'left' ? rect.left - 8 : rect.right + 7}px`;
+            caret.style.top = `${y - 9}px`;
+          };
+          const schedule = () => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(update);
+          };
+          const activate = (event: MouseEvent) => {
+            if (
+              event.button !== 0 ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.altKey ||
+              event.shiftKey ||
+              !view.editable
+            )
+              return;
+            const surface = view.dom.closest('.writing-scroll');
+            if (
+              !(event.target instanceof Element) ||
+              !surface?.contains(event.target) ||
+              !view.dom.getClientRects().length ||
+              event.target.closest('button, input, select, textarea, a')
+            )
+              return;
+            const selection = lateralCursor(view, event);
+            if (!selection) return;
+            event.preventDefault();
+            const scrollTop = surface.scrollTop;
+            const scrollLeft = surface.scrollLeft;
+            view.dispatch(view.state.tr.setSelection(selection));
+            view.focus();
+            surface.scrollTop = scrollTop;
+            surface.scrollLeft = scrollLeft;
+            update();
+          };
+          const pointerDown = (event: PointerEvent) => {
+            if (event.pointerType !== 'touch') activate(event);
+          };
+          const touchClick = (event: MouseEvent) => {
+            if (event instanceof PointerEvent && event.pointerType === 'touch')
+              activate(event);
+          };
+          doc.addEventListener('pointerdown', pointerDown, true);
+          doc.addEventListener('click', touchClick, true);
+          doc.addEventListener('scroll', schedule, true);
+          window.addEventListener('resize', schedule);
+          return {
+            update,
+            destroy() {
+              cancelAnimationFrame(frame);
+              doc.removeEventListener('pointerdown', pointerDown, true);
+              doc.removeEventListener('click', touchClick, true);
+              doc.removeEventListener('scroll', schedule, true);
+              window.removeEventListener('resize', schedule);
+            },
+          };
+        },
         props: {
           decorations: (state) => key.getState(state)?.points,
+          handleTextInput: (view, _from, _to, text) =>
+            insertBoundaryText(view, text),
           handleDOMEvents: {
+            beforeinput(view, event) {
+              if (
+                event.inputType === 'insertText' &&
+                event.data &&
+                insertBoundaryText(view, event.data)
+              ) {
+                event.preventDefault();
+                return true;
+              }
+              return false;
+            },
             blur() {
               clearEmptyBlockParagraph(editor);
               return false;

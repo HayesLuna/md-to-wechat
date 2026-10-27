@@ -354,3 +354,182 @@ test('removing one block leaves a protected gap beside the next block', async ({
   ).toHaveLength(1);
   await page.keyboard.up('Delete');
 });
+
+const blockSelectors = {
+  codeBlock: '.code-node',
+  image: '.image-box',
+  horizontalRule: '.article-editor hr',
+  table: '.tableWrapper',
+};
+for (const [type, markdown] of blocks)
+  for (const edge of ['left', 'right'] as const) {
+    test(`${type}: clicking ${edge} whitespace shows the caret alongside the block without creating a line`, async ({
+      page,
+    }) => {
+      await ready(page, markdown);
+      const original = await doc(page);
+      const box = await page.locator(blockSelectors[type]).boundingBox();
+      expect(box).toBeTruthy();
+      await page.mouse.click(
+        edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+        box!.y + box!.height / 2,
+      );
+      await expect
+        .poll(() => selection(page))
+        .toMatchObject({ type: 'blockCursor', edge });
+      expect(await doc(page)).toEqual(original);
+      await expect(page.locator('.block-side-cursor')).toBeVisible();
+      const caret = await page.locator('.block-side-cursor').boundingBox();
+      expect(
+        Math.abs(caret!.y + caret!.height / 2 - (box!.y + box!.height / 2)),
+      ).toBeLessThan(1);
+      if (edge === 'left') expect(caret!.x).toBeLessThan(box!.x);
+      else expect(caret!.x).toBeGreaterThan(box!.x + box!.width);
+      await expect(page.locator('.ProseMirror-gapcursor')).toHaveClass(
+        /block-side-cursor/,
+      );
+      if (type === 'codeBlock')
+        await page.screenshot({ path: `/tmp/mojian-code-cursor-${edge}.png` });
+    });
+  }
+test('clicking a visible code line still edits inside the code block', async ({
+  page,
+}) => {
+  await ready(page, blocks[0][1]);
+  await page.locator('.code-node pre').click();
+  await expect(page.locator('.article-editor')).toBeFocused();
+  expect(await selection(page)).toMatchObject({ type: 'text' });
+  await expect(page.locator('.block-side-cursor')).toBeHidden();
+});
+
+for (const edge of ['left', 'right'] as const)
+  test(`typing from the ${edge} side creates prose only after typing starts`, async ({
+    page,
+  }) => {
+    await ready(page, blocks[0][1]);
+    const original = await doc(page);
+    const box = await page.locator('.code-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+      box!.y + box!.height / 2,
+    );
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.insertText('正文');
+    const result = await doc(page);
+    const code = result.content.findIndex((n: any) => n.type === 'codeBlock');
+    expect(result.content[code + (edge === 'left' ? -1 : 1)]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: '正文' }],
+    });
+    await expect(page.locator('.block-side-cursor')).toBeHidden();
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await doc(page)).toEqual(original);
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'blockCursor', edge });
+  });
+test('a side caret follows its block while the writing area scrolls', async ({
+  page,
+}) => {
+  await ready(
+    page,
+    Array.from({ length: 14 }, (_, i) => `Paragraph ${i}`).join('\n\n') +
+      '\n\n' +
+      blocks[0][1] +
+      '\n\n' +
+      Array.from({ length: 25 }, (_, i) => `Following ${i}`).join('\n\n'),
+  );
+  await page.locator('.code-node').scrollIntoViewIfNeeded();
+  const box = await page.locator('.code-node').boundingBox();
+  await page.mouse.click(box!.x - 20, box!.y + box!.height / 2);
+  await expect(page.locator('.block-side-cursor')).toBeVisible();
+  await page.locator('.writing-scroll').evaluate((el) => el.scrollBy(0, 40));
+  await expect
+    .poll(async () => {
+      const block = await page.locator('.code-node').boundingBox();
+      const cursor = await page.locator('.block-side-cursor').boundingBox();
+      return cursor && block
+        ? Math.abs(cursor.y + 9 - (block.y + block.height / 2))
+        : 999;
+    })
+    .toBeLessThan(1);
+});
+
+test('clicking beside a partially scrolled code block keeps the writing position', async ({
+  page,
+}) => {
+  await ready(
+    page,
+    '```js\n' +
+      Array.from({ length: 100 }, (_, i) => `const value${i} = ${i};`).join(
+        '\n',
+      ) +
+      '\n```',
+  );
+  await page.locator('.writing-scroll').evaluate((el) => {
+    el.scrollTop = 500;
+  });
+  const box = await page.locator('.code-node').boundingBox();
+  const scroll = await page
+    .locator('.writing-scroll')
+    .evaluate((el) => el.scrollTop);
+  await page.mouse.click(box!.x - 20, 350);
+  await expect
+    .poll(() => selection(page))
+    .toMatchObject({ type: 'blockCursor', edge: 'left' });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  expect(
+    await page.locator('.writing-scroll').evaluate((el) => el.scrollTop),
+  ).toBe(scroll);
+  const caret = await page.locator('.block-side-cursor').boundingBox();
+  expect(Math.abs(caret!.y + 9 - 350)).toBeLessThan(1);
+});
+for (const edge of ['left', 'right'] as const)
+  test(`${edge} side deletion selects the block before removing it`, async ({
+    page,
+  }) => {
+    await ready(page, blocks[0][1]);
+    const original = await doc(page);
+    const box = await page.locator('.code-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+      box!.y + box!.height / 2,
+    );
+    const key = edge === 'left' ? 'Delete' : 'Backspace';
+    await page.keyboard.press(key);
+    expect(await selection(page)).toMatchObject({ type: 'node' });
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.press(key);
+    expect(
+      (await doc(page)).content.some((n: any) => n.type === 'codeBlock'),
+    ).toBe(false);
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await doc(page)).toEqual(original);
+  });
+test.describe('touch side margin', () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+  test('tapping beside code places a lateral caret and accepts Chinese text', async ({
+    page,
+  }) => {
+    await ready(page, blocks[0][1]);
+    const box = await page.locator('.code-node').boundingBox();
+    await page.touchscreen.tap(box!.x - 12, box!.y + box!.height / 2);
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'blockCursor', edge: 'left' });
+    await page.keyboard.insertText('触摸正文');
+    expect((await doc(page)).content[0]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: '触摸正文' }],
+    });
+  });
+});
