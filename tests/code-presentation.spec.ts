@@ -399,12 +399,14 @@ test('focusing language shows searchable choices without an arrow and Escape pre
 });
 
 for (const index of [0, 1, 2])
-  test(`clicking in line ${index + 1} leading space retains its horizontal code position`, async ({
+  test(`clicking after code line ${index + 1} selects the following line, or stays on the last line`, async ({
     page,
   }) => {
     const text = 'const alpha = 1;\nconst beta = 2;\nconst gamma = 3;';
     await ready(page, text);
     const offset = text.indexOf(['alpha', 'beta', 'gamma'][index]) + 2;
+    const expectedOffset =
+      text.indexOf(['alpha', 'beta', 'gamma'][Math.min(index + 1, 2)]) + 2;
     const coords = await page.evaluate((offset) => {
       const e = (window as any).__mojian.editor;
       const pre = document.querySelector('.code-node pre')!;
@@ -423,7 +425,7 @@ for (const index of [0, 1, 2])
     );
     await page.keyboard.insertText('X');
     expect((await json(page)).content[0].content[0].text).toBe(
-      text.slice(0, offset) + 'X' + text.slice(offset),
+      text.slice(0, expectedOffset) + 'X' + text.slice(expectedOffset),
     );
     await page.keyboard.press('ControlOrMeta+z');
     expect((await json(page)).content[0].content[0].text).toBe(text);

@@ -10,6 +10,13 @@ import {
 } from '@tiptap/pm/state';
 import type { Mappable } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
+import {
+  ordinaryTextAtCoords,
+  beginTextSelection,
+  endTextSelection,
+  textPointMatches,
+} from './textHitTesting';
+import { placeCodeCaret } from './codeFolding';
 
 const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
@@ -195,7 +202,7 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
       Number(isBlock(view.state.doc.nodeAt(a))),
   )) {
     const node = view.state.doc.nodeAt(pos);
-    if (!isBlock(node) && !node?.isTextblock) continue;
+    if (!isBlock(node)) continue;
     const rect = paintedBlock(view, pos)?.getBoundingClientRect();
     if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
       continue;
@@ -210,17 +217,6 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
           ? 'right'
           : null;
     if (!edge) continue;
-    if (!isBlock(node)) {
-      // Hit-test at the textblock's edge so wrapped paragraphs and list items
-      // keep the clicked visual line, rather than jumping to the block's end.
-      const line = view.posAtCoords({
-        left: edge === 'left' ? rect.left + 1 : rect.right - 1,
-        top: event.clientY,
-      });
-      if (line && view.state.doc.resolve(line.pos).parent.inlineContent)
-        return TextSelection.create(view.state.doc, line.pos);
-      continue;
-    }
     const $pos = view.state.doc.resolve(
       edge === 'left' ? pos : pos + node!.nodeSize,
     );
@@ -408,47 +404,65 @@ export const BlockBoundaries = Extension.create({
             const scrollLeft = surface.scrollLeft;
             view.dispatch(view.state.tr.setSelection(selection));
             view.focus();
-            if (
-              selection instanceof TextSelection &&
-              view.coordsAtPos(selection.head).top > event.clientY
-            ) {
-              // A soft wrap has two visual sides at one document position.
-              // Let the browser retain the preceding line's native caret affinity.
-              const block = paintedBlock(view, selection.$from.before());
-              const start =
-                block &&
-                view.posAtCoords({
-                  left: block.getBoundingClientRect().left + 1,
-                  top: event.clientY,
-                });
-              const native = doc.getSelection();
-              if (start && native?.modify) {
-                const first = view.domAtPos(start.pos);
-                native.collapse(first.node, first.offset);
-                native.modify('move', 'forward', 'lineboundary');
-                if (
-                  !native.anchorNode ||
-                  view.posAtDOM(native.anchorNode, native.anchorOffset) !==
-                    selection.head
-                ) {
-                  const end = view.domAtPos(selection.head);
-                  native.collapse(end.node, end.offset);
-                }
-              }
-            }
             surface.scrollTop = scrollTop;
             surface.scrollLeft = scrollLeft;
             update();
+            return true;
           };
           const pointerDown = (event: PointerEvent) => {
             if (event.pointerType !== 'touch') activate(event);
           };
-          const touchClick = (event: MouseEvent) => {
+          const mouseDown = (event: MouseEvent) => {
+            if (
+              event.defaultPrevented ||
+              event.button !== 0 ||
+              event.detail > 1 ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.altKey ||
+              event.shiftKey ||
+              !view.editable
+            )
+              return;
+            const surface = view.dom.closest('.writing-scroll');
+            if (
+              !(event.target instanceof Element) ||
+              !surface?.contains(event.target) ||
+              event.target.closest(
+                'button,input,select,textarea,a,[role="separator"],.image-node,.tableWrapper',
+              )
+            )
+              return;
+            if (event.target.closest('.code-node')) {
+              // The NodeView stops editor events outside its actual contentDOM.
+              // Handle padding/extra viewport space here, before native selection.
+              if (!event.target.closest('[data-node-view-content-react]'))
+                placeCodeCaret(view, event);
+              return;
+            }
+            if (activate(event)) return;
+            const point = { left: event.clientX, top: event.clientY };
+            if (textPointMatches(view, point)) return;
+            const target = ordinaryTextAtCoords(view, point);
+            if (!target) return;
+            if (
+              point.top >= target.line.top &&
+              point.top <= target.line.bottom &&
+              point.left >= target.line.left &&
+              point.left <= target.line.right
+            )
+              return;
+            beginTextSelection(view, event, target, (point) =>
+              ordinaryTextAtCoords(view, point),
+            );
+          };
+          const click = (event: MouseEvent) => {
             if (event instanceof PointerEvent && event.pointerType === 'touch')
               activate(event);
           };
           doc.addEventListener('pointerdown', pointerDown, true);
-          doc.addEventListener('click', touchClick, true);
+          doc.addEventListener('click', click, true);
+          doc.addEventListener('mousedown', mouseDown, true);
           doc.addEventListener('scroll', schedule, true);
           window.addEventListener('resize', schedule);
           return {
@@ -457,7 +471,9 @@ export const BlockBoundaries = Extension.create({
               cancelAnimationFrame(frame);
               resizeObserver.disconnect();
               doc.removeEventListener('pointerdown', pointerDown, true);
-              doc.removeEventListener('click', touchClick, true);
+              doc.removeEventListener('click', click, true);
+              doc.removeEventListener('mousedown', mouseDown, true);
+              endTextSelection(view);
               doc.removeEventListener('scroll', schedule, true);
               window.removeEventListener('resize', schedule);
             },

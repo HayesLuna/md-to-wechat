@@ -7,6 +7,11 @@ import {
   type EditorState,
 } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
+import {
+  beginTextSelection,
+  ordinaryTextAtCoords,
+  textPointMatches,
+} from './textHitTesting';
 
 export type CodeFoldRange = { from: number; to: number };
 type Fold = CodeFoldRange & { block: number };
@@ -292,8 +297,110 @@ function decorated(doc: Node, folds: Fold[]): FoldState {
   return { folds, decorations: DecorationSet.create(doc, decorations) };
 }
 
-function placeCodeCaret(view: EditorView, event: MouseEvent) {
+const lineIndexes = new WeakMap<Node, ReturnType<typeof codeLines>>();
+type CodeHitIndex = {
+  node: Node;
+  block: number;
+  folds: Fold[];
+  starts: number[];
+  lines: string[];
+  rows: number[];
+  ends: number[];
+};
+const hitIndexes = new WeakMap<EditorView, CodeHitIndex>();
+function codeHitIndex(view: EditorView, node: Node, block: number) {
+  const folds = key.getState(view.state)?.folds ?? empty.folds;
+  const cached = hitIndexes.get(view);
+  if (cached?.node === node && cached.block === block && cached.folds === folds)
+    return cached;
+  let source = lineIndexes.get(node);
+  if (!source) {
+    source = codeLines(node.textContent);
+    lineIndexes.set(node, source);
+  }
+  const { starts, lines } = source;
+  const collapsed = new Map<number, number>();
+  let end = -1;
+  for (const fold of folds
+    .filter((f) => f.block === block)
+    .sort((a, b) => a.from - b.from || b.to - a.to)) {
+    if (fold.from < end) continue;
+    collapsed.set(
+      codeLineAt(starts, fold.from - block - 1),
+      codeLineAt(starts, fold.to - block - 1),
+    );
+    end = fold.to;
+  }
+  const rows: number[] = [],
+    ends: number[] = [];
+  for (let line = 0; line < lines.length;) {
+    const last = collapsed.get(line) ?? line;
+    rows.push(line);
+    ends.push(last);
+    line = last + 1;
+  }
+  const index = { node, block, folds, starts, lines, rows, ends };
+  hitIndexes.set(view, index);
+  return index;
+}
+function codeTextAtCoords(
+  view: EditorView,
+  viewport: Element,
+  pre: Element,
+  content: Element,
+  point: { left: number; top: number },
+) {
+  const $pos = view.state.doc.resolve(view.posAtDOM(content, 0));
+  let depth = $pos.depth;
+  while (depth > 0 && $pos.node(depth).type.name !== 'codeBlock') depth--;
+  if (!depth) return null;
+  const block = $pos.before(depth),
+    node = $pos.node(depth);
+  const { starts, lines, rows, ends } = codeHitIndex(view, node, block);
+  const bounds = viewport.getBoundingClientRect(),
+    style = getComputedStyle(pre),
+    lineHeight = parseFloat(style.lineHeight) || 22.75;
+  // Code has fixed row height and does not wrap. The first visible glyph gives
+  // the baseline; arithmetic maps the following row through the cached folds.
+  const first = view.coordsAtPos(block + 1);
+  const visual = Math.max(
+    0,
+    Math.min(
+      rows.length - 1,
+      Math.ceil((point.top - first.bottom) / lineHeight),
+    ),
+  );
+  const line = rows[visual],
+    last = ends[visual];
+  const from = block + 1 + starts[line],
+    to = block + 1 + starts[last] + lines[last].length;
+  const top = first.top + visual * lineHeight,
+    bottom = first.bottom + visual * lineHeight;
+  const hit = view.posAtCoords({
+    left: point.left,
+    top: Math.max(
+      bounds.top + 1,
+      Math.min(bounds.bottom - 2, (top + bottom) / 2),
+    ),
+  });
+  const pos = Math.max(from, Math.min(to, hit?.pos ?? from));
+  // Only the row endpoints are measured, independent of source/token count.
+  const left = view.coordsAtPos(from),
+    right = view.coordsAtPos(to, -1);
+  return {
+    selection: TextSelection.create(view.state.doc, pos),
+    line: {
+      left: Math.min(left.left, right.left),
+      right: Math.max(left.right, right.right),
+      top,
+      bottom,
+    },
+  };
+}
+
+export function placeCodeCaret(view: EditorView, event: MouseEvent) {
   if (
+    event.defaultPrevented ||
     event.button !== 0 ||
     event.detail !== 1 ||
     event.shiftKey ||
@@ -306,69 +413,33 @@ function placeCodeCaret(view: EditorView, event: MouseEvent) {
     return false;
   if (event.target.closest('button,input,select,textarea,.code-gutter'))
     return false;
-  const viewport = event.target.closest('.code-viewport');
-  const pre = viewport?.querySelector('pre');
-  const content = pre?.querySelector('[data-node-view-content]');
+  const viewport = event.target.closest('.code-viewport'),
+    pre = viewport?.querySelector('pre'),
+    content = pre?.querySelector('[data-node-view-content]');
+  if (!viewport || !pre || !content) return false;
+  const point = { left: event.clientX, top: event.clientY };
+  if (textPointMatches(view, point)) return false;
+  const target = codeTextAtCoords(view, viewport, pre, content, point);
+  if (!target) return false;
   if (
-    !viewport ||
-    !pre ||
-    !content ||
-    view.dom.ownerDocument.getSelection()?.isCollapsed === false
+    point.top >= target.line.top &&
+    point.top <= target.line.bottom &&
+    point.left >= target.line.left &&
+    point.left <= target.line.right
   )
     return false;
-  const $pos = view.state.doc.resolve(view.posAtDOM(content, 0));
-  let depth = $pos.depth;
-  while (depth > 0 && $pos.node(depth).type.name !== 'codeBlock') depth--;
-  if (!depth) return false;
-  const block = $pos.before(depth),
-    node = $pos.node(depth);
-  const { lines, starts } = codeLines(node.textContent);
-  const rect = pre.getBoundingClientRect(),
-    bounds = viewport.getBoundingClientRect(),
-    style = getComputedStyle(pre);
-  const lineHeight = parseFloat(style.lineHeight) || 22.75,
-    padding = parseFloat(style.paddingTop) || 0;
-  const visual = Math.max(
-    0,
-    Math.floor((event.clientY - rect.top - padding) / lineHeight),
-  );
-  const folds = getCodeFolds(view.state, block).sort(
-    (a, b) => a.from - b.from || b.to - a.to,
-  );
-  let removed = 0,
-    end = -1;
-  for (const fold of folds) {
-    if (fold.from < end) continue;
-    const start = codeLineAt(starts, fold.from),
-      last = codeLineAt(starts, fold.to);
-    if (visual <= start - removed) break;
-    removed += last - start;
-    end = fold.to;
-  }
-  const line = Math.min(lines.length - 1, visual + removed);
-  let last = line;
-  for (const fold of folds)
-    if (codeLineAt(starts, fold.from) === line)
-      last = Math.max(last, codeLineAt(starts, fold.to));
-  const from = block + 1 + starts[line],
-    to = block + 1 + starts[last] + lines[last].length;
-  // Hit-test the text's vertical center, retaining the clicked horizontal column.
-  // Native hit testing between inline token boxes can otherwise choose the whole block's edge.
-  const top = Math.max(
-    bounds.top + 1,
-    Math.min(
-      bounds.bottom - 2,
-      rect.top + padding + (visual + 0.5) * lineHeight,
-    ),
-  );
-  const hit = view.posAtCoords({ left: event.clientX, top });
-  const pos = Math.max(from, Math.min(to, hit?.pos ?? from));
-  view.dispatch(
-    view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
-  );
-  view.focus();
+  beginTextSelection(view, event, target, (point) => {
+    const rect = viewport.getBoundingClientRect();
+    return point.left >= rect.left &&
+      point.left <= rect.right &&
+      point.top >= rect.top &&
+      point.top <= rect.bottom
+      ? codeTextAtCoords(view, viewport, pre, content, point)
+      : ordinaryTextAtCoords(view, point);
+  });
   return true;
 }
+
 export function codeFoldingPlugin() {
   return new Plugin<FoldState>({
     key,
@@ -425,7 +496,7 @@ export function codeFoldingPlugin() {
       },
     },
     props: {
-      handleDOMEvents: { click: placeCodeCaret },
+      handleDOMEvents: { mousedown: placeCodeCaret },
       decorations: (state) => key.getState(state)?.decorations,
       handleKeyDown(view, event) {
         if (
