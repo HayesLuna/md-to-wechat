@@ -425,8 +425,14 @@ button.primary:hover {
 }
 .article-editor hr {
   border: 0;
-  border-top: 1px solid var(--border);
-  margin: 30px 0;
+  height: 21px;
+  margin: 20px 0;
+  background: linear-gradient(var(--border), var(--border)) center / 100% 1px
+    no-repeat;
+}
+.article-editor hr.ProseMirror-selectednode {
+  outline: 0;
+  background-color: #f0f0f2;
 }
 .article-editor table {
   border-collapse: collapse;
@@ -2281,23 +2287,6 @@ button.primary:hover {
   color: #8b949e;
 }
 
-/* Clickable block boundaries take no space and never enter saved content. */
-.article-editor .block-insertion-point {
-  display: block;
-  position: relative;
-  height: 0;
-  margin: 0;
-  padding: 0;
-}
-.article-editor .block-insertion-hit {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -9px;
-  height: 18px;
-  cursor: text;
-  z-index: 2;
-}
 .article-editor .ProseMirror-gapcursor::after {
   width: 1px;
   height: 18px;

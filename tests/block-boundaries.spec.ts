@@ -7,6 +7,7 @@ const blocks = [
   ['horizontalRule', '---'],
   ['table', '| 标题 |\n| --- |\n| 内容 |'],
 ] as const;
+const cursorBlocks = blocks.filter(([type]) => type !== 'horizontalRule');
 async function ready(page: Page, markdown: string) {
   await page.route('**/boundary.svg', (route) =>
     route.fulfill({
@@ -20,7 +21,7 @@ async function ready(page: Page, markdown: string) {
     (text) => (window as any).__mojian.setMarkdown(text),
     markdown,
   );
-  await expect(page.locator('.block-insertion-hit').first()).toBeAttached();
+  await expect(page.locator('.article-editor')).toBeVisible();
   if (markdown.includes('https://example.test/boundary.svg'))
     await expect(page.locator('.image-box img')).toBeVisible();
 }
@@ -28,14 +29,43 @@ const doc = (page: Page) =>
   page.evaluate(() => (window as any).__mojian.editor.getJSON());
 const selection = (page: Page) =>
   page.evaluate(() => (window as any).__mojian.editor.state.selection.toJSON());
-async function clickGap(page: Page, index: number) {
-  await page.locator('.block-insertion-hit').nth(index).click();
-  await expect
-    .poll(() => selection(page))
-    .toMatchObject({ type: 'blockCursor' });
+async function clickSide(page: Page, index: number) {
+  const target = page
+    .locator(
+      '.article-editor .code-node, .article-editor .image-node, .article-editor .tableWrapper',
+    )
+    .first();
+  const box = await target.boundingBox();
+  expect(box).toBeTruthy();
+  const edge = index === 0 ? 'left' : 'right';
+  const type = await target.evaluate((el) =>
+    el.classList.contains('image-node') ? 'imageSide' : 'blockCursor',
+  );
+  await page.mouse.click(
+    edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+    box!.y + box!.height / 2,
+  );
+  await expect.poll(() => selection(page)).toMatchObject({ type, edge });
   await expect(page.locator('.ProseMirror-gapcursor')).toBeVisible();
 }
-for (const [type, markdown] of blocks) {
+type Rect = { x: number; y: number; width: number; height: number };
+async function bottomCaret(page: Page, block: Rect) {
+  let caret: Rect | null = null;
+  await expect
+    .poll(async () => {
+      caret = await page.locator('.block-side-cursor').boundingBox();
+      return caret
+        ? Math.max(
+            Math.abs(caret.y + caret.height - (block.y + block.height)),
+            Math.abs(caret.height - 18),
+          )
+        : Infinity;
+    })
+    .toBeLessThan(1);
+  return caret!;
+}
+
+for (const [type, markdown] of cursorBlocks) {
   for (const [side, index] of [
     ['before', 0],
     ['after', 1],
@@ -45,7 +75,7 @@ for (const [type, markdown] of blocks) {
     }) => {
       await ready(page, markdown);
       const before = await doc(page);
-      await clickGap(page, index);
+      await clickSide(page, index);
       expect(await doc(page)).toEqual(before);
       await page.keyboard.type('New prose');
       const result = await doc(page);
@@ -61,34 +91,35 @@ for (const [type, markdown] of blocks) {
       expect(await doc(page)).toEqual(result);
     });
   }
-  for (const [side, index, key] of [
-    ['before', 0, 'Delete'],
-    ['after', 1, 'Backspace'],
-  ] as const) {
-    test(`${type}: ${key} ${side} selects the block before removal, undo restores it`, async ({
-      page,
-    }) => {
-      await ready(page, markdown);
-      const before = await doc(page);
-      await clickGap(page, index);
-      await page.keyboard.press(key);
-      expect(await doc(page)).toEqual(before);
-      expect(await selection(page)).toMatchObject({ type: 'node' });
-      await page.keyboard.press(key);
-      expect(
-        (await doc(page)).content.some((node: any) => node.type === type),
-      ).toBe(false);
-      await page.keyboard.press('ControlOrMeta+z');
-      expect(await doc(page)).toEqual(before);
-    });
-  }
+  if (type !== 'image')
+    for (const [side, index, key] of [
+      ['before', 0, 'Delete'],
+      ['after', 1, 'Backspace'],
+    ] as const) {
+      test(`${type}: ${key} ${side} selects the block before removal, undo restores it`, async ({
+        page,
+      }) => {
+        await ready(page, markdown);
+        const before = await doc(page);
+        await clickSide(page, index);
+        await page.keyboard.press(key);
+        expect(await doc(page)).toEqual(before);
+        expect(await selection(page)).toMatchObject({ type: 'node' });
+        await page.keyboard.press(key);
+        expect(
+          (await doc(page)).content.some((node: any) => node.type === type),
+        ).toBe(false);
+        await page.keyboard.press('ControlOrMeta+z');
+        expect(await doc(page)).toEqual(before);
+      });
+    }
 }
-test('adjacent blocks share a single insertion point and prose stays outside both', async ({
+test('side insertion between adjacent blocks creates prose outside both', async ({
   page,
 }) => {
   await ready(page, blocks.map(([, text]) => text).join('\n\n'));
-  await expect(page.locator('.block-insertion-hit')).toHaveCount(5);
-  await clickGap(page, 1);
+  await expect(page.locator('.block-insertion-hit')).toHaveCount(0);
+  await clickSide(page, 1);
   await page.keyboard.type('Between');
   expect((await doc(page)).content.slice(0, 3).map((n: any) => n.type)).toEqual(
     ['codeBlock', 'paragraph', 'image'],
@@ -100,7 +131,7 @@ test('clearing inserted prose keeps a caret, blur removes the empty paragraph', 
 }) => {
   await ready(page, blocks[0][1]);
   const before = await doc(page);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.type('X');
   await page.keyboard.press('Backspace');
   expect((await doc(page)).content[0]).toMatchObject({ type: 'paragraph' });
@@ -113,7 +144,7 @@ test('empty paragraph deletion returns to gap; repeated deletion selects, then r
   page,
 }) => {
   await ready(page, blocks[0][1]);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.press('Enter');
   await page.keyboard.press('Delete');
   expect(await selection(page)).toMatchObject({ type: 'blockCursor' });
@@ -129,7 +160,7 @@ test('Chinese composition at a gap creates a normal paragraph', async ({
   page,
 }) => {
   await ready(page, blocks[0][1]);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.locator('.article-editor').evaluate((el) => {
     el.dispatchEvent(
       new CompositionEvent('compositionstart', { bubbles: true }),
@@ -157,7 +188,7 @@ test('mobile width permits insertion without horizontal overflow', async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await ready(page, blocks[0][1]);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.insertText('前面的内容');
   expect((await doc(page)).content[0]).toMatchObject({
     type: 'paragraph',
@@ -173,9 +204,9 @@ test('mobile width permits insertion without horizontal overflow', async ({
 
 test('block inside a quote supports prose on both sides', async ({ page }) => {
   await ready(page, '> ```js\n> const x = 1;\n> ```');
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.type('Before');
-  await clickGap(page, 1);
+  await clickSide(page, 1);
   await page.keyboard.type('After');
   const quote = (await doc(page)).content[0];
   expect(quote.type).toBe('blockquote');
@@ -194,7 +225,7 @@ test('plain text paste at a gap becomes prose and preserves the block', async ({
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await ready(page, blocks[0][1]);
   await page.evaluate(() => navigator.clipboard.writeText('Pasted prose'));
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.press('ControlOrMeta+v');
   expect((await doc(page)).content.slice(0, 2).map((n: any) => n.type)).toEqual(
     ['paragraph', 'codeBlock'],
@@ -235,7 +266,7 @@ test('holding Delete never confirms removal of the selected block', async ({
 }) => {
   await ready(page, blocks[0][1]);
   const before = await doc(page);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.down('Delete');
   await page.keyboard.down('Delete');
   expect(await doc(page)).toEqual(before);
@@ -250,41 +281,13 @@ test('backward arrows at the document start retain the gap', async ({
   page,
 }) => {
   await ready(page, blocks[0][1]);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowLeft');
   expect(await selection(page)).toMatchObject({ type: 'blockCursor', pos: 0 });
   await page.keyboard.press('ArrowDown');
   expect(await selection(page)).toMatchObject({ type: 'text' });
 });
-test.describe('touch boundary', () => {
-  test.use({
-    hasTouch: true,
-    isMobile: true,
-    viewport: { width: 390, height: 844 },
-  });
-  test('tap places a gap cursor and text enters outside the code block', async ({
-    page,
-  }) => {
-    await ready(page, blocks[0][1]);
-    const hit = await page
-      .locator('.block-insertion-hit')
-      .first()
-      .boundingBox();
-    expect(hit).toBeTruthy();
-    await page.touchscreen.tap(
-      hit!.x + hit!.width / 2,
-      hit!.y + hit!.height / 2,
-    );
-    expect(await selection(page)).toMatchObject({ type: 'blockCursor' });
-    await page.keyboard.insertText('触摸输入');
-    expect((await doc(page)).content[0]).toMatchObject({
-      type: 'paragraph',
-      content: [{ text: '触摸输入' }],
-    });
-  });
-});
-
 test('deletion preserves the required first paragraph in a list item', async ({
   page,
 }) => {
@@ -329,7 +332,7 @@ test('switching to source drops cleared transient paragraphs before serializing'
 }) => {
   await ready(page, blocks[0][1]);
   const before = await doc(page);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.type('X');
   await page.keyboard.press('Backspace');
   await page
@@ -344,7 +347,7 @@ test('removing one block leaves a protected gap beside the next block', async ({
   page,
 }) => {
   await ready(page, blocks[0][1] + '\n\n' + blocks[0][1]);
-  await clickGap(page, 0);
+  await clickSide(page, 0);
   await page.keyboard.press('Delete');
   await page.keyboard.down('Delete');
   expect(await selection(page)).toMatchObject({ type: 'blockCursor' });
@@ -357,13 +360,13 @@ test('removing one block leaves a protected gap beside the next block', async ({
 
 const blockSelectors = {
   codeBlock: '.code-node',
-  image: '.image-box',
+  image: '.image-node',
   horizontalRule: '.article-editor hr',
   table: '.tableWrapper',
 };
-for (const [type, markdown] of blocks)
+for (const [type, markdown] of cursorBlocks)
   for (const edge of ['left', 'right'] as const) {
-    test(`${type}: clicking ${edge} whitespace shows the caret alongside the block without creating a line`, async ({
+    test(`${type}: clicking ${edge} whitespace shows a bottom-aligned caret without creating a line`, async ({
       page,
     }) => {
       await ready(page, markdown);
@@ -376,13 +379,16 @@ for (const [type, markdown] of blocks)
       );
       await expect
         .poll(() => selection(page))
-        .toMatchObject({ type: 'blockCursor', edge });
+        .toMatchObject({
+          type: type === 'image' ? 'imageSide' : 'blockCursor',
+          edge,
+        });
       expect(await doc(page)).toEqual(original);
       await expect(page.locator('.block-side-cursor')).toBeVisible();
-      const caret = await page.locator('.block-side-cursor').boundingBox();
-      expect(
-        Math.abs(caret!.y + caret!.height / 2 - (box!.y + box!.height / 2)),
-      ).toBeLessThan(1);
+      if (type === 'image')
+        await expect(page.locator('.image-controls')).toBeVisible();
+      const currentBox = await page.locator(blockSelectors[type]).boundingBox();
+      const caret = await bottomCaret(page, currentBox!);
       if (edge === 'left') expect(caret!.x).toBeLessThan(box!.x);
       else expect(caret!.x).toBeGreaterThan(box!.x + box!.width);
       await expect(page.locator('.ProseMirror-gapcursor')).toHaveClass(
@@ -449,7 +455,7 @@ test('a side caret follows its block while the writing area scrolls', async ({
       const block = await page.locator('.code-node').boundingBox();
       const cursor = await page.locator('.block-side-cursor').boundingBox();
       return cursor && block
-        ? Math.abs(cursor.y + 9 - (block.y + block.height / 2))
+        ? Math.abs(cursor.y + cursor.height - (block.y + block.height))
         : 999;
     })
     .toBeLessThan(1);
@@ -486,8 +492,14 @@ test('clicking beside a partially scrolled code block keeps the writing position
   expect(
     await page.locator('.writing-scroll').evaluate((el) => el.scrollTop),
   ).toBe(scroll);
-  const caret = await page.locator('.block-side-cursor').boundingBox();
-  expect(Math.abs(caret!.y + 9 - 350)).toBeLessThan(1);
+  // The block's bottom is offscreen; the fixed baseline must not float at the click height.
+  await expect(page.locator('.block-side-cursor')).toBeHidden();
+  await page.locator('.writing-scroll').evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(page.locator('.block-side-cursor')).toBeVisible();
+  const block = await page.locator('.code-node').boundingBox();
+  await bottomCaret(page, block!);
 });
 for (const edge of ['left', 'right'] as const)
   test(`${edge} side deletion selects the block before removing it`, async ({
@@ -531,5 +543,369 @@ test.describe('touch side margin', () => {
       type: 'paragraph',
       content: [{ text: '触摸正文' }],
     });
+  });
+});
+
+for (const type of ['codeBlock', 'table'] as const)
+  test(`${type}: top, middle and bottom side clicks share one bottom baseline`, async ({
+    page,
+  }) => {
+    await ready(page, blocks.find(([name]) => name === type)![1]);
+    const original = await doc(page);
+    const box = await page.locator(blockSelectors[type]).boundingBox();
+    const positions: number[] = [];
+    for (const edge of ['left', 'right'] as const)
+      for (const height of [0.1, 0.5, 0.9]) {
+        await page.mouse.click(
+          edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+          box!.y + box!.height * height,
+        );
+        await expect
+          .poll(() => selection(page))
+          .toMatchObject({ type: 'blockCursor', edge });
+        await expect(page.locator('.block-side-cursor')).toBeVisible();
+        const caret = await bottomCaret(page, box!);
+        positions.push(caret!.y);
+        expect(
+          Math.abs(caret!.y + caret!.height - (box!.y + box!.height)),
+        ).toBeLessThan(1);
+        expect(await doc(page)).toEqual(original);
+      }
+    expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(1);
+    await page.screenshot({ path: `/tmp/mojian-${type}-bottom-baseline.png` });
+  });
+
+test('the divider row is selectable across its width and height without adding text', async ({
+  page,
+}) => {
+  await ready(page, '前文\n\n---\n\n后文');
+  const original = await doc(page);
+  const line = page.locator('.article-editor hr');
+  const box = await line.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(20);
+  for (const horizontal of [0.1, 0.5, 0.9])
+    for (const vertical of [0.1, 0.5, 0.9]) {
+      await page.mouse.click(
+        box!.x + box!.width * horizontal,
+        box!.y + box!.height * vertical,
+      );
+      expect(await selection(page)).toMatchObject({ type: 'node' });
+      expect(await doc(page)).toEqual(original);
+      await expect(line).toHaveClass(/ProseMirror-selectednode/);
+      await expect(line).toHaveCSS('background-color', 'rgb(240, 240, 242)');
+    }
+  await page.screenshot({ path: '/tmp/mojian-divider-selected.png' });
+  await page.keyboard.press('Delete');
+  await expect(line).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await doc(page)).toEqual(original);
+});
+
+test('divider side whitespace has no custom cursor or line-selection entry', async ({
+  page,
+}) => {
+  await ready(page, '前文\n\n---\n\n后文');
+  const original = await doc(page);
+  await expect(page.locator('.block-insertion-hit')).toHaveCount(0);
+  const box = await page.locator('.article-editor hr').boundingBox();
+  for (const edge of ['left', 'right']) {
+    await page.locator('.article-editor p').first().click();
+    await page.mouse.click(
+      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+      box!.y + box!.height / 2,
+    );
+    expect((await selection(page)).type).not.toBe('blockCursor');
+    expect((await selection(page)).type).not.toBe('node');
+    await expect(page.locator('.article-editor hr')).not.toHaveClass(
+      /ProseMirror-selectednode/,
+    );
+    expect(await doc(page)).toEqual(original);
+  }
+  await page.locator('.article-editor hr').click();
+  expect(await selection(page)).toMatchObject({ type: 'node' });
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.article-editor hr')).toHaveCount(0);
+});
+
+const smallImage = '![图片](https://example.test/boundary.svg "width=35%")';
+for (const edge of ['left', 'right'] as const)
+  test(`small image: the ${edge} caret reuses the selected outer frame`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+    await page.evaluate(() => {
+      const e = (window as any).__mojian.editor;
+      let pos = 0;
+      e.state.doc.descendants((n: any, p: number) => {
+        if (n.type.name === 'image') pos = p;
+      });
+      e.commands.setNodeSelection(pos);
+    });
+    await expect(page.locator('.image-controls')).toBeVisible();
+    const selected = await page.locator('.image-node').boundingBox();
+    const frameStyle = await page.locator('.node-image').evaluate((el) => {
+      (window as any).__selectedImageElement = el;
+      return {
+        outline: getComputedStyle(el).outline,
+        offset: getComputedStyle(el).outlineOffset,
+      };
+    });
+    const inner = await page.locator('.image-box').boundingBox();
+    expect(inner!.width).toBeLessThan(selected!.width * 0.4);
+    await page.mouse.click(
+      edge === 'left' ? selected!.x - 20 : selected!.x + selected!.width + 20,
+      selected!.y + selected!.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge });
+    await expect(page.locator('.image-controls')).toBeVisible();
+    await expect(page.locator('.image-node')).toHaveCSS(
+      'outline-style',
+      'none',
+    );
+    await expect(
+      page.locator('.node-image.ProseMirror-selectednode'),
+    ).toHaveCSS('outline', frameStyle.outline);
+    await expect(
+      page.locator('.node-image.ProseMirror-selectednode'),
+    ).toHaveCSS('outline-offset', frameStyle.offset);
+    await expect(page.locator('.image-node')).toHaveClass(/selected/);
+    expect(
+      await page
+        .locator('.node-image')
+        .evaluate((el) => el === (window as any).__selectedImageElement),
+    ).toBe(true);
+    expect(
+      await page.evaluate(() =>
+        (window as any).__mojian.editor.isActive('image'),
+      ),
+    ).toBe(true);
+    await expect(page.locator('.block-cursor-image')).toHaveCount(0);
+    let caret: Rect | null = null;
+    await expect
+      .poll(async () => {
+        const outer = await page.locator('.image-node').boundingBox();
+        caret = await page.locator('.block-side-cursor').boundingBox();
+        if (!outer || !caret) return Infinity;
+        return Math.max(
+          Math.abs(caret.y + caret.height - (outer.y + outer.height)),
+          Math.abs(
+            caret.x -
+              (edge === 'left' ? outer.x - 8 : outer.x + outer.width + 7),
+          ),
+        );
+      })
+      .toBeLessThan(1);
+    await page.screenshot({ path: `/tmp/mojian-image-outer-${edge}.png` });
+    await page.keyboard.insertText('新增正文');
+    const result = await doc(page);
+    const image = result.content.findIndex((n: any) => n.type === 'image');
+    expect(result.content[image + (edge === 'left' ? -1 : 1)]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: '新增正文' }],
+    });
+    expect(result.content[0].content[0].text).toBe('前文');
+    expect(result.content.at(-1).content[0].text).toBe('后文');
+  });
+
+for (const [edge, key] of [
+  ['left', 'Delete'],
+  ['right', 'Backspace'],
+] as const)
+  test(`small image: ${key} at the ${edge} outer edge deletes the image in one press and undo restores it`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+    const original = await doc(page);
+    const outer = await page.locator('.image-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? outer!.x - 20 : outer!.x + outer!.width + 20,
+      outer!.y + outer!.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge });
+    await page.keyboard.press(key);
+    await expect(page.locator('.image-node')).toHaveCount(0);
+    expect(
+      (await doc(page)).content.map((n: any) => n.content?.[0]?.text),
+    ).toEqual(['前文', '后文']);
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await doc(page)).toEqual(original);
+  });
+
+test('blank space inside the image outer frame does not create an outside cursor', async ({
+  page,
+}) => {
+  await ready(page, smallImage);
+  const outer = await page.locator('.image-node').boundingBox();
+  const inner = await page.locator('.image-box').boundingBox();
+  await page.mouse.click(inner!.x - 20, inner!.y + inner!.height / 2);
+  expect((await selection(page)).type).not.toBe('imageSide');
+  expect(inner!.x - 20).toBeGreaterThan(outer!.x);
+  await expect(page.locator('.block-side-cursor')).toBeHidden();
+});
+
+for (const edge of ['left', 'right'] as const)
+  test(`real image selection: Chinese composition at the ${edge} side preserves the image`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+    const outer = await page.locator('.image-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? outer!.x - 20 : outer!.x + outer!.width + 20,
+      outer!.y + outer!.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge });
+    await page.locator('.article-editor').evaluate((el) => {
+      el.dispatchEvent(
+        new CompositionEvent('compositionstart', { bubbles: true }),
+      );
+      el.dispatchEvent(
+        new InputEvent('beforeinput', {
+          bubbles: true,
+          inputType: 'insertCompositionText',
+          data: '中',
+          isComposing: true,
+        }),
+      );
+    });
+    await page.keyboard.insertText('中文正文');
+    await page
+      .locator('.article-editor')
+      .dispatchEvent('compositionend', { data: '中文正文' });
+    const result = await doc(page);
+    const at = result.content.findIndex((n: any) => n.type === 'image');
+    expect(at).toBeGreaterThan(0);
+    expect(result.content[at + (edge === 'left' ? -1 : 1)]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: '中文正文' }],
+    });
+  });
+for (const edge of ['left', 'right'] as const)
+  test(`real image selection: Enter at the ${edge} side inserts a paragraph without replacing the image`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+    const outer = await page.locator('.image-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? outer!.x - 20 : outer!.x + outer!.width + 20,
+      outer!.y + outer!.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('New prose');
+    const result = await doc(page);
+    const at = result.content.findIndex((n: any) => n.type === 'image');
+    expect(at).toBeGreaterThan(0);
+    expect(result.content[at + (edge === 'left' ? -1 : 1)]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: 'New prose' }],
+    });
+  });
+
+for (const [type, markdown] of cursorBlocks)
+  test(`${type}: clicking the gap above the next paragraph creates no block cursor`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + markdown + '\n\n下一行正文');
+    const before = await doc(page);
+    const block = await page.locator(blockSelectors[type]).boundingBox();
+    const next = await page.locator('.article-editor > p').last().boundingBox();
+    expect(next!.y).toBeGreaterThan(block!.y + block!.height);
+    await page.mouse.click(
+      block!.x + block!.width / 2,
+      (block!.y + block!.height + next!.y) / 2,
+    );
+    expect(['blockCursor', 'imageSide', 'gapcursor']).not.toContain(
+      (await selection(page)).type,
+    );
+    await expect(page.locator('.ProseMirror-gapcursor')).toHaveCount(0);
+    await expect(page.locator('.block-insertion-hit')).toHaveCount(0);
+    expect(await doc(page)).toEqual(before);
+  });
+for (const [first, second] of [
+  ['codeBlock', 'image'],
+  ['image', 'table'],
+  ['table', 'codeBlock'],
+] as const)
+  test(`${first} then ${second}: clicking the vertical gap creates no extra cursor`, async ({
+    page,
+  }) => {
+    await ready(
+      page,
+      '前文\n\n' +
+        blocks.find(([type]) => type === first)![1] +
+        '\n\n' +
+        blocks.find(([type]) => type === second)![1] +
+        '\n\n后文',
+    );
+    const before = await doc(page);
+    const a = await page.locator(blockSelectors[first]).boundingBox();
+    const b = await page.locator(blockSelectors[second]).boundingBox();
+    await page.mouse.click(a!.x + a!.width / 2, (a!.y + a!.height + b!.y) / 2);
+    expect(['blockCursor', 'imageSide', 'gapcursor']).not.toContain(
+      (await selection(page)).type,
+    );
+    await expect(page.locator('.ProseMirror-gapcursor')).toHaveCount(0);
+    expect(await doc(page)).toEqual(before);
+  });
+for (const edge of ['left', 'right'] as const)
+  test(`real image selection: pasting at the ${edge} side preserves the picture`, async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+    const outer = await page.locator('.image-node').boundingBox();
+    await page.mouse.click(
+      edge === 'left' ? outer!.x - 20 : outer!.x + outer!.width + 20,
+      outer!.y + outer!.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge });
+    await page.evaluate(() => navigator.clipboard.writeText('粘贴正文'));
+    await page.keyboard.press('ControlOrMeta+v');
+    const result = await doc(page);
+    const at = result.content.findIndex((n: any) => n.type === 'image');
+    expect(at).toBeGreaterThan(0);
+    expect(result.content[at + (edge === 'left' ? -1 : 1)]).toMatchObject({
+      type: 'paragraph',
+      content: [{ text: '粘贴正文' }],
+    });
+    expect(result.content[0].content[0].text).toBe('前文');
+    expect(result.content.at(-1).content[0].text).toBe('后文');
+  });
+test('Markdown paste at the image right side preserves the image before the pasted blocks', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await ready(page, '前文\n\n' + smallImage + '\n\n后文');
+  const outer = await page.locator('.image-node').boundingBox();
+  await page.mouse.click(
+    outer!.x + outer!.width + 20,
+    outer!.y + outer!.height / 2,
+  );
+  await page.evaluate(() =>
+    navigator.clipboard.writeText('## 粘贴标题\n\n正文'),
+  );
+  await page.keyboard.press('ControlOrMeta+v');
+  const result = await doc(page);
+  const at = result.content.findIndex((n: any) => n.type === 'image');
+  expect(at).toBeGreaterThan(0);
+  expect(result.content[at + 1]).toMatchObject({
+    type: 'heading',
+    content: [{ text: '粘贴标题' }],
+  });
+  expect(result.content[at + 2]).toMatchObject({
+    type: 'paragraph',
+    content: [{ text: '正文' }],
   });
 });

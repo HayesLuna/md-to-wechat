@@ -119,6 +119,7 @@ export function EditorPane({
   const extensions = useMemo(
     () => [
       MarkdownStarterKit.configure({
+        gapcursor: false,
         paragraph: false,
         heading: false,
         codeBlock: false,
