@@ -35,6 +35,7 @@ import {
   normalizePastedTableHTML,
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
+import { BlockBoundaries } from './blockBoundaries';
 import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
 const HighlightMarkdown = Markdown.extend({
@@ -153,6 +154,7 @@ export function EditorPane({
       TaskList,
       StructuredTaskItem.configure({ nested: true }),
       EditingRules,
+      BlockBoundaries,
     ],
     [],
   );

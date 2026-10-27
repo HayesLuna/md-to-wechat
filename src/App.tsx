@@ -61,6 +61,7 @@ import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument } from './EditorPane';
 import { flushEditorMarkdown } from './editorMarkdown';
+import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
 import { Dialog } from './Dialog';
@@ -786,6 +787,7 @@ export default function App() {
       return;
     }
     if (next === mode) return;
+    if (next === 'source' && editor) clearEmptyBlockParagraph(editor);
     readCurrent();
     if (next === 'wysiwyg' && editor)
       replaceDocument(editor, current.current.markdown);

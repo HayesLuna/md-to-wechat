@@ -2280,3 +2280,32 @@ button.primary:hover {
 .code-theme-dark[data-language='json'] .hljs-punctuation {
   color: #8b949e;
 }
+
+/* Clickable block boundaries take no space and never enter saved content. */
+.article-editor .block-insertion-point {
+  display: block;
+  position: relative;
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+.article-editor .block-insertion-hit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  height: 18px;
+  cursor: text;
+  z-index: 2;
+}
+.article-editor .ProseMirror-gapcursor::after {
+  width: 1px;
+  height: 18px;
+  top: -20px;
+  border: 0;
+  background: currentColor;
+}
+.article-editor .ProseMirror-gapcursor {
+  width: 1px;
+  height: 18px;
+}
