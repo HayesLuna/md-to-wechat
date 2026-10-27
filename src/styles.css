@@ -519,6 +519,7 @@ button.primary:hover {
   border: 0;
   background: transparent;
   color: #7b808b;
+  caret-color: currentColor;
   font:
     11px Menlo,
     Consolas,
@@ -2311,24 +2312,6 @@ button.primary:hover {
   top: 0;
 }
 
-.article-editor.custom-text-cursor:not(.cursor-composing),
-.article-editor.custom-text-cursor:not(.cursor-composing) * {
-  caret-color: transparent;
-}
-.article-editor.custom-text-cursor:not(.cursor-composing) :is(input, textarea) {
-  caret-color: auto;
-}
-.editor-text-cursor {
-  position: fixed;
-  width: 2px;
-  background: #171717;
-  pointer-events: none;
-  z-index: 20;
-  animation: editor-cursor-blink 1.1s steps(2, start) infinite;
-}
-.editor-text-cursor[hidden] {
-  display: none;
-}
 @keyframes editor-cursor-blink {
   to {
     visibility: hidden;

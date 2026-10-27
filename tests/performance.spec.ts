@@ -556,3 +556,36 @@ test('long articles list current local images when exporting without a preview',
   await dialog.getByRole('button', { name: '下载', exact: true }).click();
   expect((await imageDownload).suggestedFilename()).toBe('实际图片.png');
 });
+
+test('typing and selection changes do not measure geometry to paint a text caret', async ({page}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    (window as any).__mojian.setMarkdown('正文段落。'.repeat(1000));
+    e.commands.setTextSelection(1);
+    e.view.focus();
+    const view = e.view;
+    const index = view.state.plugins.filter((p:any) => p.spec.view).findIndex((p:any) => p.key.startsWith('blockBoundaries'));
+    const pv = view.pluginViews[index];
+    const update = pv.update;
+    const coord = view.coordsAtPos.bind(view);
+    const calls = (window as any).__textCaretWork = {updates:0,geometry:0};
+    let active = false;
+    pv.update = (...args:any[]) => {
+      calls.updates++;
+      active=true;
+      try {return update(...args);} finally {active=false;}
+    };
+    view.coordsAtPos = (...args:any[]) => {
+      if(active)calls.geometry++;
+      return coord(...args);
+    };
+  });
+  await page.keyboard.type('typing at normal speed', {delay:10});
+  await page.keyboard.press('ArrowLeft');
+  const calls = await page.evaluate(() => (window as any).__textCaretWork);
+  expect(calls.updates).toBeGreaterThan(10);
+  expect(calls.geometry).toBe(0);
+  await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
+});

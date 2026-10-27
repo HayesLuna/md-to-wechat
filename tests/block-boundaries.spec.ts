@@ -973,60 +973,34 @@ test('wrapped text: side clicks follow the clicked line instead of the paragraph
   for (const y of [box!.y + lineHeight / 2, box!.y + lineHeight * 1.5]) {
     await page.mouse.click(surface!.x + surface!.width - 3, y);
     anchors.push((await selection(page)).anchor);
-    const caret = await page.locator('.editor-text-cursor').boundingBox();
-    expect(caret).toBeTruthy();
-    expect(Math.abs(caret!.y + caret!.height / 2 - y)).toBeLessThan(
-      lineHeight / 2,
+    await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
+    await expect(page.locator('.article-editor')).toHaveCSS(
+      'caret-color',
+      'rgb(37, 37, 40)',
     );
   }
   expect(anchors[1]).toBeGreaterThan(anchors[0]);
   expect(anchors[1]).toBeLessThan((await paragraph.innerText()).length);
 });
 
-test('unified caret: 2px style, selection and focus hiding, IME fallback and mobile layout', async ({
+test('native text caret stays visible during input and composition, while side carets stay 2px', async ({
   page,
 }) => {
   await ready(page, '正文内容\n\n---\n\n后文');
   const editor = page.locator('.article-editor');
   await editor.locator('p').first().click();
-  const caret = page.locator('.editor-text-cursor');
-  await expect(caret).not.toHaveAttribute('hidden');
-  await expect(caret).toHaveCSS('width', '2px');
-  await expect(caret).toHaveCSS('background-color', 'rgb(23, 23, 23)');
-  await page.keyboard.press('Shift+ArrowLeft');
-  await expect(caret).toHaveAttribute('hidden');
-  await expect
-    .poll(async () => {
-      const s = await selection(page);
-      return s.anchor !== s.head;
-    })
-    .toBe(true);
-  await page.keyboard.press('ArrowRight');
-  await expect(caret).not.toHaveAttribute('hidden');
+  await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
+  await expect(editor).not.toHaveClass(/custom-text-cursor/);
+  await expect(editor).toHaveCSS('caret-color', 'rgb(37, 37, 40)');
   await editor.dispatchEvent('compositionstart', { data: '' });
-  await expect(caret).toHaveAttribute('hidden');
   await expect(editor).toHaveCSS('caret-color', 'rgb(37, 37, 40)');
   await editor.dispatchEvent('compositionend', { data: '' });
-  await expect(caret).not.toHaveAttribute('hidden');
-  await page
-    .getByRole('button', { name: '导出 Markdown', exact: true })
-    .focus();
-  await expect(caret).toHaveAttribute('hidden');
   await clickSide(page, 1);
-  const gap = page.locator('.ProseMirror-gapcursor');
-  const style = await gap.evaluate((el) => {
+  const style = await page.locator('.ProseMirror-gapcursor').evaluate((el) => {
     const css = getComputedStyle(el, '::after');
-    return {
-      width: css.width,
-      color: css.backgroundColor,
-      animation: css.animationName,
-    };
+    return { width: css.width, color: css.backgroundColor };
   });
-  expect(style).toEqual({
-    width: '2px',
-    color: 'rgb(23, 23, 23)',
-    animation: 'editor-cursor-blink',
-  });
+  expect(style).toEqual({ width: '2px', color: 'rgb(23, 23, 23)' });
   await page.setViewportSize({ width: 390, height: 844 });
   const box = await editor.locator('p').last().boundingBox();
   const surface = await page.locator('.writing-scroll').boundingBox();
@@ -1034,41 +1008,53 @@ test('unified caret: 2px style, selection and focus hiding, IME fallback and mob
     surface!.x + surface!.width - 2,
     box!.y + box!.height / 2,
   );
-  await expect(caret).not.toHaveAttribute('hidden');
+  expect((await selection(page)).type).toBe('text');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveCSS('caret-color', 'rgb(37, 37, 40)');
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({ path: '/tmp/mojian-unified-caret-mobile.png' });
+  await page.screenshot({
+    path: '/tmp/mojian-native-caret-mobile.png',
+    caret: 'initial',
+  });
 });
 
-test('code editing keeps the thick caret clipped and header inputs retain their native caret', async ({
+test('code editing retains a contrasting native caret without a floating overlay', async ({
   page,
 }) => {
   await ready(
     page,
-    '```js\n' + 'const longName = "' + 'x'.repeat(200) + '";\n```',
+    '\`\`\`js\nconst longName = "' + 'x'.repeat(200) + '";\n\`\`\`',
   );
   const code = page.locator('.code-node pre');
   await code.click({ position: { x: 40, y: 25 } });
-  const caret = page.locator('.editor-text-cursor');
-  await expect(caret).not.toHaveAttribute('hidden');
-  await expect(caret).toHaveCSS('width', '2px');
-  const position = await selection(page);
-  await code.evaluate((el) => {
-    el.scrollLeft = el.scrollWidth;
-  });
-  await expect(caret).toHaveAttribute('hidden');
-  await code.evaluate((el) => {
-    el.scrollLeft = 0;
-  });
-  await expect(caret).not.toHaveAttribute('hidden');
-  expect(await selection(page)).toEqual(position);
+  await expect(page.locator('.article-editor')).toBeFocused();
+  const styles = await code.evaluate((el) => ({
+    caret: getComputedStyle(el).caretColor,
+    color: getComputedStyle(el).color,
+  }));
+  expect(styles.caret).toBe('rgb(230, 237, 243)');
+  expect(styles.caret).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
+  const before = await doc(page);
+  await page.keyboard.type('native');
+  expect(JSON.stringify(await doc(page))).toContain('native');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await doc(page)).toEqual(before);
   const language = page.getByRole('textbox', { name: '代码语言' });
   await language.focus();
-  await expect(caret).toHaveAttribute('hidden');
-  expect(
-    await language.evaluate((el) => getComputedStyle(el).caretColor),
-  ).not.toBe('rgba(0, 0, 0, 0)');
+  const inputStyles = await language.evaluate((el) => ({
+    caret: getComputedStyle(el).caretColor,
+    color: getComputedStyle(el).color,
+  }));
+  expect(inputStyles.caret).toBe(inputStyles.color);
+  expect(inputStyles.caret).toBe('rgb(201, 209, 217)');
+  await code.click({ position: { x: 40, y: 25 } });
+  await page.screenshot({
+    path: '/tmp/mojian-native-code-caret.png',
+    caret: 'initial',
+  });
 });
