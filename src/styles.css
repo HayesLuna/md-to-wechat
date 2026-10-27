@@ -2010,12 +2010,7 @@ button.primary:hover {
   background: transparent;
   color: #8c929a;
   cursor: grab;
-  opacity: 0;
   touch-action: pan-y;
-}
-.sidebar-drafts .draft-list li:hover .draft-drag-handle,
-.sidebar-drafts .draft-list li.dragging .draft-drag-handle {
-  opacity: 1;
 }
 .sidebar-drafts .draft-drag-handle:active {
   cursor: grabbing;
@@ -2025,7 +2020,6 @@ button.primary:hover {
 }
 @media (hover: none) {
   .sidebar-drafts .draft-drag-handle {
-    opacity: 1;
     width: 28px;
     min-width: 28px;
   }
