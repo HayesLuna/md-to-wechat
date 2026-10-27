@@ -14,8 +14,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
   !!node && blockTypes.has(node.type.name);
-const isCursorBlock = (node: Node | null | undefined) =>
-  isBlock(node) && node!.type.name !== 'horizontalRule';
+const isCursorBlock = isBlock;
 const isBoundary = ($pos: ResolvedPos) =>
   !$pos.parent.inlineContent &&
   (isCursorBlock($pos.nodeBefore) || isCursorBlock($pos.nodeAfter)) &&
@@ -167,7 +166,7 @@ function sideSelection(doc: Node, pos: number, edge: 'left' | 'right') {
     : new BlockCursor($pos, edge);
 }
 
-type BoundaryState = { paragraph: number | null };
+type BoundaryState = { paragraph: number | null; textSide: -1 | 1 };
 const key = new PluginKey<BoundaryState>('blockBoundaries');
 
 function paintedBlock(view: EditorView, pos: number) {
@@ -190,16 +189,19 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   if ($hit.nodeBefore) candidates.add($hit.pos - $hit.nodeBefore.nodeSize);
   for (let depth = $hit.depth; depth > 0; depth--)
     candidates.add($hit.before(depth));
-  for (const pos of candidates) {
+  for (const pos of [...candidates].sort(
+    (a, b) =>
+      Number(isBlock(view.state.doc.nodeAt(b))) -
+      Number(isBlock(view.state.doc.nodeAt(a))),
+  )) {
     const node = view.state.doc.nodeAt(pos);
-    if (!isBlock(node)) continue;
+    if (!isBlock(node) && !node?.isTextblock) continue;
     const rect = paintedBlock(view, pos)?.getBoundingClientRect();
     if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
       continue;
     if (node!.type.name === 'horizontalRule') {
       if (event.clientX >= rect.left && event.clientX <= rect.right)
         return NodeSelection.create(view.state.doc, pos);
-      continue;
     }
     const edge =
       event.clientX < rect.left
@@ -208,6 +210,17 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
           ? 'right'
           : null;
     if (!edge) continue;
+    if (!isBlock(node)) {
+      // Hit-test at the textblock's edge so wrapped paragraphs and list items
+      // keep the clicked visual line, rather than jumping to the block's end.
+      const line = view.posAtCoords({
+        left: edge === 'left' ? rect.left + 1 : rect.right - 1,
+        top: event.clientY,
+      });
+      if (line && view.state.doc.resolve(line.pos).parent.inlineContent)
+        return TextSelection.create(view.state.doc, line.pos);
+      continue;
+    }
     const $pos = view.state.doc.resolve(
       edge === 'left' ? pos : pos + node!.nodeSize,
     );
@@ -278,7 +291,7 @@ export const BlockBoundaries = Extension.create({
       new Plugin<BoundaryState>({
         key,
         state: {
-          init: () => ({ paragraph: null }),
+          init: () => ({ paragraph: null, textSide: 1 }),
           apply(tr, value, oldState) {
             const mapped =
               value.paragraph === null
@@ -299,11 +312,23 @@ export const BlockBoundaries = Extension.create({
               tr.doc.nodeAt(paragraph)?.type.name !== 'paragraph'
             )
               paragraph = null;
-            return { paragraph };
+            return {
+              paragraph,
+              textSide:
+                tr.getMeta(key)?.textSide ??
+                (tr.selectionSet || tr.docChanged ? 1 : value.textSide),
+            };
           },
         },
         view(view) {
           const doc = view.dom.ownerDocument;
+          const textCaret = doc.createElement('div');
+          textCaret.className = 'editor-text-cursor';
+          textCaret.setAttribute('aria-hidden', 'true');
+          textCaret.hidden = true;
+          view.dom.closest('.writing-scroll')?.append(textCaret);
+          view.dom.classList.add('custom-text-cursor');
+          let composing = false;
           let frame = 0;
           let observedBlock: HTMLElement | null = null;
           const observe = (block: HTMLElement | null) => {
@@ -316,18 +341,61 @@ export const BlockBoundaries = Extension.create({
             }
           };
           const update = () => {
+            const selection = view.state.selection;
+            const nativeSelection = doc.getSelection();
+            const textVisible =
+              view.hasFocus() &&
+              view.editable &&
+              !composing &&
+              !view.composing &&
+              selection instanceof TextSelection &&
+              selection.empty &&
+              !!nativeSelection?.isCollapsed;
+            textCaret.hidden = !textVisible;
+            if (textVisible) {
+              const rect = view.coordsAtPos(
+                selection.head,
+                key.getState(view.state)?.textSide ?? 1,
+              );
+              const scroll = view.dom
+                .closest('.writing-scroll')!
+                .getBoundingClientRect();
+              const dom = view.domAtPos(selection.head).node;
+              const element = dom instanceof Element ? dom : dom.parentElement;
+              const inner = element
+                ?.closest('pre, .tableWrapper')
+                ?.getBoundingClientRect();
+              const top = Math.max(scroll.top, inner?.top ?? scroll.top);
+              const bottom = Math.min(
+                scroll.bottom,
+                inner?.bottom ?? scroll.bottom,
+              );
+              const left = Math.max(scroll.left, inner?.left ?? scroll.left);
+              const right = Math.min(
+                scroll.right,
+                inner?.right ?? scroll.right,
+              );
+              textCaret.hidden =
+                rect.bottom < top ||
+                rect.top > bottom ||
+                rect.left < left ||
+                rect.left > right;
+              textCaret.style.left = `${rect.left}px`;
+              textCaret.style.top = `${rect.top}px`;
+              textCaret.style.height = `${rect.bottom - rect.top}px`;
+              textCaret.style.clipPath = `inset(${Math.max(0, top - rect.top)}px 0 ${Math.max(0, rect.bottom - bottom)}px 0)`;
+            }
             if (
               !(view.state.selection instanceof GapCursor) &&
               !(view.state.selection instanceof ImageSide)
             ) {
-              observe(null);
+              observe(textVisible ? view.dom : null);
               return;
             }
             const caret = view.dom.querySelector<HTMLElement>(
               '.ProseMirror-gapcursor',
             );
             if (!caret) return;
-            const selection = view.state.selection;
             const lateral =
               selection instanceof ImageSide ||
               (selection instanceof BlockCursor && !!selection.edge);
@@ -369,6 +437,16 @@ export const BlockBoundaries = Extension.create({
             cancelAnimationFrame(frame);
             frame = requestAnimationFrame(update);
           };
+          const compositionStart = () => {
+            composing = true;
+            view.dom.classList.add('cursor-composing');
+            textCaret.hidden = true;
+          };
+          const compositionEnd = () => {
+            composing = false;
+            view.dom.classList.remove('cursor-composing');
+            schedule();
+          };
           const resizeObserver = new ResizeObserver(schedule);
           const activate = (event: MouseEvent) => {
             if (
@@ -393,7 +471,15 @@ export const BlockBoundaries = Extension.create({
             event.preventDefault();
             const scrollTop = surface.scrollTop;
             const scrollLeft = surface.scrollLeft;
-            view.dispatch(view.state.tr.setSelection(selection));
+            const tr = view.state.tr.setSelection(selection);
+            if (selection instanceof TextSelection)
+              tr.setMeta(key, {
+                textSide:
+                  event.clientX > view.coordsAtPos(selection.head).left
+                    ? -1
+                    : 1,
+              });
+            view.dispatch(tr);
             view.focus();
             surface.scrollTop = scrollTop;
             surface.scrollLeft = scrollLeft;
@@ -409,15 +495,33 @@ export const BlockBoundaries = Extension.create({
           doc.addEventListener('pointerdown', pointerDown, true);
           doc.addEventListener('click', touchClick, true);
           doc.addEventListener('scroll', schedule, true);
+          doc.addEventListener('selectionchange', schedule);
+          view.dom.addEventListener('focus', schedule);
+          view.dom.addEventListener('blur', schedule);
+          view.dom.addEventListener('compositionstart', compositionStart);
+          view.dom.addEventListener('compositionend', compositionEnd);
           window.addEventListener('resize', schedule);
           return {
             update,
             destroy() {
               cancelAnimationFrame(frame);
               resizeObserver.disconnect();
+              textCaret.remove();
+              view.dom.classList.remove(
+                'custom-text-cursor',
+                'cursor-composing',
+              );
               doc.removeEventListener('pointerdown', pointerDown, true);
               doc.removeEventListener('click', touchClick, true);
               doc.removeEventListener('scroll', schedule, true);
+              doc.removeEventListener('selectionchange', schedule);
+              view.dom.removeEventListener('focus', schedule);
+              view.dom.removeEventListener('blur', schedule);
+              view.dom.removeEventListener(
+                'compositionstart',
+                compositionStart,
+              );
+              view.dom.removeEventListener('compositionend', compositionEnd);
               window.removeEventListener('resize', schedule);
             },
           };

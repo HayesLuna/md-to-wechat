@@ -7,7 +7,7 @@ const blocks = [
   ['horizontalRule', '---'],
   ['table', '| 标题 |\n| --- |\n| 内容 |'],
 ] as const;
-const cursorBlocks = blocks.filter(([type]) => type !== 'horizontalRule');
+const cursorBlocks = blocks;
 async function ready(page: Page, markdown: string) {
   await page.route('**/boundary.svg', (route) =>
     route.fulfill({
@@ -32,7 +32,7 @@ const selection = (page: Page) =>
 async function clickSide(page: Page, index: number) {
   const target = page
     .locator(
-      '.article-editor .code-node, .article-editor .image-node, .article-editor .tableWrapper',
+      '.article-editor .code-node, .article-editor .image-node, .article-editor .tableWrapper, .article-editor hr',
     )
     .first();
   const box = await target.boundingBox();
@@ -601,30 +601,24 @@ test('the divider row is selectable across its width and height without adding t
   expect(await doc(page)).toEqual(original);
 });
 
-test('divider side whitespace has no custom cursor or line-selection entry', async ({
+test('divider side whitespace places a cursor before or after without selecting the line', async ({
   page,
 }) => {
   await ready(page, '前文\n\n---\n\n后文');
   const original = await doc(page);
-  await expect(page.locator('.block-insertion-hit')).toHaveCount(0);
   const box = await page.locator('.article-editor hr').boundingBox();
   for (const edge of ['left', 'right']) {
-    await page.locator('.article-editor p').first().click();
     await page.mouse.click(
-      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+      edge === 'left' ? box!.x - 80 : box!.x + box!.width + 80,
       box!.y + box!.height / 2,
     );
-    expect((await selection(page)).type).not.toBe('blockCursor');
-    expect((await selection(page)).type).not.toBe('node');
+    expect(await selection(page)).toMatchObject({ type: 'blockCursor', edge });
     await expect(page.locator('.article-editor hr')).not.toHaveClass(
       /ProseMirror-selectednode/,
     );
+    await bottomCaret(page, box!);
     expect(await doc(page)).toEqual(original);
   }
-  await page.locator('.article-editor hr').click();
-  expect(await selection(page)).toMatchObject({ type: 'node' });
-  await page.keyboard.press('Delete');
-  await expect(page.locator('.article-editor hr')).toHaveCount(0);
 });
 
 const smallImage = '![图片](https://example.test/boundary.svg "width=35%")';
@@ -908,4 +902,173 @@ test('Markdown paste at the image right side preserves the image before the past
     type: 'paragraph',
     content: [{ text: '正文' }],
   });
+});
+
+for (const [name, markdown, selector] of [
+  ['paragraph', '正文内容', '.article-editor > p'],
+  ['heading', '## 标题内容', '.article-editor > h2'],
+  ['list', '- 第一项\n- 第二项', '.article-editor li p'],
+  ['quote', '> 引用内容', '.article-editor blockquote p'],
+] as const)
+  for (const edge of ['left', 'right'] as const)
+    test(`${name}: the full ${edge} margin focuses the matching text line`, async ({
+      page,
+    }) => {
+      await ready(page, markdown);
+      const target = page.locator(selector).last();
+      const text = await target.innerText();
+      const box = await target.boundingBox();
+      const surface = await page.locator('.writing-scroll').boundingBox();
+      const before = await doc(page);
+      await page.mouse.click(
+        edge === 'left' ? surface!.x + 3 : surface!.x + surface!.width - 3,
+        box!.y + box!.height / 2,
+      );
+      expect(await doc(page)).toEqual(before);
+      expect((await selection(page)).type).toBe('text');
+      await page.keyboard.insertText('新增');
+      await expect(target).toHaveText(
+        edge === 'left' ? '新增' + text : text + '新增',
+      );
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(await doc(page)).toEqual(before);
+    });
+
+for (const [type, markdown] of blocks)
+  test(`${type}: far left and right margins keep the matching block`, async ({
+    page,
+  }) => {
+    await ready(page, '上一行\n\n' + markdown + '\n\n下一行');
+    const original = await doc(page);
+    const box = await page.locator(blockSelectors[type]).boundingBox();
+    const surface = await page.locator('.writing-scroll').boundingBox();
+    for (const edge of ['left', 'right']) {
+      await page.mouse.click(
+        edge === 'left' ? surface!.x + 3 : surface!.x + surface!.width - 3,
+        box!.y + box!.height / 2,
+      );
+      expect(await selection(page)).toMatchObject({
+        type: type === 'image' ? 'imageSide' : 'blockCursor',
+        edge,
+      });
+      expect(await doc(page)).toEqual(original);
+    }
+    await page.screenshot({
+      path: `/tmp/mojian-unified-${type}.png`,
+      animations: 'disabled',
+    });
+  });
+
+test('wrapped text: side clicks follow the clicked line instead of the paragraph bottom', async ({
+  page,
+}) => {
+  await ready(page, '这是用于验证多行侧边定位的正文。'.repeat(30));
+  const paragraph = page.locator('.article-editor > p');
+  const box = await paragraph.boundingBox();
+  const surface = await page.locator('.writing-scroll').boundingBox();
+  const lineHeight = await paragraph.evaluate((el) =>
+    parseFloat(getComputedStyle(el).lineHeight),
+  );
+  const anchors: number[] = [];
+  for (const y of [box!.y + lineHeight / 2, box!.y + lineHeight * 1.5]) {
+    await page.mouse.click(surface!.x + surface!.width - 3, y);
+    anchors.push((await selection(page)).anchor);
+    const caret = await page.locator('.editor-text-cursor').boundingBox();
+    expect(caret).toBeTruthy();
+    expect(Math.abs(caret!.y + caret!.height / 2 - y)).toBeLessThan(
+      lineHeight / 2,
+    );
+  }
+  expect(anchors[1]).toBeGreaterThan(anchors[0]);
+  expect(anchors[1]).toBeLessThan((await paragraph.innerText()).length);
+});
+
+test('unified caret: 2px style, selection and focus hiding, IME fallback and mobile layout', async ({
+  page,
+}) => {
+  await ready(page, '正文内容\n\n---\n\n后文');
+  const editor = page.locator('.article-editor');
+  await editor.locator('p').first().click();
+  const caret = page.locator('.editor-text-cursor');
+  await expect(caret).not.toHaveAttribute('hidden');
+  await expect(caret).toHaveCSS('width', '2px');
+  await expect(caret).toHaveCSS('background-color', 'rgb(23, 23, 23)');
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(caret).toHaveAttribute('hidden');
+  await expect
+    .poll(async () => {
+      const s = await selection(page);
+      return s.anchor !== s.head;
+    })
+    .toBe(true);
+  await page.keyboard.press('ArrowRight');
+  await expect(caret).not.toHaveAttribute('hidden');
+  await editor.dispatchEvent('compositionstart', { data: '' });
+  await expect(caret).toHaveAttribute('hidden');
+  await expect(editor).toHaveCSS('caret-color', 'rgb(37, 37, 40)');
+  await editor.dispatchEvent('compositionend', { data: '' });
+  await expect(caret).not.toHaveAttribute('hidden');
+  await page
+    .getByRole('button', { name: '导出 Markdown', exact: true })
+    .focus();
+  await expect(caret).toHaveAttribute('hidden');
+  await clickSide(page, 1);
+  const gap = page.locator('.ProseMirror-gapcursor');
+  const style = await gap.evaluate((el) => {
+    const css = getComputedStyle(el, '::after');
+    return {
+      width: css.width,
+      color: css.backgroundColor,
+      animation: css.animationName,
+    };
+  });
+  expect(style).toEqual({
+    width: '2px',
+    color: 'rgb(23, 23, 23)',
+    animation: 'editor-cursor-blink',
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const box = await editor.locator('p').last().boundingBox();
+  const surface = await page.locator('.writing-scroll').boundingBox();
+  await page.mouse.click(
+    surface!.x + surface!.width - 2,
+    box!.y + box!.height / 2,
+  );
+  await expect(caret).not.toHaveAttribute('hidden');
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: '/tmp/mojian-unified-caret-mobile.png' });
+});
+
+test('code editing keeps the thick caret clipped and header inputs retain their native caret', async ({
+  page,
+}) => {
+  await ready(
+    page,
+    '```js\n' + 'const longName = "' + 'x'.repeat(200) + '";\n```',
+  );
+  const code = page.locator('.code-node pre');
+  await code.click({ position: { x: 40, y: 25 } });
+  const caret = page.locator('.editor-text-cursor');
+  await expect(caret).not.toHaveAttribute('hidden');
+  await expect(caret).toHaveCSS('width', '2px');
+  const position = await selection(page);
+  await code.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+  });
+  await expect(caret).toHaveAttribute('hidden');
+  await code.evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await expect(caret).not.toHaveAttribute('hidden');
+  expect(await selection(page)).toEqual(position);
+  const language = page.getByRole('textbox', { name: '代码语言' });
+  await language.focus();
+  await expect(caret).toHaveAttribute('hidden');
+  expect(
+    await language.evaluate((el) => getComputedStyle(el).caretColor),
+  ).not.toBe('rgba(0, 0, 0, 0)');
 });
