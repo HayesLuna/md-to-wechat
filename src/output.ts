@@ -1,18 +1,14 @@
+import type { CodeSource } from './codeOutput';
 import { githubHighlightStyle } from './githubCodeTheme';
-import MarkdownIt from 'markdown-it';
 import { ensureSyntax } from './syntax';
-import { markdownHighlight } from './highlight';
 import DOMPurify from 'dompurify';
 import { acquireImageURL } from './storage';
 import { diagram } from './mermaid';
 import { DEFAULT_SETTINGS, type Settings } from './sample';
-import {
-  codeCardRenderer,
-  addCodeDecorations,
-  type CodeSource,
-} from './codeOutput';
+import { codeCardRenderer, addCodeDecorations } from './codeOutput';
 import { workBudget } from './workBudget';
-import { outputKey, safeURL, widthFromTitle } from './outputUtils';
+import { outputKey } from './outputUtils';
+import { parseArticleAsync } from './articleParserClient';
 export type Asset = {
   kind: 'image' | 'diagram';
   label: string;
@@ -23,6 +19,8 @@ export type Asset = {
 export type Output = {
   html: string;
   previewHTML: string;
+  previewShell: string;
+  previewBlocks: string[];
   previewReady: boolean;
   text: string;
   assets: Asset[];
@@ -346,56 +344,24 @@ export async function renderArticle(
   };
   try {
     signal?.throwIfAborted();
-    const codeSources: CodeSource[] = [];
-    const assets: Asset[] = [];
-    const errors: string[] = [];
-    const sources: string[] = [];
-    const images: { src: string; alt: string; width: number }[] = [];
-    const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
-    md.use(markdownHighlight);
-    md.validateLink = (url) => safeURL(url) || url.startsWith('local-image:');
-    md.renderer.rules.image = (tokens, i) => {
-      const t = tokens[i];
-      const item = {
-        src: t.attrGet('src') || '',
-        alt: t.content,
-        width: widthFromTitle(t.attrGet('title') || ''),
-      };
-      images.push(item);
-      return `<span data-image-index="${images.length - 1}"></span>`;
-    };
-    md.renderer.rules.fence = (tokens, i) => {
-      const t = tokens[i];
-      const lang = t.info.trim().split(/\s+/)[0].toLowerCase();
-      if (lang === 'mermaid') {
-        sources.push(t.content);
-        return `<section data-diagram-index="${sources.length - 1}"></section>`;
-      }
-      const code = escapeHTML(t.content);
-      codeSources.push({ text: t.content, language: lang });
-      return `<pre data-code-index="${codeSources.length - 1}"><code>${code}</code></pre>`;
-    };
-    md.renderer.rules.code_block = md.renderer.rules.fence;
-    // Task markers operate on list token content, never on the Markdown document.
-    const original = md.renderer.rules.inline;
-    md.renderer.rules.inline = (tokens, i, opts, env, self) => {
-      const t = tokens[i];
-      if (t.children?.[0]?.type === 'text') {
-        const m = /^\[([ xX])\] /.exec(t.children[0].content);
-        if (m)
-          t.children[0].content =
-            (m[1] === ' ' ? '☐ ' : '☑ ') +
-            t.children[0].content.slice(m[0].length);
-      }
-      return original
-        ? original(tokens, i, opts, env, self)
-        : self.renderInline(t.children || [], opts, env);
-    };
+    const { blocks, codeSources, sources, images } = await parseArticleAsync(
+      markdown,
+      signal,
+    );
+    const assets: Asset[] = [],
+      errors: string[] = [];
     const root = document.createElement('section');
-    root.innerHTML = DOMPurify.sanitize(md.render(markdown), {
-      ADD_ATTR: ['data-image-index', 'data-diagram-index'],
-    });
-    const clipboard = root.cloneNode(true) as HTMLElement;
+    const clipboard = document.createElement('section');
+    for (const block of blocks) {
+      const pause = checkpoint();
+      if (pause) await pause;
+      const fragment = DOMPurify.sanitize(block, {
+        ADD_ATTR: ['data-image-index', 'data-diagram-index'],
+        RETURN_DOM_FRAGMENT: true,
+      });
+      clipboard.append(fragment.cloneNode(true));
+      root.append(fragment);
+    }
     await Promise.all(
       images.map(async (img, i) => {
         const previewTarget = root.querySelector(`[data-image-index="${i}"]`)!;
@@ -539,7 +505,25 @@ export async function renderArticle(
     if (pause) await pause;
     addCodeDecorations(root);
     addCodeDecorations(clean);
-    const html = clean.innerHTML;
+    const serializeBlocks = async (element: Element) => {
+      const blocks: string[] = [];
+      for (const child of element.childNodes) {
+        const pause = checkpoint();
+        if (pause) await pause;
+        blocks.push(
+          child instanceof Element
+            ? child.outerHTML
+            : escapeHTML(child.textContent || ''),
+        );
+      }
+      return blocks;
+    };
+    const clipboardBlocks = await serializeBlocks(cleanArticle);
+    const clipboardShell = cleanArticle.cloneNode(false) as Element;
+    const html = clipboardShell.outerHTML.replace(
+      '</section>',
+      clipboardBlocks.join('') + '</section>',
+    );
     // Preview affordances are applied after the clipboard document is finalized.
     for (const image of root.querySelectorAll('img')) {
       const pause = checkpoint();
@@ -560,9 +544,19 @@ export async function renderArticle(
         graph.setAttribute('aria-label', '预览 Mermaid 图表');
         graph.title = '点击放大预览';
       }
+    const previewBlocks = await serializeBlocks(root);
+    const previewShell = (root.cloneNode(false) as Element).outerHTML;
+    let previewHTML: string | undefined;
     const result: Output = {
       html,
-      previewHTML: root.outerHTML,
+      get previewHTML() {
+        return (previewHTML ??= previewShell.replace(
+          '</section>',
+          previewBlocks.join('') + '</section>',
+        ));
+      },
+      previewShell,
+      previewBlocks,
       previewReady: options.diagrams !== false || sources.length === 0,
       text: readableText(clean, codeSources),
       assets,

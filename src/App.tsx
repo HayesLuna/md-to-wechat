@@ -33,17 +33,14 @@ import {
   RotateCcw,
   HelpCircle,
 } from 'lucide-react';
-import { SAMPLE, DEFAULT_SETTINGS, type Settings } from './sample';
+import { SAMPLE } from './sample';
 import { buildInfo, versionLabel, buildTime } from './buildInfo';
 import {
-  DraftConflictError,
-  beginImageSession,
   loadDraftLibrary,
   loadDraft,
   summarizeDraft,
   type DraftSummary,
   newDraft,
-  draftTitle,
   saveDraft,
   removeDraft,
   saveDraftOrder,
@@ -53,14 +50,16 @@ import {
   downloadImage,
   imageExists,
 } from './storage';
-import type { Output, Asset } from './output';
+import type { Asset } from './output';
+import { useArticleOutput } from './useArticleOutput';
 import { outputKey, safeURL } from './outputUtils';
 import { headings } from './headings';
 import { copyRich, copyText } from './clipboard';
 import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
+import { ArticlePreview } from './ArticlePreview';
 import { EditorPane, replaceDocument } from './EditorPane';
-import { flushEditorMarkdown } from './editorMarkdown';
+import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
@@ -83,20 +82,6 @@ type Modal =
   | { type: 'link' | 'image' | 'assets' | 'downloads' | 'help' }
   | { type: 'confirm'; title: string; message: string; action: () => void }
   | { type: 'rename'; draft: DraftSummary };
-type SaveStatus = 'saving' | 'saved' | 'failed';
-function validSettings(s?: Settings): Settings {
-  if (!s) return DEFAULT_SETTINGS;
-  return {
-    ...DEFAULT_SETTINGS,
-    theme: ['default', 'simple', 'elegant'].includes(s.theme)
-      ? s.theme
-      : 'default',
-    color: /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : DEFAULT_SETTINGS.color,
-    fontSize: Math.max(14, Math.min(20, s.fontSize || 16)),
-    lineHeight: Math.max(1.5, Math.min(2.3, s.lineHeight || 1.85)),
-    codeTheme: s.codeTheme === 'dark' ? 'dark' : 'light',
-  };
-}
 function placeDraft(
   items: DraftSummary[],
   id: string,
@@ -147,10 +132,6 @@ export default function App() {
   const [activeHeading, setActiveHeading] = useState(0);
   const [query, setQuery] = useState('');
   const [renameTitle, setRenameTitle] = useState('');
-  const [switching, setSwitching] = useState(false);
-  const savedVersions = useRef(new Map<string, number>());
-  const activeDraft = useRef<Draft | null>(null);
-  const switchingRef = useRef(false);
   useEffect(() => {
     const screen = window.matchMedia('(max-width:800px)');
     const change = (e: MediaQueryListEvent) => {
@@ -159,33 +140,66 @@ export default function App() {
     screen.addEventListener('change', change);
     return () => screen.removeEventListener('change', change);
   }, []);
-  const [ready, setReady] = useState(false);
-  const [markdown, setMarkdown] = useState('');
-  const [contentRevision, setContentRevision] = useState(0);
-  const [initial, setInitial] = useState('');
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [editor, setEditor] = useState<Editor | null>(null);
   const latestEditor = useRef(editor);
   latestEditor.current = editor;
+  const [notice, setNotice] = useState('');
+  const notify = useCallback((s: string) => setNotice(s), []);
+  const {
+    ready,
+    markdown,
+    contentRevision,
+    initial,
+    settings,
+    switching,
+    setSwitching,
+    savedVersions,
+    activeDraft,
+    switchingRef,
+    saveStatus,
+    saveTime,
+    version,
+    current,
+    statusRef,
+    setSaveTime,
+    changed,
+    markDirty,
+    readCurrent,
+    changeSettings,
+    saveNow,
+    activate,
+  } = useDraftSession({ editor: latestEditor, notify, setDrafts });
   const [mode, setMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
   const [preview, setPreview] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
   const [context, setContext] = useState<{ x: number; y: number } | null>(null);
-  const [notice, setNotice] = useState('');
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saving');
-  const outputRef = useRef<Output | null>(null);
-  const outputAbort = useRef<AbortController | null>(null);
-  const [output, setOutput] = useState<Output | null>(null);
   const [downloadAssets, setDownloadAssets] = useState<Asset[]>([]);
   const downloadRequest = useRef(0);
   const [requestedOutput, setRequestedOutput] = useState<{
     key: string;
     attempt: number;
   } | null>(null);
-  const [preparing, setPreparing] = useState(true);
-  const [renderError, setRenderError] = useState('');
+  const {
+    output,
+    preparing,
+    renderError,
+    invalidate: invalidateOutput,
+    reset: resetOutput,
+  } = useArticleOutput({
+    markdown,
+    settings,
+    ready,
+    preview,
+    contentRevision,
+    requestedOutput,
+    version,
+  });
+  const editorDirty = () => {
+    markDirty();
+    invalidateOutput();
+  };
   const [selectionState, setSelectionState] = useState('');
   const updateSelection = useCallback(() => {
     const selected = latestEditor.current;
@@ -208,13 +222,6 @@ export default function App() {
   const [dialogError, setDialogError] = useState('');
   const [processing, setProcessing] = useState(false);
   const [copying, setCopying] = useState(false);
-  const [saveTime, setSaveTime] = useState(0);
-  const current = useRef({ markdown, settings });
-  current.current = { markdown, settings };
-  const version = useRef(Date.now());
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
-  const statusRef = useRef(saveStatus);
-  statusRef.current = saveStatus;
   const target = useRef<ReturnType<typeof captureTarget> | null>(null);
   const imageRequest = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -228,144 +235,6 @@ export default function App() {
     page: number;
   } | null>(null);
   const contextElement = useRef<HTMLDivElement>(null);
-  const notify = useCallback((s: string) => setNotice(s), []);
-  useEffect(() => {
-    let active = true;
-    let releaseImages: (() => void) | undefined;
-    beginImageSession()
-      .then((release) => {
-        releaseImages = release;
-        if (!active) {
-          release();
-          return null;
-        }
-        return loadDraftLibrary();
-      })
-      .then(async (library) => {
-        if (!active || !library) return;
-        library.drafts.forEach((d) =>
-          savedVersions.current.set(d.id, d.version),
-        );
-        const selected =
-          library.drafts.find((d) => d.id === library.activeId) ||
-          library.drafts[0];
-        const d =
-          (selected && (await loadDraft(selected.id))) ||
-          newDraft(SAMPLE, DEFAULT_SETTINGS);
-        if (!active) return;
-        activeDraft.current = d;
-        setDrafts(library.drafts.length ? library.drafts : [summarizeDraft(d)]);
-        setMarkdown(d.markdown);
-        setInitial(d.markdown);
-        setSettings(validSettings(d.settings));
-        version.current = Math.max(Date.now(), d.version + 1);
-        setSaveTime(d.savedAt);
-        setReady(true);
-      })
-      .catch(() => {
-        if (active) {
-          const d = newDraft(SAMPLE, DEFAULT_SETTINGS);
-          activeDraft.current = d;
-          setDrafts([summarizeDraft(d)]);
-          setMarkdown(SAMPLE);
-          setInitial(SAMPLE);
-          setReady(true);
-          notify('无法读取本地存储；请保留内容并导出 Markdown。');
-        }
-      });
-    return () => {
-      active = false;
-      releaseImages?.();
-    };
-  }, [notify]);
-  const changed = (text: string) => {
-    current.current = { ...current.current, markdown: text };
-    version.current++;
-    statusRef.current = 'saving';
-    setMarkdown(text);
-    setContentRevision((n) => n + 1);
-    setSaveStatus('saving');
-  };
-  const editorDirty = () => {
-    version.current++;
-    statusRef.current = 'saving';
-    outputAbort.current?.abort();
-    setPreparing(true);
-    setSaveStatus('saving');
-  };
-  const readCurrent = useCallback(() => {
-    flushEditorMarkdown(latestEditor.current);
-    return current.current;
-  }, []);
-  const changeSettings = (s: Settings) => {
-    if (
-      switchingRef.current ||
-      outputKey('', s) === outputKey('', current.current.settings)
-    )
-      return;
-    current.current = { ...current.current, settings: s };
-    version.current++;
-    setSettings(s);
-    setSaveStatus('saving');
-  };
-  const saveNow = useCallback(
-    (manual = false) => {
-      if (!activeDraft.current) return Promise.resolve();
-      const snapshot = readCurrent();
-      const v = version.current;
-      const draft = {
-        ...activeDraft.current,
-        ...snapshot,
-        title: activeDraft.current.customTitle
-          ? activeDraft.current.title
-          : draftTitle(snapshot.markdown),
-        version: v,
-        savedAt: Date.now(),
-      };
-      setSaveStatus('saving');
-      const pending = saveQueue.current
-        .catch(() => {})
-        .then(async () => {
-          await saveDraft(draft, savedVersions.current.get(draft.id));
-          savedVersions.current.set(draft.id, draft.version);
-          if (activeDraft.current?.id === draft.id) activeDraft.current = draft;
-        });
-      saveQueue.current = pending;
-      pending
-        .then(() => {
-          setDrafts((items) =>
-            items.map((item) =>
-              item.id === draft.id ? summarizeDraft(draft) : item,
-            ),
-          );
-          if (activeDraft.current?.id === draft.id && v === version.current) {
-            activeDraft.current = draft;
-            setSaveStatus('saved');
-            setSaveTime(draft.savedAt);
-            if (manual) notify('草稿已保存到当前浏览器');
-          }
-        })
-        .catch((error) => {
-          if (activeDraft.current?.id === draft.id && v === version.current) {
-            setSaveStatus('failed');
-            notify(
-              error instanceof DraftConflictError
-                ? error.message
-                : '保存失败：浏览器存储不可用或空间不足。正文仍在，请重试或导出。',
-            );
-          }
-        });
-      return pending;
-    },
-    [notify, readCurrent],
-  );
-  useEffect(() => {
-    if (!ready) return;
-    const timer = setTimeout(() => {
-      if (!switchingRef.current) void saveNow().catch(() => {});
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [markdown, settings, ready, saveNow, switching]);
   useEffect(() => {
     const listener = (e: Event) => notify((e as CustomEvent).detail);
     window.addEventListener('mojian-notice', listener);
@@ -376,74 +245,6 @@ export default function App() {
     const timer = setTimeout(() => setNotice(''), 6500);
     return () => clearTimeout(timer);
   }, [notice]);
-  useEffect(() => {
-    if (!ready) return;
-    const key = outputKey(markdown, settings);
-    const demanded = preview || requestedOutput?.key === key;
-    if (
-      outputRef.current?.key === key &&
-      (!demanded || outputRef.current.previewReady)
-    ) {
-      setPreparing(false);
-      setRenderError('');
-      return;
-    }
-    if (!demanded && markdown.length > 50_000) {
-      // Free a stale snapshot while long articles wait for explicit preview/copy.
-      outputRef.current?.dispose();
-      outputRef.current = null;
-      setOutput(null);
-      setPreparing(true);
-      return;
-    }
-    let active = true;
-    const controller = new AbortController();
-    outputAbort.current = controller;
-    const renderVersion = version.current;
-    setPreparing(true);
-    setRenderError('');
-    const timer = setTimeout(
-      () => {
-        import('./output')
-          .then(({ renderArticle }) =>
-            renderArticle(markdown, settings, controller.signal, {
-              diagrams: demanded,
-            }),
-          )
-          .then((result) => {
-            if (
-              active &&
-              !controller.signal.aborted &&
-              renderVersion === version.current
-            ) {
-              outputRef.current?.dispose();
-              outputRef.current = result;
-              setOutput(result);
-              setPreparing(false);
-            } else result.dispose();
-          })
-          .catch((e) => {
-            if (active && !controller.signal.aborted) {
-              setPreparing(false);
-              setRenderError('排版准备失败，请重试：' + e.message);
-            }
-          });
-      },
-      preview ? 250 : 600,
-    );
-    return () => {
-      active = false;
-      controller.abort();
-      if (outputAbort.current === controller) outputAbort.current = null;
-      clearTimeout(timer);
-    };
-  }, [markdown, settings, ready, preview, contentRevision, requestedOutput]);
-  useEffect(
-    () => () => {
-      outputRef.current?.dispose();
-    },
-    [],
-  );
   const closeModal = () => {
     downloadRequest.current++;
     imageRequest.current++;
@@ -581,23 +382,10 @@ export default function App() {
     });
   }, [editor, output, readCurrent]);
   const activateDraft = (d: Draft) => {
-    activeDraft.current = d;
-    version.current = Math.max(version.current + 1, d.version);
-    current.current = {
-      markdown: d.markdown,
-      settings: validSettings(d.settings),
-    };
-    setMarkdown(d.markdown);
-    setSettings(current.current.settings);
-    setInitial(d.markdown);
-    setSaveTime(d.savedAt);
-    setSaveStatus('saved');
+    activate(d);
     // Recreate the editor so undo cannot restore content from another article.
     setEditor(null);
-    outputRef.current?.dispose();
-    outputRef.current = null;
-    setOutput(null);
-    setPreparing(true);
+    resetOutput();
     setActiveHeading(0);
     setOutlineQuery('');
     setContext(null);
@@ -1552,45 +1340,10 @@ export default function App() {
               {renderError ? (
                 <p className="output-error">{renderError}</p>
               ) : (
-                <div
-                  className={`preview-paper ${preparing ? 'preparing' : ''}`}
-                  aria-label="公众号排版正文"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      const target = e.target as HTMLElement;
-                      if (target.matches('[data-media-preview]')) {
-                        e.preventDefault();
-                        target.click();
-                      }
-                    }
-                  }}
-                  onClick={(e) => {
-                    const target = (e.target as Element).closest<HTMLElement>(
-                      '[data-media-preview]',
-                    );
-                    if (target) {
-                      e.preventDefault();
-                      if (target instanceof HTMLImageElement) {
-                        setMedia({
-                          kind: 'image',
-                          url: target.src,
-                          title: target.alt || '图片',
-                        });
-                      } else {
-                        const svg = target.querySelector('svg');
-                        if (svg)
-                          setMedia({
-                            kind: 'diagram',
-                            svg: svg.outerHTML,
-                            title: 'Mermaid 图表',
-                          });
-                      }
-                      return;
-                    }
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: output?.previewHTML || '',
-                  }}
+                <ArticlePreview
+                  output={output}
+                  preparing={preparing}
+                  onMedia={setMedia}
                 />
               )}
             </div>

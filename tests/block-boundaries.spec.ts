@@ -1026,10 +1026,7 @@ test('native text caret stays visible during input and composition, while side c
 test('code editing retains a contrasting native caret without a floating overlay', async ({
   page,
 }) => {
-  await ready(
-    page,
-    '\`\`\`js\nconst longName = "' + 'x'.repeat(200) + '";\n\`\`\`',
-  );
+  await ready(page, '```js\nconst longName = "' + 'x'.repeat(200) + '";\n```');
   const code = page.locator('.code-node pre');
   await code.click({ position: { x: 40, y: 25 } });
   await expect(page.locator('.article-editor')).toBeFocused();

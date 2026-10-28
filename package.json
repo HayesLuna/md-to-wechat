@@ -9,9 +9,9 @@
     "build": "tsc -b && vite build",
     "test": "playwright test",
     "preview": "vite preview --host 0.0.0.0",
-    "lint": "eslint src && tsc --noEmit --noUnusedLocals --noUnusedParameters",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.js .prettierrc.json .github/workflows/pages.yml",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.js .prettierrc.json .github/workflows/pages.yml"
+    "lint": "eslint src tests && tsc --noEmit --noUnusedLocals --noUnusedParameters && tsc -p tsconfig.tests.json --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.{ts,tsx}\" tsconfig.tests.json package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.js .prettierrc.json .github/workflows/pages.yml",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"tests/**/*.{ts,tsx}\" tsconfig.tests.json package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.js .prettierrc.json .github/workflows/pages.yml"
   },
   "dependencies": {
     "@tiptap/core": "^3.20.0",

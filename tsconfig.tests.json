@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "/src/*": ["./src/*"],
+      "/tests/*": ["./tests/*"]
+    }
+  },
+  "include": ["src", "tests", "playwright.config.ts", "vite.config.ts"]
+}

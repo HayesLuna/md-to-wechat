@@ -575,15 +575,60 @@ export const EditingRules = Extension.create({
                 indentDecorations,
                 emptyTable: tr.getMeta('mojian-empty-table'),
               };
-            if (tr.docChanged || tr.selectionSet) return { indentDecorations };
+            if (
+              tr.docChanged ||
+              tr.selectionSet ||
+              tr.getMeta('mojian-progress-reset')
+            )
+              return { indentDecorations };
             return previous;
           },
         },
         props: {
           decorations: (state) => key.getState(state)?.indentDecorations,
+          handleDOMEvents: {
+            mousedown(view) {
+              if (key.getState(view.state)?.progress)
+                view.dispatch(
+                  view.state.tr.setMeta('mojian-progress-reset', true),
+                );
+              return false;
+            },
+          },
           handleKeyDown: (view, event) => {
             if (view.composing || event.isComposing || event.keyCode === 229)
               return false;
+            // Native pointer selection can precede PM's selectionchange observer.
+            // Read a collapsed caret before consuming a progressive-select key,
+            // so a fast click + Mod-A cannot reuse the previous block selection.
+            if (
+              (event.ctrlKey || event.metaKey) &&
+              event.key.toLowerCase() === 'a'
+            ) {
+              const native = view.dom.ownerDocument.getSelection();
+              if (
+                native?.isCollapsed &&
+                native.anchorNode &&
+                view.dom.contains(native.anchorNode)
+              ) {
+                const pos = view.posAtDOM(
+                  native.anchorNode,
+                  native.anchorOffset,
+                );
+                if (
+                  pos >= 0 &&
+                  pos <= view.state.doc.content.size &&
+                  view.state.doc.resolve(pos).parent.inlineContent &&
+                  (!view.state.selection.empty ||
+                    view.state.selection.head !== pos)
+                )
+                  view.dispatch(
+                    view.state.tr.setSelection(
+                      TextSelection.create(view.state.doc, pos),
+                    ),
+                  );
+              }
+            }
             const { state } = view;
             const selection = state.selection;
             const $from = selection.$from;

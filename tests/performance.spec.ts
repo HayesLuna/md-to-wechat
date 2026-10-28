@@ -7,6 +7,7 @@ test('dense highlights process only their own inline tokens', () => {
   let processedTokens = 0;
   parser.inline.ruler2.push('measure-highlight-work', (state) => {
     processedTokens += state.tokens.length;
+    return true;
   });
   const html = parser.renderInline('==word== '.repeat(4000));
   expect(html.match(/<mark>/g)).toHaveLength(4000);
@@ -105,7 +106,9 @@ test('URL and image attributes do not consume later highlight delimiters', () =>
   ).toContain('<mark>重点</mark>');
   expect(
     parser.renderInline('[链接 ==标题==](https://example.com) ==正文=='),
-  ).toContain('<a href="https://example.com">链接 <mark>标题</mark></a> <mark>正文</mark>');
+  ).toContain(
+    '<a href="https://example.com">链接 <mark>标题</mark></a> <mark>正文</mark>',
+  );
   expect(parser.renderInline('==前 [链接==](https://example.com)')).toBe(
     '==前 <a href="https://example.com">链接==</a>',
   );
@@ -195,7 +198,7 @@ test('selecting a dense highlight paragraph queries decorations by range', async
   await expect(page.locator('.article-editor mark')).toHaveCount(1000);
   await page.locator('.article-editor mark').first().click();
   const queries = await page.evaluate(async () => {
-    const { DecorationSet } = await import('/node_modules/.vite/deps/@tiptap_pm_view.js');
+    const { DecorationSet } = await import('/tests/editorInspection.ts');
     const original = DecorationSet.prototype.find;
     let calls = 0;
     DecorationSet.prototype.find = function (...args) {
@@ -238,14 +241,20 @@ test('oversized code remains intact while editor and output skip syntax highligh
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.waitForFunction(() => {
     const m = (window as any).__mojian;
-    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
+    return (
+      m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()])
+    );
   });
   expect(await page.evaluate(() => (window as any).__largeCodeCalls)).toEqual({
     editor: 0,
     output: 0,
   });
-  await expect(page.locator('.article-editor .code-node code')).toHaveText(source);
-  await expect(page.locator('.preview-paper [data-code-block] code')).toContainText(source);
+  await expect(page.locator('.article-editor .code-node code')).toHaveText(
+    source,
+  );
+  await expect(
+    page.locator('.preview-paper [data-code-block] code'),
+  ).toContainText(source);
 });
 
 test('editing one code block never detects languages or highlights unchanged blocks', async ({
@@ -497,34 +506,54 @@ test('superseded batched output stops and never produces a mixed snapshot', asyn
   expect(result.html).not.toContain('value_');
 });
 
-
-test('large articles save without background output and prepare the latest version on demand', async ({ page }) => {
+test('large articles save without background output and prepare the latest version on demand', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   const first = '# 大文章\n\n' + '正文内容'.repeat(15_000);
-  await page.evaluate((text) => (window as any).__mojian.setMarkdown(text), first);
+  await page.evaluate(
+    (text) => (window as any).__mojian.setMarkdown(text),
+    first,
+  );
   await expect(page.locator('.save-indicator')).toContainText('已保存');
-  expect(await page.evaluate(() => {
-    const m = (window as any).__mojian;
-    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
-  })).toBe(false);
+  expect(
+    await page.evaluate(() => {
+      const m = (window as any).__mojian;
+      return (
+        m.getOutput()?.key ===
+        JSON.stringify([m.getMarkdown(), m.getSettings()])
+      );
+    }),
+  ).toBe(false);
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await page.waitForFunction(() => {
     const m = (window as any).__mojian;
-    return m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
+    return (
+      m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()])
+    );
   });
-  await page.evaluate((text) => (window as any).__mojian.setMarkdown(text + '\n\n最新修改'), first);
+  await page.evaluate(
+    (text) => (window as any).__mojian.setMarkdown(text + '\n\n最新修改'),
+    first,
+  );
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await expect(page.locator('.preview-paper')).toContainText('最新修改');
   await expect(page.locator('.save-indicator')).toContainText('已保存');
-  expect(await page.evaluate(async () => {
-    const s = await import('/src/storage.ts');
-    const library = await s.loadDraftLibrary();
-    return (await s.loadDraft(library.activeId!))!.markdown.endsWith('最新修改');
-  })).toBe(true);
+  expect(
+    await page.evaluate(async () => {
+      const s = await import('/src/storage.ts');
+      const library = await s.loadDraftLibrary();
+      return (await s.loadDraft(library.activeId!))!.markdown.endsWith(
+        '最新修改',
+      );
+    }),
+  ).toBe(true);
 });
 
-test('long articles list current local images when exporting without a preview', async ({ page }) => {
+test('long articles list current local images when exporting without a preview', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   const src = await page.evaluate(async () => {
@@ -538,15 +567,21 @@ test('long articles list current local images when exporting without a preview',
   });
   await page.evaluate((image) => {
     (window as any).__mojian.setMarkdown(
-      '# 长文\n\n![实际图片](' + image + ')\n\n' +
+      '# 长文\n\n![实际图片](' +
+        image +
+        ')\n\n' +
         '普通正文。'.repeat(10_000) +
         '\n\n```md\n![代码示例](local-image:fake)\n```',
     );
   }, src);
   await expect(page.locator('.save-indicator')).toContainText('已保存');
-  expect(await page.evaluate(() => !!(window as any).__mojian.getOutput())).toBe(false);
+  expect(
+    await page.evaluate(() => !!(window as any).__mojian.getOutput()),
+  ).toBe(false);
   const markdownDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出 Markdown', exact: true }).click();
+  await page
+    .getByRole('button', { name: '导出 Markdown', exact: true })
+    .click();
   await markdownDownload;
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('实际图片');
@@ -557,7 +592,9 @@ test('long articles list current local images when exporting without a preview',
   expect((await imageDownload).suggestedFilename()).toBe('实际图片.png');
 });
 
-test('typing and selection changes do not measure geometry to paint a text caret', async ({page}) => {
+test('typing and selection changes do not measure geometry to paint a text caret', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(() => {
@@ -566,23 +603,32 @@ test('typing and selection changes do not measure geometry to paint a text caret
     e.commands.setTextSelection(1);
     e.view.focus();
     const view = e.view;
-    const index = view.state.plugins.filter((p:any) => p.spec.view).findIndex((p:any) => p.key.startsWith('blockBoundaries'));
+    const index = view.state.plugins
+      .filter((p: any) => p.spec.view)
+      .findIndex((p: any) => p.key.startsWith('blockBoundaries'));
     const pv = view.pluginViews[index];
     const update = pv.update;
     const coord = view.coordsAtPos.bind(view);
-    const calls = (window as any).__textCaretWork = {updates:0,geometry:0};
+    const calls = ((window as any).__textCaretWork = {
+      updates: 0,
+      geometry: 0,
+    });
     let active = false;
-    pv.update = (...args:any[]) => {
+    pv.update = (...args: any[]) => {
       calls.updates++;
-      active=true;
-      try {return update(...args);} finally {active=false;}
+      active = true;
+      try {
+        return update(...args);
+      } finally {
+        active = false;
+      }
     };
-    view.coordsAtPos = (...args:any[]) => {
-      if(active)calls.geometry++;
+    view.coordsAtPos = (...args: any[]) => {
+      if (active) calls.geometry++;
       return coord(...args);
     };
   });
-  await page.keyboard.type('typing at normal speed', {delay:10});
+  await page.keyboard.type('typing at normal speed', { delay: 10 });
   await page.keyboard.press('ArrowLeft');
   const calls = await page.evaluate(() => (window as any).__textCaretWork);
   expect(calls.updates).toBeGreaterThan(10);

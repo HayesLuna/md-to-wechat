@@ -227,8 +227,7 @@ test('an exhausted code viewport hands scrolling to the article and dragging can
     el.scrollTop = el.scrollHeight;
   });
   const start = await page.evaluate(() => {
-    const e = (window as any).__mojian.editor,
-      v = document.querySelector('.code-viewport')!;
+    const e = (window as any).__mojian.editor;
     const lines = e.state.doc.firstChild.textContent.split('\n'),
       offset = lines.slice(0, lines.length - 3).join('\n').length + 1;
     const a = e.view.coordsAtPos(offset + 1),

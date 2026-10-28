@@ -6,7 +6,8 @@ import {
   type PointerEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, Plus, Pencil, Trash2, GripVertical } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
+import { DraftRow, type DraftRowActions } from './DraftRow';
 import { DraftListIcon, OutlineIcon } from './NavigationIcons';
 import { useSidebarResize } from './useSidebarResize';
 import type { DraftSummary } from './storage';
@@ -79,6 +80,7 @@ export function DocumentSidebar({
     scrollTimer?: number;
     onKeyDown?: (event: globalThis.KeyboardEvent) => void;
   } | null>(null);
+  const rowActions = useRef<DraftRowActions | null>(null);
   const dropRef = useRef<{ id: string; side: 'before' | 'after' } | null>(null);
   const clearSettling = () => {
     if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current);
@@ -326,6 +328,18 @@ export function DocumentSidebar({
     updateDrop(session.x, session.y);
     positionDraggedRow();
   };
+  rowActions.current = {
+    pointerDown: handlePointerDown,
+    pointerMove: handlePointerMove,
+    pointerUp: (event, commit) => {
+      if (pointerSession.current?.pointerId === event.pointerId)
+        finishPointer(commit);
+    },
+    cancel: () => finishPointer(false),
+    select: onSelect,
+    rename: onRename,
+    delete: onDelete,
+  };
   const visibleHeadings = useMemo(
     () =>
       headings
@@ -404,74 +418,15 @@ export function DocumentSidebar({
             <div className="sidebar-draft-scroll" ref={scrollArea}>
               <ul className="draft-list">
                 {drafts.map((d) => (
-                  <li
+                  <DraftRow
                     key={d.id}
-                    data-draft-id={d.id}
-                    className={d.id === activeId ? 'current' : ''}
-                  >
-                    <span
-                      className="draft-drag-handle"
-                      aria-hidden="true"
-                      data-disabled={!canReorder ? 'true' : undefined}
-                      title={
-                        normalizedQuery
-                          ? '清空搜索后可调整顺序'
-                          : '拖动调整顺序'
-                      }
-                      onPointerDown={(event) => handlePointerDown(event, d.id)}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={(event) => {
-                        if (
-                          pointerSession.current?.pointerId === event.pointerId
-                        )
-                          finishPointer(true);
-                      }}
-                      onPointerCancel={(event) => {
-                        if (
-                          pointerSession.current?.pointerId === event.pointerId
-                        )
-                          finishPointer(false);
-                      }}
-                      onLostPointerCapture={() => finishPointer(false)}
-                    >
-                      <GripVertical size={14} />
-                    </span>
-                    <button
-                      className="draft-select"
-                      aria-current={d.id === activeId ? 'page' : undefined}
-                      disabled={busy}
-                      onClick={() => onSelect(d)}
-                    >
-                      <strong>{d.title}</strong>
-                      <small>
-                        {new Date(d.savedAt).toLocaleString('zh-CN', {
-                          month: 'numeric',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                        {d.id === activeId ? ' · 当前文章' : ''}
-                      </small>
-                    </button>
-                    <div className="draft-actions">
-                      <button
-                        disabled={busy}
-                        aria-label={`重命名 ${d.title}`}
-                        title="重命名"
-                        onClick={() => onRename(d)}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        disabled={busy}
-                        aria-label={`删除 ${d.title}`}
-                        title="删除"
-                        onClick={() => onDelete(d)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
+                    draft={d}
+                    active={d.id === activeId}
+                    busy={busy}
+                    canReorder={canReorder}
+                    searching={!!normalizedQuery}
+                    actions={rowActions}
+                  />
                 ))}
               </ul>
               {!drafts.length && (
