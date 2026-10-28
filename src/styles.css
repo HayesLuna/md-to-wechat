@@ -821,6 +821,21 @@ button.primary:hover {
   color: #9b9ea5;
   text-align: center;
 }
+.preview-paper [data-code-lines] {
+  counter-reset: code-line;
+}
+.preview-paper [data-code-line]::before {
+  counter-increment: code-line;
+  content: counter(code-line);
+  display: inline-block;
+  width: 3ch;
+  padding-right: 1em;
+  color: #8b949e;
+  text-align: right;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
 .preview-paper {
   background: white;
   margin: 14px auto 28px;
