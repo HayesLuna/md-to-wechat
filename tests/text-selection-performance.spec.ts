@@ -42,9 +42,10 @@ for (const direction of ['down', 'up'] as const)
           ],
           [1],
         );
-      const a = e.view.coordsAtPos(starts[row - 1]),
-        b = e.view.coordsAtPos(starts[row]);
-      return { x: b.left + 45, y: (a.bottom + b.top) / 2 };
+      // Use trailing whitespace: platform font metrics can make the apparent
+      // inter-line midpoint overlap a glyph and start a native drag instead.
+      const end = e.view.coordsAtPos(starts[row + 1] - 1);
+      return { x: end.right + 24, y: (end.top + end.bottom) / 2 };
     });
     const before = await viewport.evaluate((el) => el.scrollTop);
     const box = (await viewport.boundingBox())!;
