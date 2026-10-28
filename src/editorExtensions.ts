@@ -688,14 +688,19 @@ export const EditingRules = Extension.create({
                   break;
                 }
               const table = tableInfo(selection);
-              if (codeDepth)
+              const selectedCode =
+                selection instanceof NodeSelection &&
+                selection.node.type.name === 'codeBlock';
+              if (codeDepth) {
                 selections.push(
                   TextSelection.create(
                     state.doc,
                     $from.start(codeDepth),
                     $from.end(codeDepth),
                   ),
+                  NodeSelection.create(state.doc, $from.before(codeDepth)),
                 );
+              } else if (selectedCode) selections.push(selection);
               else if (table) {
                 let rowDepth = 0;
                 for (let d = $from.depth; d > 0; d--)
@@ -757,7 +762,13 @@ export const EditingRules = Extension.create({
                 selection.node.type.name === 'blockquote'
               )
                 selections.push(selection);
-              for (let d = $from.depth; d > 0; d--)
+              // Code has exactly three stages, including inside a quote/list:
+              // raw source, the fenced block, then the entire article.
+              for (
+                let d = $from.depth;
+                !codeDepth && !selectedCode && d > 0;
+                d--
+              )
                 if ($from.node(d).type.name === 'blockquote') {
                   const quote = NodeSelection.create(
                     state.doc,

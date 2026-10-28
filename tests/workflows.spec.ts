@@ -27,7 +27,7 @@ test('progressive select lists, nested lists, code and normal text; movement res
  await page.keyboard.press('ControlOrMeta+a');s=await selection(page);expect(s.node).toBe('bulletList');expect(s.text).toContain('第二项');
  await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');
  await cursor(page,'内层');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('listItem');
- await cursor(page,'line one');await page.keyboard.press('ControlOrMeta+a');s=await selection(page);expect(s.type).toBe('text');expect(s.text).toBe('line one\n\tline two');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');
+ await cursor(page,'line one');await page.keyboard.press('ControlOrMeta+a');s=await selection(page);expect(s.type).toBe('text');expect(s.text).toBe('line one\n\tline two');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('codeBlock');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');
  await cursor(page,'普通正文');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');
 });
 
@@ -420,9 +420,9 @@ test('progressive quote selection covers full nested blocks, resets on caret edi
  await page.getByRole('button',{name:'Markdown 源码',exact:true}).click();await page.locator('.source-editor').press('ControlOrMeta+a');expect(await page.locator('.source-editor').evaluate(el=>{const input=el as HTMLTextAreaElement;return input.selectionEnd-input.selectionStart;})).toBe((await markdown(page)).length);
 });
 
-test('quoted lists tables and code retain their selection stages before expanding to the quote',async({page})=>{
+test('quoted lists and tables expand to the quote while code selects source then block then article',async({page})=>{
  await ready(page);const all=async()=>{await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('all');};const quote=async()=>{await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('blockquote');};
  await setDoc(page,'> 引用说明\n>\n> - 列表项\n>   - 嵌套项\n> - 第二项\n\n引用外');await cursor(page,'嵌套项');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('listItem');for(let i=0;i<2;i++){await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('bulletList');}await quote();expect((await selection(page)).text).toContain('引用说明');await all();
  await setDoc(page,'> 表格说明\n>\n> | A | B |\n> | --- | --- |\n> | 当前行 | 内容 |\n> | 下一行 | 内容 |\n\n引用外');await cursor(page,'当前行');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('cell');expect((await selection(page)).text).not.toContain('下一行');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).text).toContain('下一行');await quote();await all();
- for(const language of ['java','mermaid']){await setDoc(page,'> 代码说明\n>\n> ```'+language+'\n> flowchart LR\n> A-->B\n> ```\n\n引用外');if(language==='mermaid')await page.getByRole('button',{name:'展示代码',exact:true}).click();await cursor(page,'flowchart LR');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('text');expect((await selection(page)).text).toBe('flowchart LR\nA-->B');await quote();await all();}
+ for(const language of ['java','mermaid']){await setDoc(page,'> 代码说明\n>\n> ```'+language+'\n> flowchart LR\n> A-->B\n> ```\n\n引用外');if(language==='mermaid')await page.getByRole('button',{name:'展示代码',exact:true}).click();await cursor(page,'flowchart LR');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).type).toBe('text');expect((await selection(page)).text).toBe('flowchart LR\nA-->B');await page.keyboard.press('ControlOrMeta+a');expect((await selection(page)).node).toBe('codeBlock');await all();}
 });

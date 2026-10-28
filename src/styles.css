@@ -521,9 +521,14 @@ button.primary:hover {
   color: #7b808b;
   caret-color: currentColor;
   font:
-    11px Menlo,
-    Consolas,
-    monospace;
+    400 13px/20px 'Helvetica Neue',
+    -apple-system,
+    'PingFang SC',
+    'Microsoft YaHei',
+    STHeiti,
+    Helvetica,
+    Arial,
+    sans-serif;
   padding: 4px 0;
 }
 .code-header > div {

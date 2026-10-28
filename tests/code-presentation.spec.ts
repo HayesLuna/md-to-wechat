@@ -260,7 +260,7 @@ test('language dropdown selects common syntax and keeps custom language input', 
   await dropdown.fill('python');
   await dropdown.press('Enter');
   await expect(page.getByRole('combobox', { name: '代码语言' })).toHaveValue(
-    'python',
+    'Python',
   );
   expect(await markdown(page)).toContain('```python');
   await page.getByRole('combobox', { name: '代码语言' }).fill('custom-lang');
@@ -384,10 +384,11 @@ test('focusing language shows searchable choices without an arrow and Escape pre
     page.getByRole('listbox', { name: '代码语言候选' }).getByRole('option'),
   ).toContainText('JavaScript');
   await input.press('Escape');
-  await expect(input).toHaveValue('javascript');
+  await expect(input).toHaveValue('JavaScript');
   expect((await json(page)).content[0].attrs.language).toBe('javascript');
   await input.fill('java');
   await input.press('Enter');
+  await expect(input).toHaveValue('Java');
   expect((await json(page)).content[0].attrs.language).toBe('java');
   await input.fill('py');
   await page
@@ -396,6 +397,7 @@ test('focusing language shows searchable choices without an arrow and Escape pre
     .filter({ hasText: 'Python' })
     .click();
   expect((await json(page)).content[0].attrs.language).toBe('python');
+  await expect(input).toHaveValue('Python');
 });
 
 for (const index of [0, 1, 2])

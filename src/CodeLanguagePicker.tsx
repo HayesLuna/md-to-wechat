@@ -69,6 +69,12 @@ export function CodeLanguagePicker({
     menu = useRef<HTMLDivElement>(null);
   const initialActive = useRef(0);
   const id = useId();
+  const label = language
+    ? (languages.find(([value, , aliases]) =>
+        [value, ...aliases.split(' ')].includes(language.toLowerCase()),
+      )?.[1] ?? language)
+    : '';
+  const display = open && searching ? query : label;
   const options = useMemo(
     () =>
       languages
@@ -171,11 +177,8 @@ export function CodeLanguagePicker({
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
-        size={Math.min(
-          16,
-          Math.max(8, (open && searching ? query : language).length + 1),
-        )}
-        value={open && searching ? query : language}
+        size={Math.min(16, Math.max(8, display.length + 1))}
+        value={display}
         placeholder="纯文本"
         onFocus={(event) => {
           show();
