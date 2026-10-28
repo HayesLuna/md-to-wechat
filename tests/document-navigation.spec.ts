@@ -95,7 +95,6 @@ test('left navigation shares drafts and outline, preserves collapse and supports
   await expect(sidebar).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(sidebar).toBeVisible();
-  await page.screenshot({ path: '/tmp/mojian-navigation-drafts.png' });
 });
 
 for (const width of [390, 546, 586])

@@ -19,6 +19,6 @@ test('first screen and preview', async ({ page }) => {
   await expect(
     page.locator('.mermaid-editor-preview .diagram svg'),
   ).toBeVisible({ timeout: 20000 });
-  await page.screenshot({ path: '/tmp/mojian-desktop.png' });
+
   expect(errors).toEqual([]);
 });

@@ -83,7 +83,7 @@ test('drag order survives refresh; new drafts join the top without switching art
   await drag(page, 'C', 'A');
   await expect.poll(() => titles(page)).toEqual(['B', 'A', 'C']);
   await expect(page.locator('.article-editor h1')).toHaveText('C');
-  await page.screenshot({ path: '/tmp/mojian-draft-reorder-desktop.png' });
+
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
@@ -158,7 +158,7 @@ test('drag preview moves neighboring drafts aside and Escape restores their posi
     )
     .toBeGreaterThan(20);
   await expect.poll(() => titles(page)).toEqual(['D', 'C', 'B', 'A']);
-  await page.screenshot({ path: '/tmp/mojian-draft-make-way.png' });
+
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await expect(page.locator('.draft-list li.dragging')).toHaveCount(0);
@@ -560,13 +560,12 @@ test('touch handle reorders after a long press', async ({ browser }) => {
           ),
       )
       .toBeLessThan(-20);
-    await page.screenshot({ path: '/tmp/mojian-draft-make-way-mobile.png' });
+
     await client.send('Input.dispatchTouchEvent', {
       type: 'touchEnd',
       touchPoints: [],
     });
     await expect.poll(() => titles(page)).toEqual(['B', 'A', 'C']);
-    await page.screenshot({ path: '/tmp/mojian-draft-reorder-mobile.png' });
   } finally {
     await context.close();
   }

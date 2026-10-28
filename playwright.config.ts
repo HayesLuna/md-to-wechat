@@ -38,6 +38,7 @@ export default defineConfig({
     viewport: { width: 1440, height: 1000 },
     launchOptions,
     trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   webServer: {
     command: `npm run dev -- --port ${Number(port)} --strictPort`,

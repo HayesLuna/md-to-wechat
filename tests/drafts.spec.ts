@@ -94,7 +94,7 @@ test('drafts preserve immediate edits, titles, settings and active article acros
   await page.getByRole('textbox', { name: '搜索草稿标题' }).fill('写作');
   await expect(page.locator('.draft-list li')).toHaveCount(1);
   await expect(page.locator('.draft-select')).toContainText('写作笔记');
-  await page.screenshot({ path: '/tmp/mojian-drafts-desktop.png' });
+
   await page.keyboard.press('Escape');
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
@@ -268,7 +268,7 @@ test('Mermaid editor switches diagram/code while article preview shows diagrams 
   expect(
     await page.evaluate(() => (window as any).__mojian.getOutput().html),
   ).not.toContain('data-mermaid-view');
-  await page.screenshot({ path: '/tmp/mojian-mermaid-toggle.png' });
+
   await page
     .getByRole('button', { name: '关闭预览', exact: true })
     .first()
@@ -285,7 +285,7 @@ test('Mermaid editor switches diagram/code while article preview shows diagrams 
   expect(bounds!.x).toBe(body!.x);
   expect(bounds!.y).toBe(body!.y);
   expect(bounds!.width).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: '/tmp/mojian-drafts-mobile.png' });
+
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(errors).toEqual([]);

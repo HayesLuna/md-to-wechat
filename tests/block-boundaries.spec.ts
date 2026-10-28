@@ -85,8 +85,16 @@ for (const [type, markdown] of cursorBlocks) {
         content: [{ type: 'text', text: 'New prose' }],
       });
       await expect(page.locator('.article-editor')).toBeFocused();
+      await expect(page.locator('.block-side-cursor')).toBeHidden();
       await page.keyboard.press('ControlOrMeta+z');
       expect(await doc(page)).toEqual(before);
+      if (type === 'codeBlock')
+        await expect
+          .poll(() => selection(page))
+          .toMatchObject({
+            type: 'blockCursor',
+            edge: side === 'before' ? 'left' : 'right',
+          });
       await page.keyboard.press('ControlOrMeta+Shift+z');
       expect(await doc(page)).toEqual(result);
     });
@@ -124,7 +132,6 @@ test('side insertion between adjacent blocks creates prose outside both', async 
   expect((await doc(page)).content.slice(0, 3).map((n: any) => n.type)).toEqual(
     ['codeBlock', 'paragraph', 'image'],
   );
-  await page.screenshot({ path: '/tmp/mojian-block-boundaries-desktop.png' });
 });
 test('clearing inserted prose keeps a caret, blur removes the empty paragraph', async ({
   page,
@@ -199,7 +206,6 @@ test('mobile width permits insertion without horizontal overflow', async ({
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({ path: '/tmp/mojian-block-boundaries-mobile.png' });
 });
 
 test('block inside a quote supports prose on both sides', async ({ page }) => {
@@ -364,7 +370,10 @@ const blockSelectors = {
   horizontalRule: '.article-editor hr',
   table: '.tableWrapper',
 };
-for (const [type, markdown] of cursorBlocks)
+// Code/table geometry is covered at three heights by the baseline test below.
+for (const [type, markdown] of cursorBlocks.filter(
+  ([type]) => type === 'image' || type === 'horizontalRule',
+))
   for (const edge of ['left', 'right'] as const) {
     test(`${type}: clicking ${edge} whitespace shows a bottom-aligned caret without creating a line`, async ({
       page,
@@ -394,8 +403,6 @@ for (const [type, markdown] of cursorBlocks)
       await expect(page.locator('.ProseMirror-gapcursor')).toHaveClass(
         /block-side-cursor/,
       );
-      if (type === 'codeBlock')
-        await page.screenshot({ path: `/tmp/mojian-code-cursor-${edge}.png` });
     });
   }
 test('clicking a visible code line still edits inside the code block', async ({
@@ -408,32 +415,6 @@ test('clicking a visible code line still edits inside the code block', async ({
   await expect(page.locator('.block-side-cursor')).toBeHidden();
 });
 
-for (const edge of ['left', 'right'] as const)
-  test(`typing from the ${edge} side creates prose only after typing starts`, async ({
-    page,
-  }) => {
-    await ready(page, blocks[0][1]);
-    const original = await doc(page);
-    const box = await page.locator('.code-node').boundingBox();
-    await page.mouse.click(
-      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
-      box!.y + box!.height / 2,
-    );
-    expect(await doc(page)).toEqual(original);
-    await page.keyboard.insertText('正文');
-    const result = await doc(page);
-    const code = result.content.findIndex((n: any) => n.type === 'codeBlock');
-    expect(result.content[code + (edge === 'left' ? -1 : 1)]).toMatchObject({
-      type: 'paragraph',
-      content: [{ text: '正文' }],
-    });
-    await expect(page.locator('.block-side-cursor')).toBeHidden();
-    await page.keyboard.press('ControlOrMeta+z');
-    expect(await doc(page)).toEqual(original);
-    await expect
-      .poll(() => selection(page))
-      .toMatchObject({ type: 'blockCursor', edge });
-  });
 test('a side caret follows its block while the writing area scrolls', async ({
   page,
 }) => {
@@ -502,28 +483,7 @@ test('clicking beside a partially scrolled code block keeps the writing position
   const block = await page.locator('.code-node').boundingBox();
   await bottomCaret(page, block!);
 });
-for (const edge of ['left', 'right'] as const)
-  test(`${edge} side deletion selects the block before removing it`, async ({
-    page,
-  }) => {
-    await ready(page, blocks[0][1]);
-    const original = await doc(page);
-    const box = await page.locator('.code-node').boundingBox();
-    await page.mouse.click(
-      edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
-      box!.y + box!.height / 2,
-    );
-    const key = edge === 'left' ? 'Delete' : 'Backspace';
-    await page.keyboard.press(key);
-    expect(await selection(page)).toMatchObject({ type: 'node' });
-    expect(await doc(page)).toEqual(original);
-    await page.keyboard.press(key);
-    expect(
-      (await doc(page)).content.some((n: any) => n.type === 'codeBlock'),
-    ).toBe(false);
-    await page.keyboard.press('ControlOrMeta+z');
-    expect(await doc(page)).toEqual(original);
-  });
+
 test.describe('touch side margin', () => {
   test.use({
     hasTouch: true,
@@ -566,6 +526,11 @@ for (const type of ['codeBlock', 'table'] as const)
           .toMatchObject({ type: 'blockCursor', edge });
         await expect(page.locator('.block-side-cursor')).toBeVisible();
         const caret = await bottomCaret(page, box!);
+        if (edge === 'left') expect(caret.x).toBeLessThan(box!.x);
+        else expect(caret.x).toBeGreaterThan(box!.x + box!.width);
+        await expect(page.locator('.ProseMirror-gapcursor')).toHaveClass(
+          /block-side-cursor/,
+        );
         positions.push(caret!.y);
         expect(
           Math.abs(caret!.y + caret!.height - (box!.y + box!.height)),
@@ -573,7 +538,6 @@ for (const type of ['codeBlock', 'table'] as const)
         expect(await doc(page)).toEqual(original);
       }
     expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(1);
-    await page.screenshot({ path: `/tmp/mojian-${type}-bottom-baseline.png` });
   });
 
 test('the divider row is selectable across its width and height without adding text', async ({
@@ -595,7 +559,7 @@ test('the divider row is selectable across its width and height without adding t
       await expect(line).toHaveClass(/ProseMirror-selectednode/);
       await expect(line).toHaveCSS('background-color', 'rgb(240, 240, 242)');
     }
-  await page.screenshot({ path: '/tmp/mojian-divider-selected.png' });
+
   await page.keyboard.press('Delete');
   await expect(line).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+z');
@@ -692,7 +656,7 @@ for (const edge of ['left', 'right'] as const)
         );
       })
       .toBeLessThan(1);
-    await page.screenshot({ path: `/tmp/mojian-image-outer-${edge}.png` });
+
     await page.keyboard.insertText('新增正文');
     const result = await doc(page);
     const image = result.content.findIndex((n: any) => n.type === 'image');
@@ -954,10 +918,6 @@ for (const [type, markdown] of blocks)
       });
       expect(await doc(page)).toEqual(original);
     }
-    await page.screenshot({
-      path: `/tmp/mojian-unified-${type}.png`,
-      animations: 'disabled',
-    });
   });
 
 test('wrapped text: side clicks follow the clicked line instead of the paragraph bottom', async ({
@@ -1017,10 +977,6 @@ test('native text caret stays visible during input and composition, while side c
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({
-    path: '/tmp/mojian-native-caret-mobile.png',
-    caret: 'initial',
-  });
 });
 
 test('code editing retains a contrasting native caret without a floating overlay', async ({
@@ -1051,8 +1007,4 @@ test('code editing retains a contrasting native caret without a floating overlay
   expect(inputStyles.caret).toBe(inputStyles.color);
   expect(inputStyles.caret).toBe('rgb(87, 96, 106)');
   await code.click({ position: { x: 40, y: 25 } });
-  await page.screenshot({
-    path: '/tmp/mojian-native-code-caret.png',
-    caret: 'initial',
-  });
 });

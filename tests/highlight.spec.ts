@@ -102,7 +102,6 @@ test('Typora highlights survive Markdown round trips and publication output', as
     return { text: mark.textContent, color: mark.style.backgroundColor };
   }, html);
   expect(copied).toEqual({ text: '重点', color: 'rgb(255, 243, 163)' });
-  await page.screenshot({ path: '/tmp/mojian-highlight-preview.png' });
 });
 
 test('equals in a link URL do not hide later editor and publication highlights', async ({
@@ -204,7 +203,7 @@ test('highlights work in headings, lists and tables on mobile without leaking in
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
-  await page.screenshot({ path: '/tmp/mojian-highlight-mobile.png' });
+
   expect(errors).toEqual([]);
 });
 
@@ -383,9 +382,6 @@ for (const width of [1440, 390])
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBe(width);
     expect(errors).toEqual([]);
-    await page.screenshot({
-      path: `/tmp/mojian-highlight-toolbar-${width}.png`,
-    });
   });
 
 for (const width of [1440, 390])
@@ -444,13 +440,8 @@ for (const width of [1440, 390])
     await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
     await expectVisibleText(page, '前第一处中第二处后');
     expect(errors).toEqual([]);
-    await page.screenshot({
-      path: `/tmp/mojian-highlight-collapsed-${width}.png`,
-    });
+
     await page.locator('.article-editor mark').first().click();
-    await page.screenshot({
-      path: `/tmp/mojian-highlight-expanded-${width}.png`,
-    });
   });
 
 test('highlight pairs match Typora from left to right, including adjacent and repeated equals', async ({
@@ -804,10 +795,7 @@ for (const width of [1440, 390])
         .getByRole('toolbar', { name: '正文格式' })
         .getByRole('button', { name: '高亮', exact: true }),
     ).toHaveAttribute('aria-pressed', 'false');
-    await editor.locator('p').screenshot({
-      path: `/tmp/mojian-highlight-closing-caret-${width}.png`,
-      caret: 'initial',
-    });
+
     await page.keyboard.press('ArrowLeft');
     await expect
       .poll(() =>
@@ -833,10 +821,7 @@ for (const width of [1440, 390])
     expect(
       await page.evaluate(() => (window as any).__mojian.editor.getMarkdown()),
     ).toBe('==测试==后');
-    await editor.locator('p').screenshot({
-      path: `/tmp/mojian-highlight-following-text-${width}.png`,
-      caret: 'initial',
-    });
+
     await page.keyboard.press('Backspace');
     await expect(editor.locator('.highlight-delimiter.expanded')).toHaveText([
       '==',

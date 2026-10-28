@@ -95,17 +95,7 @@ test('nested folds preserve complete source, raw copy, download and undo', async
   });
   await inner.click();
   await expect(page.locator('.code-fold-placeholder')).toHaveCount(1);
-  const frame = (await page.locator('.code-node').boundingBox())!;
-  await page.screenshot({
-    path: '/tmp/mojian-code-final-detail.png',
-    clip: {
-      x: frame.x - 10,
-      y: frame.y - 10,
-      width: frame.width + 20,
-      height: frame.height + 20,
-    },
-    caret: 'initial',
-  });
+
   expect(
     await page
       .locator('.code-gutter-row')
@@ -245,10 +235,6 @@ test('long code has bounded height, a virtual gutter, and supports pointer and k
   await expect
     .poll(async () => Math.round((await viewport.boundingBox())!.height))
     .toBe(360);
-  await page.screenshot({
-    path: '/tmp/mojian-code-tools-desktop.png',
-    caret: 'initial',
-  });
 });
 
 test('language dropdown selects common syntax and keeps custom language input', async ({
@@ -295,10 +281,6 @@ test('code tools fit mobile width and resize without page overflow', async ({
   expect(
     (await page.locator('.code-viewport').boundingBox())!.height,
   ).toBeLessThanOrEqual(844 * 0.7 + 1);
-  await page.screenshot({
-    path: '/tmp/mojian-code-tools-mobile.png',
-    caret: 'initial',
-  });
 });
 
 test('selecting and copying folded code includes hidden source without line numbers or placeholders', async ({
@@ -432,39 +414,6 @@ for (const index of [0, 1, 2])
     await page.keyboard.press('ControlOrMeta+z');
     expect((await json(page)).content[0].content[0].text).toBe(text);
   });
-
-test('GitHub light syntax colors agree between the editor and article preview', async ({
-  page,
-}) => {
-  await ready(page, '// comment\nconst text = "hello";\nconst number = 42;');
-  await expect(page.locator('.code-node')).toHaveClass(/code-theme-github/);
-  await expect(page.locator('.code-node')).toHaveCSS(
-    'background-color',
-    'rgb(255, 255, 255)',
-  );
-  await expect(page.locator('.code-node .hljs-keyword').first()).toHaveCSS(
-    'color',
-    'rgb(215, 58, 73)',
-  );
-  await expect(page.locator('.code-node .hljs-string')).toHaveCSS(
-    'color',
-    'rgb(3, 47, 98)',
-  );
-  await expect(page.locator('.code-node .hljs-comment')).toHaveCSS(
-    'color',
-    'rgb(106, 115, 125)',
-  );
-  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-  const card = page.locator('.preview-paper [data-code-block]');
-  await expect(card.getByText('const', { exact: true }).first()).toHaveCSS(
-    'color',
-    'rgb(215, 58, 73)',
-  );
-  await expect(card.getByText('"hello"', { exact: true })).toHaveCSS(
-    'color',
-    'rgb(3, 47, 98)',
-  );
-});
 
 test('code selection can still be dragged across lines and horizontal scrolling keeps the gutter fixed', async ({
   page,

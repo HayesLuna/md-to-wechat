@@ -129,7 +129,6 @@ test('user fare-date Gantt inside a numbered list renders in editor and preview'
       .locator('img')
       .evaluate((el: HTMLImageElement) => el.naturalWidth),
   ).toBeGreaterThan(0);
-  await page.screenshot({ path: '/tmp/mojian-user-gantt.png' });
 });
 
 test('Typora-style HTML paste retains Mermaid language and source', async ({

@@ -82,7 +82,7 @@ test('version and build time remain accessible on desktop and mobile', async ({
       /构建时间：\d{4}\/\d{2}\/\d{2}/,
     );
     await expect(dialog.locator('.build-info')).toContainText('北京时间');
-    await page.screenshot({ path: `/tmp/mojian-build-info-${width}.png` });
+
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
   }

@@ -83,6 +83,27 @@ for (const key of ['Control+a', 'Meta+a'])
       expect(
         await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
       ).toEqual(original);
+      // Preserve the raw-source cut/undo check previously in editor-code-behavior.
+      // Modifier routing is already covered above; run this once per language.
+      if (key === 'Control+a') {
+        await insideCode(page);
+        await page.keyboard.press(key);
+        await page.keyboard.press('ControlOrMeta+x');
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+          source,
+        );
+        await expect(page.locator('.article-editor pre')).toHaveText('');
+        await expect(page.locator('.article-editor')).toContainText(
+          '前面的正文',
+        );
+        await expect(page.locator('.article-editor')).toContainText(
+          '后面的正文',
+        );
+        await page.keyboard.press('ControlOrMeta+z');
+        expect(
+          await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
+        ).toEqual(original);
+      }
     });
 
 test('the block stage copies safe fences around literal backticks and cut/undo removes/restores the complete block', async ({

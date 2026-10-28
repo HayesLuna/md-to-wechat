@@ -231,5 +231,4 @@ test('opening preview reuses current output and edits still prepare the newest s
   });
   await page.clock.fastForward(1000);
   await expect(page.locator('.preview-paper h1')).toHaveText('最新稿');
-  await page.screenshot({ path: '/tmp/mojian-optimized-preview.png' });
 });

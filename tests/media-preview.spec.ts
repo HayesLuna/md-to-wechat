@@ -182,7 +182,7 @@ test('Mermaid and article media use the same uncluttered preview on desktop and 
   expect(
     await screen.evaluate((el) => el.contains(document.activeElement)),
   ).toBe(true);
-  await page.screenshot({ path: '/tmp/mojian-media-desktop.png' });
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(screen.locator('img')).toBeVisible();
   const bounds = await screen.boundingBox();
@@ -195,7 +195,7 @@ test('Mermaid and article media use the same uncluttered preview on desktop and 
       screen.locator('img').evaluate((el) => el.getBoundingClientRect().height),
     )
     .toBeLessThanOrEqual(844);
-  await page.screenshot({ path: '/tmp/mojian-media-mobile.png' });
+
   await page.keyboard.press('Escape');
   await expect(screen).toHaveCount(0);
   expect(await markdown(page)).toBe(before);

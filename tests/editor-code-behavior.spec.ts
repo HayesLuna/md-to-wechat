@@ -59,55 +59,8 @@ for (const [name, text] of [
       ),
     ).toBe(from + 3);
   });
-for (const language of ['js', 'mermaid'])
-  test(`${language}: Ctrl+A in the code view copies only raw code; cut and undo remain scoped`, async ({
-    page,
-    context,
-  }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    const source =
-      language === 'js'
-        ? 'const first = 1;\nconst second = 2;'
-        : 'graph LR\n  A[开始] --> B[结束]';
-    await ready(
-      page,
-      `前面的正文\n\n\`\`\`${language}\n${source}\n\`\`\`\n\n后面的正文`,
-    );
-    if (language === 'mermaid')
-      await page.getByRole('button', { name: '展示代码', exact: true }).click();
-    await page.evaluate(() => {
-      const e = (window as any).__mojian.editor;
-      let at = 0;
-      e.state.doc.descendants((n: any, p: number) => {
-        if (n.type.name === 'codeBlock') at = p + 1;
-      });
-      e.commands.setTextSelection(at);
-      e.commands.focus();
-    });
-    await expect(page.locator('.article-editor')).toBeFocused();
-    await page.keyboard.press('ControlOrMeta+a');
-    await page.keyboard.press('ControlOrMeta+c');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-      source,
-    );
-    await page.keyboard.press('ControlOrMeta+x');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-      source,
-    );
-    await expect(page.locator('.article-editor pre')).toHaveText('');
-    await expect(page.locator('.article-editor')).toContainText('前面的正文');
-    await page.keyboard.press('ControlOrMeta+z');
-    await expect(page.locator('.article-editor pre')).toHaveText(source);
-    await page.evaluate(() =>
-      (window as any).__mojian.editor.commands.selectAll(),
-    );
-    await page.keyboard.press('ControlOrMeta+c');
-    const article = await page.evaluate(() => navigator.clipboard.readText());
-    expect(article).toContain('```' + language);
-    expect(article).toContain('前面的正文');
-    expect(article).toContain('后面的正文');
-  });
-test('code view uses GitHub light highlighting while Mermaid diagram stays light', async ({
+
+test('GitHub colors agree in editor and preview, preview has line numbers, and Mermaid stays light', async ({
   page,
 }) => {
   await ready(
@@ -140,6 +93,42 @@ test('code view uses GitHub light highlighting while Mermaid diagram stays light
   await expect(mermaid).toHaveClass(/code-theme-github/);
   await mermaid.getByRole('button', { name: '展示图表', exact: true }).click();
   await expect(mermaid).not.toHaveClass(/code-theme-github/);
+  await expect(code.locator('.hljs-comment')).toHaveCSS(
+    'color',
+    'rgb(106, 115, 125)',
+  );
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  const card = page.locator('.preview-paper [data-code-block]');
+  await expect(card.getByText('const', { exact: true })).toHaveCSS(
+    'color',
+    'rgb(215, 58, 73)',
+  );
+  await expect(card.getByText('"hello"', { exact: true })).toHaveCSS(
+    'color',
+    'rgb(3, 47, 98)',
+  );
+  await expect(card.locator('[data-code-line]')).toHaveCount(3);
+  await expect(card.locator('[data-code-lines]')).toHaveCSS(
+    'counter-reset',
+    'code-line 0',
+  );
+  expect(
+    await card
+      .locator('[data-code-line]')
+      .first()
+      .evaluate((el) => {
+        const number = getComputedStyle(el, '::before');
+        return {
+          content: number.content,
+          increment: number.counterIncrement,
+          visible: number.display !== 'none' && parseFloat(number.width) > 0,
+        };
+      }),
+  ).toEqual({
+    content: 'counter(code-line)',
+    increment: 'code-line 1',
+    visible: true,
+  });
 });
 for (const [name, markdown, from, to, expected] of [
   ['empty paragraph', '', 1, 1, '\tX'],

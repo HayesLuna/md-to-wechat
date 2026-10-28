@@ -399,7 +399,6 @@ test('outline duplicates and code exclusions, full screen and Esc layering; mobi
   );
   await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await expect(page.locator('.writing-pane')).toBeVisible();
-  await page.screenshot({ path: '/tmp/mojian-mobile.png' });
 });
 
 test('context menu retargets outside selection and stays in viewport', async ({
@@ -439,7 +438,7 @@ test('context menu retargets outside selection and stays in viewport', async ({
   const editorBounds = (await page.locator('.article-editor').boundingBox())!;
   let actual = await check(editorBounds.x + 30, 700);
   expect(actual.y).toBe(700);
-  await page.screenshot({ path: '/tmp/mojian-context-position.png' });
+
   await page.keyboard.press('Escape');
   actual = await check(editorBounds.x + editorBounds.width - 20, 940);
   expect(actual.x + actual.width).toBeLessThanOrEqual(1432);
@@ -864,9 +863,7 @@ for (const viewport of [
     const selected = await selection(page);
     const before = await page.locator('.writing-pane').boundingBox();
     const content = await markdown(page);
-    await page.screenshot({
-      path: `/tmp/mojian-fullscreen-before-${viewport.width}.png`,
-    });
+
     await page
       .locator('.pane-actions')
       .getByRole('button', { name: '全屏写作', exact: true })
@@ -884,9 +881,7 @@ for (const viewport of [
       'hidden',
     );
     expect(await selection(page)).toEqual(selected);
-    await page.screenshot({
-      path: `/tmp/mojian-fullscreen-after-${viewport.width}.png`,
-    });
+
     await page.getByRole('button', { name: '插入链接', exact: true }).click();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -1019,7 +1014,6 @@ test('WeChat typography uses explicit pixel line heights in lists and inline mar
     'display',
     'inline',
   );
-  await page.screenshot({ path: '/tmp/mojian-wechat-lineheight.png' });
 });
 
 test('mixed rich text avoids legacy WeChat fragment-count overlap warnings', async ({
@@ -1098,7 +1092,6 @@ test('mixed rich text avoids legacy WeChat fragment-count overlap warnings', asy
   );
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.preview-scroll').evaluate((e) => (e.scrollTop = 380));
-  await page.screenshot({ path: '/tmp/mojian-wechat-compatible-mobile.png' });
 });
 
 test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code', async ({
@@ -1239,7 +1232,7 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
     expect(clip.comments[1]).toBe(clip.comments[0]);
     expect(await page.locator('.preview-paper').innerHTML()).toBe(clip.html);
   }
-  await page.screenshot({ path: '/tmp/mojian-svg-code-desktop.png' });
+
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     const card = page.locator('.preview-paper [data-code-block]').first();
@@ -1258,7 +1251,7 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
     await expect(card.locator('svg')).toHaveCSS('height', '13px');
   }
   await page.locator('.preview-scroll').evaluate((e) => (e.scrollTop = 330));
-  await page.screenshot({ path: '/tmp/mojian-svg-code-mobile.png' });
+
   expect(await markdown(page)).toBe(raw);
   await setDoc(page, '```unknown\n\n\t  last  \n\n```');
   await prepared(page);
@@ -1371,7 +1364,7 @@ test('mixed table cells and long identifiers stay readable in rich clipboard on 
   await page
     .locator('.preview-scroll')
     .evaluate((e) => (e.scrollTop = e.scrollHeight));
-  await page.screenshot({ path: '/tmp/mojian-table-compatibility.png' });
+
   await import('node:fs/promises').then((fs) =>
     fs.writeFile('/tmp/mojian-table-clipboard.html', clip.html),
   );
@@ -1438,7 +1431,6 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
   expect(copied.types).toEqual(
     expect.arrayContaining(['text/html', 'text/plain']),
   );
-  await page.screenshot({ path: '/tmp/mojian-italic.png' });
 });
 
 test('Ctrl and Cmd clicking editor links open actual new tabs without changing draft or selection', async ({
@@ -1567,7 +1559,6 @@ test('link selection controls never shift text during boundary drag selection', 
     await page.mouse.up();
     expect(await markdown(page)).toBe(raw);
   }
-  await page.screenshot({ path: '/tmp/mojian-link-selection-stable.png' });
 });
 
 test('separate link and table action row overlays without moving text or formatting toolbar', async ({
@@ -1642,7 +1633,6 @@ test('separate link and table action row overlays without moving text or formatt
       e.commands.setTextSelection(pos);
       e.commands.focus();
     }, positions.link + 1);
-    await page.screenshot({ path: `/tmp/mojian-context-overlay-${width}.png` });
   }
   expect(await markdown(page)).toBe(raw);
 });
@@ -1721,7 +1711,6 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
-  await page.screenshot({ path: '/tmp/mojian-image-200.png' });
 });
 
 test('column alignment controls and context menu persist GFM header and data alignment', async ({
@@ -1831,7 +1820,6 @@ test('task checkboxes align with first text line on desktop mobile and multiline
     await page.locator('.article-editor input[type=checkbox]').first().check();
     expect(await markdown(page)).toContain('- [x] 中文清单第一行');
   }
-  await page.screenshot({ path: '/tmp/mojian-task-alignment.png' });
 });
 
 test('quote Backspace joins preceding paragraph while empty Enter splits the quote, with undo and Markdown roundtrip', async ({
@@ -2029,7 +2017,6 @@ test('code header downloads raw UTF-8 source, respects language and keeps draft,
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
-  await page.screenshot({ path: '/tmp/mojian-code-download-mobile.png' });
 });
 
 test('progressive quote selection covers full nested blocks, resets on caret edits and stays out of dialogs and source mode', async ({

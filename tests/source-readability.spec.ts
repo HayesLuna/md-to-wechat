@@ -35,7 +35,7 @@ test('source soft-wraps long paragraphs and URLs without changing text; outline 
     expect(position.at).toBe(text.indexOf('## 目标标题'));
     expect(position.scroll).toBeGreaterThan(300);
   }
-  await page.screenshot({ path: '/tmp/mojian-source-wrap-mobile.png' });
+
   expect(
     await page.evaluate(() => (window as any).__mojian.getMarkdown()),
   ).toBe(text);
@@ -150,7 +150,6 @@ test('Mermaid uses blue in editor, previews and SVG export while preserving sour
   for await (const chunk of stream!) svg += chunk.toString();
   expect(svg.toLowerCase()).toContain('#e8f2ff');
   expect(svg).toContain('#123456');
-  await page.screenshot({ path: '/tmp/mojian-mermaid-colors.png' });
 });
 
 test('long sequence diagrams stay compact and sequence numbers are readable in all outputs', async ({

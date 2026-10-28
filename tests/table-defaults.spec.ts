@@ -59,7 +59,6 @@ for (const format of ['markdown', 'html'])
         nodes.every((n) => getComputedStyle(n).textAlign === 'center'),
       ),
     ).toBe(true);
-    await page.screenshot({ path: `/tmp/mojian-pasted-table-${format}.png` });
   });
 
 test('pasted explicit column alignment is preserved and existing tables are unchanged', async ({

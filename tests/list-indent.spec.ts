@@ -36,45 +36,15 @@ async function select(
 }
 const code = '\n\n```js\nconst untouched = true;\n```';
 
-test('cursor movement reuses indent decorations in a long document', async ({
-  page,
-}) => {
-  await ready(
-    page,
-    '-\n  - 父项\n  - 第二项\n- 末项\n\n' +
-      Array.from({ length: 200 }, (_, i) => `段落 ${i}`).join('\n\n'),
-  );
-  const result = await page.evaluate(() => {
-    const editor = (window as any).__mojian.editor;
-    const plugin = editor.state.plugins.find((item: any) =>
-      item.key.startsWith('mojian-editing$'),
-    );
-    const initial = plugin.props.decorations(editor.state);
-    for (let i = 0; i < 40; i++)
-      editor.commands.setTextSelection(
-        i % 2 ? 1 : editor.state.doc.content.size - 1,
-      );
-    const afterSelection = plugin.props.decorations(editor.state);
-    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
-    editor.commands.insertContent('追加');
-    const afterEdit = plugin.props.decorations(editor.state);
-    return {
-      reused: initial === afterSelection,
-      rebuilt: afterSelection !== afterEdit,
-      wrappers: editor.view.dom.querySelectorAll('[data-indent-wrapper]')
-        .length,
-    };
-  });
-  expect(result).toEqual({ reused: true, rebuilt: true, wrappers: 1 });
-});
-
 for (const modifier of ['Control', 'Meta'])
+  // Structural undo coverage uses Control; the code case also checks Meta's
+  // equivalent key binding without repeating the full structural matrix.
   for (const [name, doc, text] of [
     ['bullet', '- 父项\n- 第二项', '第二项'],
     ['ordered', '1. 父项\n2. 第二项', '第二项'],
     ['task', '- [x] 父项\n- [ ] 第二项', '第二项'],
     ['code', '```js\nfirst\nsecond\n```', 'first\nsecond'],
-  ])
+  ].filter(([name]) => modifier === 'Control' || name === 'code'))
     test(`${modifier}+Z undoes ${name} indentation and Shift+Z redoes it`, async ({
       page,
     }) => {
@@ -451,7 +421,7 @@ for (const [name, list] of [
     ).toEqual(after);
   });
 
-test('editing an unrelated paragraph avoids a whole-document indent scan', async ({
+test('moving the caret and editing unrelated prose avoid whole-document indent scans', async ({
   page,
 }) => {
   await ready(
@@ -477,12 +447,21 @@ test('editing an unrelated paragraph avoids a whole-document indent scan', async
         return callback(...args);
       });
     };
+    let selectionVisited: number;
     try {
+      for (let i = 0; i < 40; i++)
+        editor.commands.setTextSelection(
+          i % 2 ? position : editor.state.doc.content.size - 1,
+        );
+      selectionVisited = visited;
+      visited = 0;
+      editor.commands.setTextSelection(position);
       editor.commands.insertContent('修改');
     } finally {
       prototype.descendants = original;
     }
     return {
+      selectionVisited,
       visited,
       wrappers: editor.view.dom.querySelectorAll('[data-indent-wrapper]')
         .length,
@@ -491,5 +470,6 @@ test('editing an unrelated paragraph avoids a whole-document indent scan', async
   });
   expect(result.wrappers).toBe(2);
   expect(result.text).toBe(true);
+  expect(result.selectionVisited).toBeLessThan(100);
   expect(result.visited).toBeLessThan(100);
 });
