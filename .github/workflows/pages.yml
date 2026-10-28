@@ -9,8 +9,30 @@ permissions:
   id-token: write
 concurrency:
   group: github-pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
+  test:
+    name: Tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test -- --shard=${{ matrix.shard }}/3
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-failures-${{ matrix.shard }}
+          path: /tmp/mojian-test-results
+          retention-days: 7
   build:
     runs-on: ubuntu-latest
     steps:
@@ -22,14 +44,13 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run format:check
-      - run: npm test
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
   deploy:
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -25,7 +25,9 @@ const launchOptions = executablePath
 
 export default defineConfig({
   testDir: './tests',
-  fullyParallel: false,
+  // CI shards individual tests evenly across runners. Each runner still uses
+  // one worker so CPU-throttled measurements never compete with another test.
+  fullyParallel: !!process.env.CI,
   workers: 1,
   timeout: 30000,
   retries: 0,
