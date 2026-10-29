@@ -39,6 +39,10 @@ test('read-only protects content and node controls, preserves copy and unlocks w
   await expect(
     page.getByRole('button', { name: '格式化 JSON', exact: true }),
   ).toBeDisabled();
+  await expect(page.getByRole('combobox', { name: '代码语言' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: '复制代码', exact: true }),
+  ).toBeEnabled();
   await page.locator('.article-editor td').first().click({ button: 'right' });
   await expect(page.locator('.context-menu')).toHaveCount(0);
   // Commands from custom node views and keyboard shortcuts must also be blocked.
@@ -92,6 +96,7 @@ test('read-only protects content and node controls, preserves copy and unlocks w
   await expect(
     page.getByRole('button', { name: '格式化 JSON', exact: true }),
   ).toBeEnabled();
+  await expect(page.getByRole('combobox', { name: '代码语言' })).toBeEnabled();
   expect(
     await page.evaluate(
       () => window.__mojian!.editor === (window as any).__originalEditor,
@@ -199,3 +204,47 @@ for (const width of [320, 390])
         page.getByRole('textbox', { name: 'Markdown 源码正文', exact: true }),
       ).toHaveJSProperty('readOnly', true);
     });
+
+test('read-only changes during pending preview preserve the render and copy result', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  let release!: () => void;
+  let requested!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const loading = new Promise<void>((resolve) => {
+    requested = resolve;
+  });
+  await page.route('**/src/output.ts', async (route) => {
+    requested();
+    await gate;
+    await route.continue();
+  });
+  await ready(page);
+  await page.evaluate(() =>
+    window.__mojian!.setMarkdown(
+      '# 排版期间锁定\n\n' + '正文内容。'.repeat(12_000),
+    ),
+  );
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await loading;
+  const toggle = page.getByRole('switch', { name: '只读模式' });
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  release();
+  await expect(page.locator('.preview-paper:not(.preparing)')).toContainText(
+    '排版期间锁定',
+  );
+  await expect(page.locator('.preview-header')).not.toContainText('准备排版');
+  await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain('排版期间锁定');
+  await expect(page.locator('.article-editor')).toHaveAttribute(
+    'contenteditable',
+    'false',
+  );
+});

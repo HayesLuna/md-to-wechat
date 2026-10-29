@@ -272,16 +272,31 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
     </NodeViewWrapper>
   );
 }
+// Only the native editing controls subscribe to editability. Keeping the card
+// itself out of this subscription avoids rerendering every code body on lock.
+function CodeEditControls({
+  editor,
+  children,
+}: {
+  editor: NodeViewProps['editor'];
+  children: React.ReactNode;
+}) {
+  const editable = useEditorState({
+    editor,
+    selector: ({ editor }) => editor.isEditable,
+  });
+  return (
+    <fieldset className="code-edit-controls" disabled={!editable}>
+      {children}
+    </fieldset>
+  );
+}
 export function CodeView({
   node,
   updateAttributes,
   editor,
   getPos,
 }: NodeViewProps) {
-  const editable = useEditorState({
-    editor,
-    selector: ({ editor }) => editor.isEditable,
-  });
   const [folded, setFolded] = useState(false);
   const [svg, setSVG] = useState('');
   const [error, setError] = useState('');
@@ -501,19 +516,23 @@ export function CodeView({
           <i />
           <i />
         </span>
-        <CodeLanguagePicker
-          language={String(node.attrs.language || '')}
-          disabled={!editable}
-          change={(value) => updateAttributes({ language: value })}
-        />
+        <CodeEditControls editor={editor}>
+          <CodeLanguagePicker
+            language={String(node.attrs.language || '')}
+            disabled={false}
+            change={(value) => {
+              if (editor.isEditable) updateAttributes({ language: value });
+            }}
+          />
+        </CodeEditControls>
 
         <div>
           {language === 'json' && (
-            <>
+            <CodeEditControls editor={editor}>
               <button
                 aria-label="压缩 JSON"
                 title="压缩 JSON（仅移除排版空白）"
-                disabled={!source.length || !editable}
+                disabled={!source.length}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => rewriteJSON('compact')}
               >
@@ -523,14 +542,14 @@ export function CodeView({
               <button
                 aria-label="格式化 JSON"
                 title="格式化 JSON（2 空格缩进）"
-                disabled={!source.length || !editable}
+                disabled={!source.length}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => rewriteJSON('format')}
               >
                 <IndentIncrease size={14} />
                 <span>格式化</span>
               </button>
-            </>
+            </CodeEditControls>
           )}
           {mermaid && (
             <>
@@ -582,13 +601,14 @@ export function CodeView({
             <Download size={15} />
           </button>
           {!source && (
-            <button
-              title="删除空代码块"
-              disabled={!editable}
-              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-            >
-              <Trash2 size={15} />
-            </button>
+            <CodeEditControls editor={editor}>
+              <button
+                title="删除空代码块"
+                onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+              >
+                <Trash2 size={15} />
+              </button>
+            </CodeEditControls>
           )}
         </div>
       </div>

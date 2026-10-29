@@ -1502,6 +1502,9 @@ button.primary:hover {
 .code-node {
   border-radius: 10px;
 }
+.code-edit-controls {
+  display: contents;
+}
 .code-header {
   height: 40px;
   justify-content: flex-start;

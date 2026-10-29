@@ -4,8 +4,7 @@ import {
   parseHighlightMarkdown,
   serializeHighlightMarkdown,
 } from './highlight';
-import { TableKit } from '@tiptap/extension-table';
-import TaskList from '@tiptap/extension-task-list';
+import { ArticleTableKit, ArticleTaskList } from './markdownBlocks';
 import {
   lowlight,
   ensureSyntax,
@@ -156,14 +155,14 @@ export function EditorPane({
         lowlight,
         defaultLanguage: null,
       }),
-      TableKit.configure({
+      ArticleTableKit.configure({
         table: {
           resizable: false,
           renderWrapper: true,
           allowTableNodeSelection: true,
         },
       }),
-      TaskList,
+      ArticleTaskList,
       StructuredTaskItem.configure({ nested: true }),
       EditingRules,
       BlockBoundaries,

@@ -159,6 +159,7 @@ export default function App() {
     saveStatus,
     saveTime,
     version,
+    outputRevision,
     current,
     statusRef,
     setSaveTime,
@@ -204,7 +205,7 @@ export default function App() {
     preview,
     contentRevision,
     requestedOutput,
-    version,
+    revision: outputRevision,
   });
   const editorDirty = () => {
     markDirty();

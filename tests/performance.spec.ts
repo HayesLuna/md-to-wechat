@@ -635,3 +635,61 @@ test('typing and selection changes do not measure geometry to paint a text caret
   expect(calls.geometry).toBe(0);
   await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
 });
+
+test('ordinary Markdown rejects task and table tokenizers without repeatedly splitting the remaining document', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  const result = await page.evaluate(async () => {
+    const { safeDocument } = await import('/src/EditorPane.tsx');
+    const source = Array.from(
+      { length: 1200 },
+      (_, i) =>
+        `## 章节 ${i}\n\n` + '没有任务和表格的普通正文。'.repeat(10) + '\n\n',
+    ).join('');
+    const prototype = String.prototype as any;
+    const original = prototype.split;
+    let splitCharacters = 0;
+    prototype.split = function (this: string, ...args: any[]) {
+      if (args[0] === '\n') splitCharacters += this.length;
+      return original.apply(this, args);
+    };
+    try {
+      const document = safeDocument(window.__mojian!.editor!, source);
+      return {
+        length: source.length,
+        splitCharacters,
+        blocks: document.content?.filter((node) => node.content?.length).length,
+      };
+    } finally {
+      prototype.split = original;
+    }
+  });
+  expect(result.blocks).toBe(2400);
+  expect(result.splitCharacters).toBeLessThan(result.length * 12);
+});
+
+test('bounded block tokenizers retain code-span pipes in tables and nested mixed task lists', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  await page.evaluate(() =>
+    window.__mojian!.setMarkdown(
+      '普通正文\n\n| `a|b` | 标题 |\n| --- | --- |\n| `c|d` | 内容 |\n\n- [ ] 父任务\n  - 普通子项\n  - [x] 完成的子任务\n\n后续正文',
+    ),
+  );
+  const editor = page.locator('.article-editor');
+  await expect(editor.locator('th')).toHaveCount(2);
+  await expect(editor.locator('td')).toHaveCount(2);
+  await expect(editor.locator('th code')).toHaveText('a|b');
+  await expect(editor.locator('td code')).toHaveText('c|d');
+  await expect(editor.locator('input[type="checkbox"]')).toHaveCount(2);
+  await expect(
+    editor.locator('input[type="checkbox"]').nth(0),
+  ).not.toBeChecked();
+  await expect(editor.locator('input[type="checkbox"]').nth(1)).toBeChecked();
+  await expect(editor).toContainText('普通子项');
+  await expect(editor).toContainText('后续正文');
+});

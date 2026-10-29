@@ -16,7 +16,7 @@ export function useArticleOutput({
   preview,
   contentRevision,
   requestedOutput,
-  version,
+  revision,
 }: {
   markdown: string;
   settings: Settings;
@@ -24,7 +24,7 @@ export function useArticleOutput({
   preview: boolean;
   contentRevision: number;
   requestedOutput: { key: string; attempt: number } | null;
-  version: RefObject<number>;
+  revision: RefObject<number>;
 }) {
   const outputRef = useRef<Output | null>(null);
   const outputAbort = useRef<AbortController | null>(null);
@@ -65,7 +65,7 @@ export function useArticleOutput({
     let active = true;
     const controller = new AbortController();
     outputAbort.current = controller;
-    const renderVersion = version.current;
+    const renderRevision = revision.current;
     setPreparing(true);
     setRenderError('');
     const timer = setTimeout(
@@ -80,7 +80,7 @@ export function useArticleOutput({
             if (
               active &&
               !controller.signal.aborted &&
-              renderVersion === version.current
+              renderRevision === revision.current
             ) {
               outputRef.current?.dispose();
               outputRef.current = result;

@@ -59,6 +59,9 @@ export function useDraftSession({
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saving');
   const version = useRef(Date.now());
+  // Saving metadata (for example read-only state) must not invalidate content
+  // that is still being rendered for preview or copying.
+  const outputRevision = useRef(0);
   const [saveTime, setSaveTime] = useState(0);
   const current = useRef({ markdown, settings, readOnly });
   current.current = { markdown, settings, readOnly };
@@ -116,6 +119,7 @@ export function useDraftSession({
     };
   }, [notify]);
   const changed = (text: string) => {
+    outputRevision.current++;
     current.current = { ...current.current, markdown: text };
     version.current++;
     statusRef.current = 'saving';
@@ -124,6 +128,7 @@ export function useDraftSession({
     setSaveStatus('saving');
   };
   const markDirty = () => {
+    outputRevision.current++;
     version.current++;
     statusRef.current = 'saving';
     setSaveStatus('saving');
@@ -147,6 +152,7 @@ export function useDraftSession({
       outputKey('', s) === outputKey('', current.current.settings)
     )
       return;
+    outputRevision.current++;
     current.current = { ...current.current, settings: s };
     version.current++;
     setSettings(s);
@@ -211,6 +217,7 @@ export function useDraftSession({
     return () => clearTimeout(timer);
   }, [markdown, settings, readOnly, ready, saveNow, switching]);
   const activate = (d: Draft) => {
+    outputRevision.current++;
     activeDraft.current = d;
     version.current = Math.max(version.current + 1, d.version);
     current.current = {
@@ -240,6 +247,7 @@ export function useDraftSession({
     saveStatus,
     saveTime,
     version,
+    outputRevision,
     current,
     statusRef,
     setSaveTime,
