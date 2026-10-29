@@ -25,11 +25,13 @@ export function Toolbar({
   editor,
   onOpen,
   source,
+  readOnly,
   onCopySource,
 }: {
   editor: Editor | null;
   onOpen: (op: Operation) => void;
   source: boolean;
+  readOnly: boolean;
   onCopySource: () => void;
 }) {
   useEditorState({
@@ -64,7 +66,7 @@ export function Toolbar({
       </div>
     );
   const action = (fn: (e: Editor) => unknown) => () => {
-    if (editor) fn(editor);
+    if (editor && !readOnly) fn(editor);
   };
   const button = (
     title: string,
@@ -73,6 +75,7 @@ export function Toolbar({
     active?: boolean,
   ) => (
     <button
+      disabled={readOnly && title !== '更多操作'}
       key={title}
       type="button"
       title={title}
@@ -88,6 +91,7 @@ export function Toolbar({
   return (
     <div className="toolbar" role="toolbar" aria-label="正文格式">
       <select
+        disabled={readOnly}
         aria-label="标题级别"
         value={
           editor?.isActive('heading')

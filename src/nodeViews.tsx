@@ -1,4 +1,5 @@
 import {
+  useEditorState,
   NodeViewWrapper,
   NodeViewContent,
   type NodeViewProps,
@@ -62,6 +63,10 @@ function signal(message: string) {
   window.dispatchEvent(new CustomEvent('mojian-notice', { detail: message }));
 }
 export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
+  const editable = useEditorState({
+    editor,
+    selector: ({ editor }) => editor.isEditable,
+  });
   const [widthInput, setWidthInput] = useState(String(node.attrs.percent));
   useEffect(
     () => setWidthInput(String(node.attrs.percent)),
@@ -72,6 +77,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const setWidth = (percent: number) => {
+    if (!editor.isEditable) return;
     const pos = getPos();
     if (pos === undefined) return;
     editor.commands.command(({ tr }) => {
@@ -105,6 +111,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   }, [node.attrs.src]);
   const resize = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
+    if (!editor.isEditable) return;
     editor.view.dispatch(closeHistory(editor.state.tr));
     const start = event.clientX;
     const base = box.current!.getBoundingClientRect().width;
@@ -196,7 +203,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
           {missing && url && (
             <span className="image-failed">图片无法加载，请检查地址</span>
           )}
-          {selected && (
+          {selected && editable && (
             <button
               className="resize-handle"
               aria-label="拖拽调整图片宽度"
@@ -205,7 +212,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
           )}
         </div>
       </div>
-      {selected && (
+      {selected && editable && (
         <div
           className="image-controls"
           contentEditable={false}
@@ -271,6 +278,10 @@ export function CodeView({
   editor,
   getPos,
 }: NodeViewProps) {
+  const editable = useEditorState({
+    editor,
+    selector: ({ editor }) => editor.isEditable,
+  });
   const [folded, setFolded] = useState(false);
   const [svg, setSVG] = useState('');
   const [error, setError] = useState('');
@@ -492,7 +503,7 @@ export function CodeView({
         </span>
         <CodeLanguagePicker
           language={String(node.attrs.language || '')}
-          disabled={!editor.isEditable}
+          disabled={!editable}
           change={(value) => updateAttributes({ language: value })}
         />
 
@@ -502,7 +513,7 @@ export function CodeView({
               <button
                 aria-label="压缩 JSON"
                 title="压缩 JSON（仅移除排版空白）"
-                disabled={!source.length || !editor.isEditable}
+                disabled={!source.length || !editable}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => rewriteJSON('compact')}
               >
@@ -512,7 +523,7 @@ export function CodeView({
               <button
                 aria-label="格式化 JSON"
                 title="格式化 JSON（2 空格缩进）"
-                disabled={!source.length || !editor.isEditable}
+                disabled={!source.length || !editable}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => rewriteJSON('format')}
               >
@@ -573,6 +584,7 @@ export function CodeView({
           {!source && (
             <button
               title="删除空代码块"
+              disabled={!editable}
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
             >
               <Trash2 size={15} />

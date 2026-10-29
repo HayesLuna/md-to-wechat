@@ -5,6 +5,7 @@ export type Draft = {
   id: string;
   title: string;
   customTitle?: boolean;
+  readOnly?: boolean;
   markdown: string;
   settings: Settings;
   version: number;
@@ -14,8 +15,9 @@ export type Draft = {
 export type DraftSummary = Omit<Draft, 'markdown' | 'settings'>;
 type DraftInfo = DraftSummary & { imageIds: string[] };
 export function summarizeDraft(draft: DraftSummary): DraftSummary {
-  const { id, title, customTitle, version, createdAt, savedAt } = draft;
-  return { id, title, customTitle, version, createdAt, savedAt };
+  const { id, title, customTitle, readOnly, version, createdAt, savedAt } =
+    draft;
+  return { id, title, customTitle, readOnly, version, createdAt, savedAt };
 }
 function draftInfo(draft: Draft): DraftInfo {
   return {

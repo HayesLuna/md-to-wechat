@@ -55,12 +55,13 @@ export function useDraftSession({
   const [markdown, setMarkdown] = useState('');
   const [contentRevision, setContentRevision] = useState(0);
   const [initial, setInitial] = useState('');
+  const [readOnly, setReadOnly] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saving');
   const version = useRef(Date.now());
   const [saveTime, setSaveTime] = useState(0);
-  const current = useRef({ markdown, settings });
-  current.current = { markdown, settings };
+  const current = useRef({ markdown, settings, readOnly });
+  current.current = { markdown, settings, readOnly };
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const statusRef = useRef(saveStatus);
   statusRef.current = saveStatus;
@@ -90,6 +91,7 @@ export function useDraftSession({
         if (!active) return;
         activeDraft.current = d;
         setDrafts(library.drafts.length ? library.drafts : [summarizeDraft(d)]);
+        setReadOnly(d.readOnly === true);
         setMarkdown(d.markdown);
         setInitial(d.markdown);
         setSettings(validSettings(d.settings));
@@ -130,6 +132,15 @@ export function useDraftSession({
     flushEditorMarkdown(latestEditor.current);
     return current.current;
   }, []);
+  const changeReadOnly = (value: boolean) => {
+    if (switchingRef.current) return;
+    readCurrent();
+    current.current = { ...current.current, readOnly: value };
+    version.current++;
+    statusRef.current = 'saving';
+    setSaveStatus('saving');
+    setReadOnly(value);
+  };
   const changeSettings = (s: Settings) => {
     if (
       switchingRef.current ||
@@ -198,14 +209,16 @@ export function useDraftSession({
       if (!switchingRef.current) void saveNow().catch(() => {});
     }, 600);
     return () => clearTimeout(timer);
-  }, [markdown, settings, ready, saveNow, switching]);
+  }, [markdown, settings, readOnly, ready, saveNow, switching]);
   const activate = (d: Draft) => {
     activeDraft.current = d;
     version.current = Math.max(version.current + 1, d.version);
     current.current = {
+      readOnly: d.readOnly === true,
       markdown: d.markdown,
       settings: validSettings(d.settings),
     };
+    setReadOnly(d.readOnly === true);
     setMarkdown(d.markdown);
     setSettings(current.current.settings);
     setInitial(d.markdown);
@@ -234,6 +247,8 @@ export function useDraftSession({
     markDirty,
     readCurrent,
     changeSettings,
+    readOnly,
+    changeReadOnly,
     saveNow,
     activate,
   };

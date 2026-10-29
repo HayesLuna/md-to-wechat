@@ -214,6 +214,46 @@ button.primary:hover {
 .pane-actions button.active {
   color: var(--accent);
 }
+.pane-actions .read-only-track {
+  display: inline-flex;
+  align-items: center;
+  width: 26px;
+  height: 16px;
+  padding: 2px;
+  border-radius: 2px;
+  background: #c8cbd1;
+}
+.pane-actions .read-only-track > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 1px;
+  background: white;
+  transition: transform 0.14s;
+}
+.read-only-toggle.active .read-only-track {
+  background: var(--accent);
+}
+.read-only-toggle.active .read-only-track > span {
+  transform: translateX(10px);
+}
+@media (max-width: 380px) {
+  .app .pane-tabs {
+    padding: 0 6px;
+  }
+  .app .editor-mode-switches {
+    gap: 4px;
+  }
+  .app .mode-tabs {
+    gap: 8px;
+  }
+  .app .mode-tabs button {
+    font-size: 11px;
+  }
+  .app .pane-actions button {
+    padding: 5px;
+  }
+}
 .toolbar {
   display: flex;
   align-items: center;
@@ -953,6 +993,12 @@ button.primary:hover {
 }
 .context-menu {
   position: fixed;
+  width: 144px;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+}
+.context-menu button {
+  white-space: nowrap;
 }
 .dialog-backdrop {
   position: fixed;
@@ -1438,6 +1484,11 @@ button.primary:hover {
 }
 .app.fullscreen .pane-actions .fullscreen-label {
   display: inline;
+}
+@media (max-width: 380px) {
+  .app.fullscreen .pane-actions .fullscreen-label {
+    display: none;
+  }
 }
 .app.fullscreen .more-menu {
   top: 110px;

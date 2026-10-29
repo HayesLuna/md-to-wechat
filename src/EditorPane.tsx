@@ -14,7 +14,13 @@ import {
 } from './syntax';
 import DOMPurify from 'dompurify';
 import { useEffect, useMemo, useRef } from 'react';
-import type { Editor, EditorOptions, JSONContent } from '@tiptap/core';
+import {
+  Extension,
+  type Editor,
+  type EditorOptions,
+  type JSONContent,
+} from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
 import {
   SizedImage,
   SmartCode,
@@ -84,6 +90,7 @@ export function replaceDocument(editor: Editor, markdown: string) {
     .chain()
     .command(({ tr }) => {
       tr.setMeta('addToHistory', false);
+      tr.setMeta('mojian-load-document', true);
       return true;
     })
     .setContent(json, { emitUpdate: false })
@@ -91,6 +98,7 @@ export function replaceDocument(editor: Editor, markdown: string) {
 }
 export function EditorPane({
   initial,
+  readOnly,
   onReady,
   onChange,
   onDirty,
@@ -99,6 +107,7 @@ export function EditorPane({
   onPasteImage,
 }: {
   initial: string;
+  readOnly: boolean;
   onReady: (e: Editor) => void;
   onChange: (s: string) => void;
   onDirty: () => void;
@@ -106,6 +115,8 @@ export function EditorPane({
   onContext: (event: MouseEvent, editor: Editor) => boolean;
   onPasteImage: (file: File) => void;
 }) {
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const props = useRef({
     onChange,
     onDirty,
@@ -156,6 +167,19 @@ export function EditorPane({
       StructuredTaskItem.configure({ nested: true }),
       EditingRules,
       BlockBoundaries,
+      Extension.create({
+        name: 'readOnlyGuard',
+        addProseMirrorPlugins() {
+          return [
+            new Plugin({
+              filterTransaction: (tr) =>
+                !tr.docChanged ||
+                !readOnlyRef.current ||
+                tr.getMeta('mojian-load-document') === true,
+            }),
+          ];
+        },
+      }),
     ],
     [],
   );
@@ -208,6 +232,7 @@ export function EditorPane({
         },
       },
       handlePaste: (_view, event) => {
+        if (readOnlyRef.current) return true;
         const literal = plainPaste.current;
         plainPaste.current = false;
         const data = event.clipboardData;

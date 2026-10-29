@@ -166,9 +166,19 @@ export default function App() {
     markDirty,
     readCurrent,
     changeSettings,
+    readOnly,
+    changeReadOnly,
     saveNow,
     activate,
   } = useDraftSession({ editor: latestEditor, notify, setDrafts });
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  useLayoutEffect(() => {
+    if (!editor || editor.isEditable === (!readOnly && !switching)) return;
+    editor.setEditable(!readOnly && !switching, false);
+    // Notify node controls without treating the mode change as a content edit.
+    editor.view.dispatch(editor.state.tr);
+  }, [editor, readOnly, switching]);
   const [mode, setMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
   const [preview, setPreview] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -404,7 +414,8 @@ export default function App() {
     } finally {
       switchingRef.current = false;
       setSwitching(false);
-      if (editor && !editor.isDestroyed) editor.setEditable(true, false);
+      if (editor && !editor.isDestroyed)
+        editor.setEditable(!readOnlyRef.current, false);
     }
   };
   const selectDraft = (d: DraftSummary) =>
@@ -575,7 +586,8 @@ export default function App() {
       return;
     }
     if (next === mode) return;
-    if (next === 'source' && editor) clearEmptyBlockParagraph(editor);
+    if (next === 'source' && editor && !readOnly)
+      clearEmptyBlockParagraph(editor);
     readCurrent();
     if (next === 'wysiwyg' && editor)
       replaceDocument(editor, current.current.markdown);
@@ -587,7 +599,7 @@ export default function App() {
   const tableActions = (
     action: 'row' | 'col' | 'deleteRow' | 'deleteCol' | 'delete',
   ) => {
-    if (!editor) return;
+    if (!editor || readOnlyRef.current) return;
     setContext(null);
     if (action === 'row' || action === 'col')
       addCenteredTablePart(editor, action);
@@ -598,7 +610,7 @@ export default function App() {
   const open = (op: Operation) => {
     setContext(null);
     setMenu(false);
-    if (!editor) return;
+    if (!editor || (readOnlyRef.current && op !== 'more')) return;
     if (op === 'table') {
       insertCenteredTable(editor);
       return;
@@ -623,7 +635,7 @@ export default function App() {
     setModal({ type: op });
   };
   const insertLink = () => {
-    if (!editor) return;
+    if (!editor || readOnlyRef.current) return;
     if (!safeURL(url.trim())) {
       setDialogError(
         '请输入完整的 HTTP、HTTPS、mailto 或 tel 地址，禁止危险协议。',
@@ -669,7 +681,7 @@ export default function App() {
     setDialogError('');
   };
   const insertURLImage = async () => {
-    if (!editor || processing) return;
+    if (!editor || processing || readOnlyRef.current) return;
     const address = url.trim();
     if (!/^https?:\/\//i.test(address) || !safeURL(address)) {
       setDialogError('图片地址必须是公开 HTTP 或 HTTPS URL。');
@@ -718,7 +730,7 @@ export default function App() {
     }
   };
   const insertFile = async (file: File, fromPaste = false) => {
-    if (processing || !editor) return;
+    if (processing || !editor || readOnlyRef.current) return;
     if (fromPaste) {
       target.current?.cancel();
       target.current = captureTarget(editor);
@@ -754,6 +766,7 @@ export default function App() {
     }
   };
   const contextMenu = (event: MouseEvent, e: Editor) => {
+    if (readOnlyRef.current) return false;
     if (window.matchMedia('(pointer: coarse)').matches) return false;
     event.preventDefault();
     const hit = e.view.posAtCoords({ left: event.clientX, top: event.clientY });
@@ -787,6 +800,7 @@ export default function App() {
     return true;
   };
   const replaceArticle = (text: string) => {
+    if (readOnlyRef.current) return;
     if (editor) replaceDocument(editor, text);
     changed(text);
     setModal(null);
@@ -795,10 +809,12 @@ export default function App() {
     editor?.commands.focus('start');
   };
   const askReplace = (title: string, message: string, action: () => void) => {
+    if (readOnlyRef.current) return;
     setMenu(false);
     setModal({ type: 'confirm', title, message, action });
   };
   const importFile = async (file: File) => {
+    if (readOnlyRef.current) return;
     if (!/\.md$/i.test(file.name)) {
       notify('请选择 .md Markdown 文件。');
       return;
@@ -944,7 +960,7 @@ export default function App() {
     setFullscreen((f) => !f);
   };
   const tableAlign = (align: 'left' | 'center' | 'right') => {
-    if (editor) {
+    if (editor && !readOnlyRef.current) {
       setContext(null);
       alignTableColumns(editor, align);
     }
@@ -962,8 +978,12 @@ export default function App() {
       el.style.left = '8px';
       el.style.top = '8px';
       const { width, height } = el.getBoundingClientRect();
+      const left =
+        context.x + width <= window.innerWidth - 8
+          ? context.x
+          : context.x - width;
       el.style.left =
-        Math.max(8, Math.min(context.x, window.innerWidth - width - 8)) + 'px';
+        Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px';
       el.style.top =
         Math.max(8, Math.min(context.y, window.innerHeight - height - 8)) +
         'px';
@@ -1059,6 +1079,7 @@ export default function App() {
         <nav className="header-actions">
           <button
             className="import-export"
+            disabled={readOnly}
             onClick={() => fileInput.current?.click()}
           >
             <Upload size={16} />
@@ -1132,6 +1153,25 @@ export default function App() {
             </div>
             <div className="pane-actions">
               <button
+                className={`read-only-toggle ${readOnly ? 'active' : ''}`}
+                role="switch"
+                aria-label="只读模式"
+                aria-checked={readOnly}
+                title={readOnly ? '关闭只读，继续编辑' : '开启只读，防止误改'}
+                disabled={switching || processing}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setContext(null);
+                  setMenu(false);
+                  changeReadOnly(!readOnly);
+                }}
+              >
+                <span>只读</span>
+                <span className="read-only-track" aria-hidden="true">
+                  <span />
+                </span>
+              </button>
+              <button
                 title={fullscreen ? '退出全屏' : '全屏写作'}
                 aria-pressed={fullscreen}
                 onMouseDown={(e) => e.preventDefault()}
@@ -1188,13 +1228,14 @@ export default function App() {
             <div className="writing-content">
               <Toolbar
                 editor={editor}
+                readOnly={readOnly}
                 onOpen={open}
                 source={mode === 'source'}
                 onCopySource={copySource}
               />
               <div className="writing-surface">
                 <div className="context-overlay">
-                  {mode === 'wysiwyg' && inTable && (
+                  {mode === 'wysiwyg' && !readOnly && inTable && (
                     <div className="context-tools" aria-label="表格操作">
                       <span>表格</span>
                       <label className="column-align">
@@ -1249,7 +1290,7 @@ export default function App() {
                       </button>
                     </div>
                   )}
-                  {mode === 'wysiwyg' && linkActive && (
+                  {mode === 'wysiwyg' && !readOnly && linkActive && (
                     <div
                       className="context-tools link-tools"
                       aria-label="链接操作"
@@ -1294,6 +1335,7 @@ export default function App() {
                     <EditorPane
                       key={activeDraft.current?.id}
                       initial={initial}
+                      readOnly={readOnly}
                       onReady={setEditor}
                       onChange={changed}
                       onDirty={editorDirty}
@@ -1307,6 +1349,7 @@ export default function App() {
                       ref={source}
                       className="source-editor"
                       disabled={switching}
+                      readOnly={readOnly}
                       aria-label="Markdown 源码正文"
                       wrap="soft"
                       spellCheck={false}
@@ -1402,6 +1445,7 @@ export default function App() {
             下载本地图片
           </button>
           <button
+            disabled={readOnly}
             onClick={() =>
               askReplace(
                 '替换为示例文章',
@@ -1414,6 +1458,7 @@ export default function App() {
             替换为示例文章
           </button>
           <button
+            disabled={readOnly}
             onClick={() =>
               askReplace(
                 '清空草稿',

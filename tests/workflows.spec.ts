@@ -425,8 +425,9 @@ test('context menu retargets outside selection and stays in viewport', async ({
     await expect(menu).toBeVisible();
     const box = (await menu.boundingBox())!;
     const viewport = page.viewportSize()!;
+    const left = x + box.width <= viewport.width - 8 ? x : x - box.width;
     expect(box.x).toBeCloseTo(
-      Math.max(8, Math.min(x, viewport.width - box.width - 8)),
+      Math.max(8, Math.min(left, viewport.width - box.width - 8)),
       0,
     );
     expect(box.y).toBeCloseTo(
@@ -457,11 +458,30 @@ test('context menu retargets outside selection and stays in viewport', async ({
     })
     .toBeLessThanOrEqual(592);
   await page.keyboard.press('Escape');
+  // With enough vertical room, the right edge of a flipped menu meets the pointer.
+  const narrowBounds = (await page.locator('.article-editor').boundingBox())!;
+  const rightClick = Math.floor(narrowBounds.x + narrowBounds.width - 10);
+  actual = await check(rightClick, 300);
+  expect(actual.x + actual.width).toBeCloseTo(rightClick, 0);
+  expect(actual.y).toBe(300);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect
+    .poll(async () => (await page.locator('.context-menu').boundingBox())!.x)
+    .toBe(rightClick);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 900, height: 600 });
   await setDoc(page, '| A | B |\n| --- | --- |\n| 当前行 | 内容 |');
   const cell = page.locator('.article-editor td').first();
   await cell.scrollIntoViewIfNeeded();
   const target = (await cell.boundingBox())!;
   await check(target.x + 20, target.y + 10);
+  await expect(page.locator('.context-menu')).toContainText('删除整表');
+  await page.keyboard.press('Escape');
+  const lastCell = page.locator('.article-editor td').last();
+  const lastTarget = (await lastCell.boundingBox())!;
+  const tableClick = Math.floor(lastTarget.x + lastTarget.width - 10);
+  actual = await check(tableClick, lastTarget.y + 10);
+  expect(actual.x + actual.width).toBeCloseTo(tableClick, 0);
   await expect(page.locator('.context-menu')).toContainText('删除整表');
   await page.keyboard.press('Escape');
 });
