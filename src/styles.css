@@ -877,7 +877,7 @@ button.primary:hover {
   position: sticky;
   left: 0;
   z-index: 1;
-  width: 3ch;
+  width: var(--code-line-number-width, 1ch);
   margin-left: -1em;
   padding-left: 1em;
   padding-right: 1em;

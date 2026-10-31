@@ -130,6 +130,39 @@ test('GitHub colors agree in editor and preview, preview has line numbers, and M
     visible: true,
   });
 });
+test('preview line number width follows digit boundaries and shrinks after editing', async ({
+  page,
+}) => {
+  await ready(page, '```text\nline\n```');
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  const card = page.locator('.preview-paper [data-code-block]');
+  const widths: number[] = [];
+  for (const count of [9, 10, 99, 100, 999, 1000, 9]) {
+    await page.evaluate((count) => {
+      (window as any).__mojian.setMarkdown(
+        '```text\n' + Array(count).fill('line').join('\n') + '\n```',
+      );
+    }, count);
+    await expect(card.locator('[data-code-line]')).toHaveCount(count);
+    const geometry = await card.evaluate((el) => {
+      const lines = el.querySelectorAll('[data-code-line]');
+      const first = lines[0];
+      const last = lines[lines.length - 1];
+      return {
+        width: parseFloat(getComputedStyle(first, '::before').width),
+        first: first.firstElementChild!.getBoundingClientRect().left,
+        last: last.firstElementChild!.getBoundingClientRect().left,
+      };
+    });
+    expect(geometry.first).toBeCloseTo(geometry.last, 1);
+    widths.push(geometry.width);
+  }
+  const unit = widths[0];
+  expect(unit).toBeGreaterThan(0);
+  for (const [i, digits] of [1, 2, 2, 3, 3, 4, 1].entries())
+    expect(widths[i]).toBeCloseTo(unit * digits, 1);
+});
+
 test('preview line numbers stay fixed while long code scrolls in both themes', async ({
   page,
 }) => {

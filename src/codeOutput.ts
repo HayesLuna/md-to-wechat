@@ -279,7 +279,7 @@ function* buildCodeCard(
   container.setAttribute('data-code-lines', '');
   container.setAttribute(
     'style',
-    'display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:pre !important;',
+    `display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:pre !important;--code-line-number-width:${String(lines.length).length}ch;`,
   );
   for (const [i, line] of lines.entries()) {
     const section = document.createElement('section');
