@@ -32,6 +32,7 @@ import {
   Trash2,
   RotateCcw,
   HelpCircle,
+  Share2,
 } from 'lucide-react';
 import { SAMPLE } from './sample';
 import { buildInfo, versionLabel, buildTime } from './buildInfo';
@@ -49,6 +50,7 @@ import {
   download,
   downloadImage,
   imageExists,
+  draftTitle,
 } from './storage';
 import type { Asset } from './output';
 import { useArticleOutput } from './useArticleOutput';
@@ -68,6 +70,28 @@ import { DocumentSidebar } from './DocumentSidebar';
 const MediaPreview = lazy(() =>
   import('./MediaPreview').then((module) => ({ default: module.MediaPreview })),
 );
+const ShareDialog = lazy(() =>
+  import('./sharing/ShareDialog')
+    .then((module) => ({ default: module.ShareDialog }))
+    .catch(() => ({ default: ShareUnavailable })),
+);
+const ShareImport = lazy(() =>
+  import('./sharing/ShareImport')
+    .then((module) => ({ default: module.ShareImport }))
+    .catch(() => ({ default: ShareUnavailable })),
+);
+function ShareUnavailable({ onClose }: { onClose: () => void }) {
+  return (
+    <Dialog title="分享暂不可用" onClose={onClose}>
+      <p role="alert">
+        分享模块加载失败，请联网后刷新页面重试。当前本地草稿已保留。
+      </p>
+      <div className="dialog-actions">
+        <button onClick={onClose}>返回编辑器</button>
+      </div>
+    </Dialog>
+  );
+}
 import { revealSourcePosition } from './sourceEditor';
 import type { MediaPreviewItem } from './mediaPreviewEvents';
 import {
@@ -185,6 +209,17 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareImportQueue = useRef<Promise<void>>(Promise.resolve());
+  const [shareHash, setShareHash] = useState(() =>
+    location.hash.startsWith('#share=') ? location.hash : '',
+  );
+  useEffect(() => {
+    const update = () =>
+      setShareHash(location.hash.startsWith('#share=') ? location.hash : '');
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
   const [context, setContext] = useState<{ x: number; y: number } | null>(null);
   const [downloadAssets, setDownloadAssets] = useState<Asset[]>([]);
   const downloadRequest = useRef(0);
@@ -288,7 +323,10 @@ export default function App() {
         return;
       }
       if (e.key === 'Escape') {
-        if (media) {
+        if (shareOpen || shareHash) {
+          // Sharing dialogs handle their own busy state and Escape behavior.
+          return;
+        } else if (media) {
           e.preventDefault();
           setMedia(null);
         } else if (modal) {
@@ -340,6 +378,8 @@ export default function App() {
     editor,
     saveNow,
     ready,
+    shareOpen,
+    shareHash,
   ]);
   useEffect(() => {
     if (fullscreen) {
@@ -418,6 +458,48 @@ export default function App() {
       if (editor && !editor.isDestroyed)
         editor.setEditable(!readOnlyRef.current, false);
     }
+  };
+  const receiveSharedArticle = (read: () => Promise<Draft>) => {
+    // A hash change cancels the old download. Wait for its cleanup before
+    // importing the next link, so one canceled import cannot unlock another.
+    const pending = shareImportQueue.current
+      .catch(() => {})
+      .then(async () => {
+        if (switchingRef.current) throw new Error('正在切换草稿，请稍后重试。');
+        switchingRef.current = true;
+        setSwitching(true);
+        try {
+          await saveNow();
+          const draft = await read();
+          await saveDraft(draft, draft.version);
+          savedVersions.current.set(draft.id, draft.version);
+          setDrafts((await loadDraftLibrary()).drafts);
+          activateDraft(draft);
+          setShareOpen(false);
+          notify('分享文章已保存到本地，修改只影响你的副本');
+        } finally {
+          switchingRef.current = false;
+          setSwitching(false);
+        }
+      });
+    shareImportQueue.current = pending;
+    return pending;
+  };
+  const closeShareImport = () => {
+    // Keep signed download credentials out of later navigation/referrers.
+    if (location.hash.startsWith('#share='))
+      history.replaceState(null, '', location.pathname + location.search);
+    setShareHash('');
+  };
+  const shareArticle = () => {
+    const snapshot = current.current;
+    const draft = activeDraft.current!;
+    return {
+      id: draft.id,
+      title: draft.customTitle ? draft.title : draftTitle(snapshot.markdown),
+      markdown: snapshot.markdown,
+      settings: snapshot.settings,
+    };
   };
   const selectDraft = (d: DraftSummary) =>
     void draftOperation(async () => {
@@ -1079,6 +1161,21 @@ export default function App() {
         </div>
         <nav className="header-actions">
           <button
+            className="share-launch"
+            aria-label="分享当前文章"
+            title="分享当前文章"
+            disabled={switching || !!shareHash}
+            onClick={() => {
+              readCurrent();
+              setShareOpen(true);
+              setMenu(false);
+              setContext(null);
+            }}
+          >
+            <Share2 size={16} />
+            <span>分享</span>
+          </button>
+          <button
             className="import-export"
             disabled={readOnly}
             onClick={() => fileInput.current?.click()}
@@ -1532,6 +1629,42 @@ export default function App() {
             </>
           )}
         </div>
+      )}
+      {shareOpen && !shareHash && (
+        <Suspense
+          fallback={
+            <Dialog title="分享当前文章" onClose={() => setShareOpen(false)}>
+              <p className="share-progress">
+                <Loader2 className="spin" size={16} />
+                正在打开分享设置…
+              </p>
+            </Dialog>
+          }
+        >
+          <ShareDialog
+            article={shareArticle()}
+            getArticle={() => {
+              readCurrent();
+              return shareArticle();
+            }}
+            onClose={() => setShareOpen(false)}
+          />
+        </Suspense>
+      )}
+      {shareHash && (
+        <Suspense
+          fallback={
+            <div className="dialog-backdrop">
+              <p className="loading">正在打开分享文章…</p>
+            </div>
+          }
+        >
+          <ShareImport
+            hash={shareHash}
+            onImport={receiveSharedArticle}
+            onClose={closeShareImport}
+          />
+        </Suspense>
       )}
       {modal && (
         <Dialog

@@ -2540,3 +2540,164 @@ button.primary:hover {
     height: 16px;
   }
 }
+
+/* Sharing stays focused on the current article. */
+.share-dialog {
+  width: 480px;
+}
+.share-article-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+.share-article-title {
+  margin: 0;
+  font-weight: 500;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.share-dialog .share-text-button {
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  box-shadow: none;
+  color: #747984;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.share-dialog .share-text-button:hover {
+  color: #303036;
+}
+.share-dialog button {
+  gap: 5px;
+}
+.share-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.share-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 12px 0;
+  color: #626773;
+  font-size: 12px;
+}
+.share-fields > label:first-child {
+  margin-top: 0;
+}
+.share-dialog select {
+  border: 1px solid #d7dbe0;
+  border-radius: 4px;
+  background: #fff;
+  color: #303036;
+  padding: 9px 10px;
+  min-width: 0;
+  font: inherit;
+}
+.share-field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.share-fields .share-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.share-checkbox input {
+  width: auto;
+}
+.share-options,
+.share-settings-actions,
+.share-record-meta,
+.share-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.share-options {
+  flex-wrap: wrap;
+}
+.share-options label {
+  color: #747984;
+  font-size: 12px;
+}
+.share-options select {
+  padding: 6px 10px;
+}
+.share-settings-actions,
+.share-record-meta {
+  justify-content: space-between;
+}
+.share-settings-actions {
+  gap: 18px;
+  margin-top: 22px;
+}
+.share-settings-actions .dialog-actions {
+  margin-top: 0;
+}
+.share-dialog .dialog-actions {
+  flex-wrap: wrap;
+}
+.share-advanced {
+  margin-top: 18px;
+  font-size: 12px;
+  color: #747984;
+}
+.share-advanced summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.share-advanced[open] > summary {
+  margin-bottom: 14px;
+}
+.share-record {
+  margin-top: 24px;
+}
+.share-link-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.share-link-row input {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.share-link-row button {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.share-record-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #92959d;
+}
+.share-status {
+  font-size: 12px;
+  color: #747984;
+  margin: 14px 0 0;
+}
+.share-create-actions {
+  margin-top: 24px;
+}
+@media (max-width: 600px) {
+  .header-actions .share-launch {
+    padding: 8px;
+  }
+  .share-launch span {
+    display: none;
+  }
+  .share-field-pair {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

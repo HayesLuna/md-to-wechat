@@ -447,3 +447,51 @@ export async function downloadImage(src: string, name: string) {
     )[blob.type] || 'png';
   download(blob, name + '.' + extension);
 }
+
+// One transaction commits the draft, all images and its import identity. Concurrent
+// tabs importing the same share reuse the winner without overwriting its edits.
+export async function importedShareDraft(source: string) {
+  const database = await db();
+  const tx = database.transaction(['meta', 'draft']);
+  const id = await tx.objectStore('meta').get('share-import:' + source);
+  const draft = id ? await tx.objectStore('draft').get(id) : undefined;
+  await tx.done;
+  return draft;
+}
+
+export async function importSharedDraft(
+  draft: Draft,
+  images: { id: string; blob: Blob }[],
+  source: string,
+) {
+  const database = await db();
+  const tx = database.transaction(
+    ['draft', 'draftInfo', 'images', 'meta'],
+    'readwrite',
+  );
+  const meta = tx.objectStore('meta');
+  const id = await meta.get('share-import:' + source);
+  const previous = id ? await tx.objectStore('draft').get(id) : undefined;
+  if (previous) {
+    await meta.put(previous.id, 'active');
+    await tx.done;
+    return previous;
+  }
+  await tx.objectStore('draft').put(draft, draft.id);
+  await tx.objectStore('draftInfo').put(draftInfo(draft), draft.id);
+  for (const image of images)
+    await tx.objectStore('images').put(image.blob, image.id);
+  const order = await meta.get(DRAFT_ORDER_KEY);
+  if (order)
+    await meta.put(
+      JSON.stringify([
+        draft.id,
+        ...parseDraftOrder(order).filter((id) => id !== draft.id),
+      ]),
+      DRAFT_ORDER_KEY,
+    );
+  await meta.put(draft.id, 'active');
+  await meta.put(draft.id, 'share-import:' + source);
+  await tx.done;
+  return draft;
+}

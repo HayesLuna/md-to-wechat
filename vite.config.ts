@@ -30,6 +30,18 @@ export default defineConfig(({ command }) => {
   return {
     base: './',
     define: { __BUILD_INFO__: JSON.stringify(buildInfo) },
+    // Sharing uses lazy SDKs and Markdown-it rules. Prebundle their entries so
+    // the first share action doesn't trigger a development-page reload.
+    optimizeDeps: {
+      include: [
+        'ali-oss',
+        'cos-js-sdk-v5/index.js',
+        '@aws-sdk/client-s3',
+        '@aws-sdk/s3-request-presigner',
+        'markdown-it/lib/rules_inline/image.mjs',
+        'markdown-it/lib/rules_block/reference.mjs',
+      ],
+    },
     plugins: [
       react(),
       {

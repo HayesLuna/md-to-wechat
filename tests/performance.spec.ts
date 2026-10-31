@@ -693,3 +693,119 @@ test('bounded block tokenizers retain code-span pipes in tables and nested mixed
   await expect(editor).toContainText('普通子项');
   await expect(editor).toContainText('后续正文');
 });
+
+test('sharing large text and image packages keeps the main thread responsive', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90000);
+  await page.route('**/sharing-performance', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<html><title>Sharing performance</title></html>',
+    }),
+  );
+  await page.goto('/sharing-performance');
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  try {
+    const results = await page.evaluate(async () => {
+      const { createArticlePackage, readArticlePackage } =
+        await import('/src/sharing/articlePackage.ts');
+      const { storeImage } = await import('/src/storage.ts');
+      const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d')!;
+      const pixels = ctx.createImageData(canvas.width, canvas.height);
+      for (let offset = 0; offset < pixels.data.length; offset += 65536)
+        crypto.getRandomValues(pixels.data.subarray(offset, offset + 65536));
+      ctx.putImageData(pixels, 0, 0);
+      const image = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((blob) => resolve(blob!), 'image/png'),
+      );
+      const sources: string[] = [];
+      for (let i = 0; i < 6; i++) sources.push(await storeImage(image));
+      async function measure<T>(run: () => Promise<T>) {
+        let active = true;
+        let last = 0;
+        let maxFrameGap = 0;
+        const frames = (now: number) => {
+          if (!active) return;
+          if (last) maxFrameGap = Math.max(maxFrameGap, now - last);
+          last = now;
+          requestAnimationFrame(frames);
+        };
+        requestAnimationFrame(frames);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        maxFrameGap = 0;
+        const start = performance.now();
+        const value = await run();
+        const elapsed = performance.now() - start;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        active = false;
+        return {
+          value,
+          elapsed: Math.round(elapsed),
+          maxFrameGap: Math.round(maxFrameGap),
+        };
+      }
+      const markdown =
+        ('# 长文\n\n' + '普通正文。'.repeat(100) + '\n\n').repeat(3200) +
+        '\n\n![图](' +
+        sources[0] +
+        ')';
+      const textPackage = await createArticlePackage({
+        title: '长文',
+        markdown,
+        settings: DEFAULT_SETTINGS,
+      });
+      const text = await measure(
+        async () =>
+          (
+            await readArticlePackage(
+              new Uint8Array(await textPackage.blob.arrayBuffer()),
+            )
+          ).draft.markdown.length,
+      );
+      let imagePackage: { blob: Blob; sha256: string };
+      const images = await measure(async () => {
+        imagePackage = await createArticlePackage({
+          title: '多图',
+          markdown: sources
+            .map((source) => '![图](' + source + ')')
+            .join('\n\n'),
+          settings: DEFAULT_SETTINGS,
+        });
+        return imagePackage.blob.size;
+      });
+      const readImages = await measure(
+        async () =>
+          (
+            await readArticlePackage(
+              new Uint8Array(await imagePackage.blob.arrayBuffer()),
+            )
+          ).images.length,
+      );
+      return {
+        text,
+        images,
+        readImages,
+        textLength: markdown.length,
+        imageBytes: image.size * 6,
+      };
+    });
+    expect(results.text.value).toBe(results.textLength);
+    expect(results.imageBytes).toBeGreaterThan(45 * 1024 * 1024);
+    expect(results.readImages.value).toBe(6);
+    for (const measurement of [
+      results.text,
+      results.images,
+      results.readImages,
+    ])
+      expect(measurement.maxFrameGap).toBeLessThan(150);
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  }
+});
