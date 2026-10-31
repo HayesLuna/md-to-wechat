@@ -864,12 +864,24 @@ button.primary:hover {
 .preview-paper [data-code-lines] {
   counter-reset: code-line;
 }
+.preview-paper [data-code-scroll],
+.preview-paper [data-code-block] code,
+.preview-paper [data-code-lines],
+.preview-paper [data-code-line] {
+  background-color: inherit;
+}
 .preview-paper [data-code-line]::before {
   counter-increment: code-line;
   content: counter(code-line);
   display: inline-block;
+  position: sticky;
+  left: 0;
+  z-index: 1;
   width: 3ch;
+  margin-left: -1em;
+  padding-left: 1em;
   padding-right: 1em;
+  background-color: inherit;
   color: #8b949e;
   text-align: right;
   font-style: normal;

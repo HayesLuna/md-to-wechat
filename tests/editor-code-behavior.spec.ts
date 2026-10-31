@@ -130,6 +130,62 @@ test('GitHub colors agree in editor and preview, preview has line numbers, and M
     visible: true,
   });
 });
+test('preview line numbers stay fixed while long code scrolls in both themes', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const line = 'const value = "' + 'long_code_'.repeat(40) + '";';
+  await ready(page, `\`\`\`js\n${line}\n\n${line}\n\`\`\``);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');
+  const card = page.locator('.preview-paper [data-code-block]');
+  for (const [theme, background] of [
+    ['浅色', 'rgb(255, 255, 255)'],
+    ['深色', 'rgb(13, 17, 23)'],
+  ]) {
+    await page.getByRole('button', { name: theme, exact: true }).click();
+    await expect(card.locator('pre')).toHaveCSS('background-color', background);
+    await expect(card.locator('[data-code-line]')).toHaveCount(3);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await card.scrollIntoViewIfNeeded();
+      const scroll = card.locator('[data-code-scroll]');
+      await scroll.evaluate((el) => (el.scrollLeft = 0));
+      const textLeft = () =>
+        card
+          .locator('[data-code-line] > span')
+          .first()
+          .evaluate((el) => el.getBoundingClientRect().left);
+      const before = await textLeft();
+      for (const offset of [100, 5000, 0]) {
+        await scroll.evaluate((el, x) => (el.scrollLeft = x), offset);
+        const actual = await scroll.evaluate((el) => el.scrollLeft);
+        if (offset) expect(actual).toBeGreaterThan(0);
+        expect(await textLeft()).toBeCloseTo(before - actual, 0);
+        const gutter = await scroll.evaluate((el) => {
+          const line = el.querySelector('[data-code-line]')!;
+          const bounds = line.getBoundingClientRect();
+          const style = getComputedStyle(line, '::before');
+          return {
+            fixed:
+              document.elementFromPoint(
+                el.getBoundingClientRect().left + 20,
+                bounds.top + bounds.height / 2,
+              ) === line,
+            background: style.backgroundColor,
+          };
+        });
+        expect(gutter).toEqual({ fixed: true, background });
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBe(width);
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
 for (const [name, markdown, from, to, expected] of [
   ['empty paragraph', '', 1, 1, '\tX'],
   ['paragraph end', '正文', 3, 3, '正文\tX'],
