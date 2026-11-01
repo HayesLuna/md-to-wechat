@@ -1681,7 +1681,8 @@ test('settings show text, modal transitions and real loading feedback without na
   for (const width of [320, 390, 1440]) {
     await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
     const entry = page.getByRole('button', { name: '存储设置', exact: true });
-    await expect(entry.locator('span')).toBeVisible();
+    if (width <= 800) await expect(entry.locator('span')).toBeHidden();
+    else await expect(entry.locator('span')).toBeVisible();
     await expect(entry).toHaveText('存储设置');
     const layout = await page.locator('.header-actions').evaluate((element) => {
       const buttons = Array.from(element.querySelectorAll('button'))

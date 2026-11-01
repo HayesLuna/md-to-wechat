@@ -1199,13 +1199,18 @@ export default function App() {
           </button>
           <button
             className="import-export"
+            aria-label="导入 Markdown"
             disabled={readOnly}
             onClick={() => fileInput.current?.click()}
           >
             <Upload size={16} />
             <span>导入 Markdown</span>
           </button>
-          <button className="import-export" onClick={exportMD}>
+          <button
+            className="import-export"
+            aria-label="导出 Markdown"
+            onClick={exportMD}
+          >
             <Download size={16} />
             <span>导出 Markdown</span>
           </button>
@@ -1218,6 +1223,7 @@ export default function App() {
           </button>
           <button
             className="primary copy-main"
+            aria-label={copying ? '复制中…' : '复制到公众号'}
             onClick={requestCopy}
             disabled={copying}
           >
