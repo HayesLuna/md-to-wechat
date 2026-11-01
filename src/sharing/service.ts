@@ -1,4 +1,8 @@
 import {
+  credentialErrorMessage,
+  credentialResponseError,
+} from './storageErrors';
+import {
   createArticlePackage,
   importArticlePackage,
   MAX_PACKAGE_BYTES,
@@ -84,6 +88,8 @@ export async function fetchShareBytes(url: string, signal?: AbortSignal) {
       : AbortSignal.timeout(60_000),
   });
   if (!response.ok) {
+    const expired = await credentialResponseError(response);
+    if (expired) throw expired;
     if ([401, 403, 404, 410].includes(response.status))
       throw new Error('分享已过期、已取消或没有读取权限。');
     throw new Error('下载未完成，请稍后重试。');
@@ -130,12 +136,14 @@ export async function createShare(
   const storage = await makeStorage(config);
   try {
     await storage.upload(key, blob);
-  } catch {
-    throw new Error(shareError());
+  } catch (error) {
+    throw new Error(credentialErrorMessage(error) || shareError(), {
+      cause: error,
+    });
   }
   let record: ShareRecord;
   try {
-    // Packaging and upload may take time; calculate credential lifetime again.
+    // Validate the configured share duration again after packaging and upload.
     const seconds = shareLifetime(config, requestedSeconds);
     const createdAt = Date.now();
     const expiresAt = createdAt + seconds * 1000;
@@ -166,10 +174,12 @@ export async function createShare(
       },
     };
     addShareRecord(record);
-  } catch {
+  } catch (error) {
     await storage.remove(key).catch(() => {});
     throw new Error(
-      '分享链接未能生成或保存，请检查凭证有效期和浏览器存储后重试。',
+      credentialErrorMessage(error) ||
+        '分享链接未能生成或保存，请检查凭证和浏览器存储后重试。',
+      { cause: error },
     );
   }
   return record;
@@ -190,12 +200,13 @@ export async function receiveShare(hash: string, signal?: AbortSignal) {
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new Error(
-      error instanceof TypeError ||
+      credentialErrorMessage(error, true) ||
+        (error instanceof TypeError ||
         (error instanceof DOMException && error.name === 'TimeoutError')
-        ? '下载失败，请检查网络和存储服务的 CORS 配置后重试。'
-        : error instanceof Error
-          ? error.message
-          : '下载失败，请重试。',
+          ? '下载失败，请检查网络和存储服务的 CORS 配置后重试。'
+          : error instanceof Error
+            ? error.message
+            : '下载失败，请重试。'),
       { cause: error },
     );
   }
@@ -216,8 +227,10 @@ export async function cancelShare(
   const storage = await makeStorage(config);
   try {
     await storage.remove(record.key);
-  } catch {
-    throw new Error(shareError());
+  } catch (error) {
+    throw new Error(credentialErrorMessage(error) || shareError(), {
+      cause: error,
+    });
   }
   removeShareRecord(record.id);
 }
@@ -243,11 +256,13 @@ export async function testShareStorage(
       throw new Error();
     await storage.remove(key);
     removed = true;
-  } catch {
+  } catch (error) {
     throw new Error(
-      uploaded
-        ? '连接测试未完成：上传成功，请检查下载、删除权限及 CORS。临时测试文件可通过桶的生命周期规则清理。'
-        : shareError(),
+      credentialErrorMessage(error) ||
+        (uploaded
+          ? '连接测试未完成：上传成功，请检查下载、删除权限及 CORS。临时测试文件可通过桶的生命周期规则清理。'
+          : shareError()),
+      { cause: error },
     );
   } finally {
     if (uploaded && !removed) await storage.remove(key).catch(() => {});

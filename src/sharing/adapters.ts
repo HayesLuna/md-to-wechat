@@ -1,3 +1,4 @@
+import { credentialResponseError } from './storageErrors';
 import { validateConfig } from './config';
 import type { ShareStorage, ShareStorageConfig } from './types';
 
@@ -44,9 +45,6 @@ export async function createShareStorage(
         SecretId: config.accessKeyId,
         SecretKey: config.accessKeySecret,
         SecurityToken: config.sessionToken || undefined,
-        ExpiredTime: config.credentialExpiresAt
-          ? Math.floor(Date.parse(config.credentialExpiresAt) / 1000)
-          : undefined,
         Domain: config.endpoint ? new URL(config.endpoint).host : undefined,
         Protocol: 'https:',
         Timeout: 60_000,
@@ -129,7 +127,10 @@ export async function createShareStorage(
             credentials: 'omit',
             referrerPolicy: 'no-referrer',
           });
-          if (!response.ok) throw new Error('上传失败');
+          if (!response.ok)
+            throw (
+              (await credentialResponseError(response)) || new Error('上传失败')
+            );
         },
         downloadURL: (key, expiresIn) =>
           getSignedUrl(client, new GetObjectCommand({ ...target, Key: key }), {

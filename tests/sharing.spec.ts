@@ -19,7 +19,6 @@ const config = {
   accessKeyId: 'test-key-id',
   accessKeySecret: 'test-secret-only-sender',
   sessionToken: '',
-  credentialExpiresAt: '',
 };
 
 async function ready(page: Page) {
@@ -65,12 +64,44 @@ async function mockBucket(
   });
 }
 
+async function openStorageSettings(page: Page) {
+  await expect(
+    page.locator('.dialog-backdrop[data-closing="true"]'),
+  ).toHaveCount(0);
+  if (
+    await page
+      .getByRole('dialog', { name: '分享存储设置', exact: true })
+      .isVisible()
+  )
+    return;
+  if (await page.getByRole('dialog').count()) {
+    await page.getByRole('button', { name: '关闭弹窗', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '分享存储设置', exact: true }),
+  ).toBeVisible();
+}
+
 async function configure(page: Page, provider: StorageProvider) {
   await page.getByRole('button', { name: '分享当前文章', exact: true }).click();
+  await page.getByRole('button', { name: '配置存储', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: '分享存储设置' }),
   ).toBeVisible();
-  await page.getByLabel('存储类型', { exact: true }).selectOption(provider);
+  await page.getByRole('combobox', { name: '存储类型', exact: true }).click();
+  await page
+    .getByRole('option', {
+      name:
+        provider === 'oss'
+          ? '阿里云 OSS'
+          : provider === 'cos'
+            ? '腾讯云 COS'
+            : 'MinIO',
+      exact: true,
+    })
+    .click();
   await page
     .getByLabel('Bucket', { exact: true })
     .fill(provider === 'cos' ? 'mojian-test-123456' : 'mojian-test');
@@ -103,7 +134,7 @@ async function configure(page: Page, provider: StorageProvider) {
     .fill(config.accessKeySecret);
 }
 
-test('share descriptors reject invalid URLs and credentials cap the actual lifetime', () => {
+test('share descriptors reject invalid URLs and STS credentials need no manual expiry', () => {
   const descriptor = {
     version: 1 as const,
     id: '12345678-1234-1234-1234-123456789abc',
@@ -132,19 +163,13 @@ test('share descriptors reject invalid URLs and credentials cap the actual lifet
   }
   expect(() => decodeShareLink('#share=%invalid')).toThrow();
   expect(shareLifetime(config, 604800)).toBe(604800);
-  const seconds = shareLifetime(
-    {
-      ...config,
-      sessionToken: 'temporary',
-      credentialExpiresAt: new Date(Date.now() + 3600000).toISOString(),
-    },
+  expect(shareLifetime({ ...config, sessionToken: 'temporary' }, 604800)).toBe(
     604800,
   );
-  expect(seconds).toBeGreaterThan(3500);
-  expect(seconds).toBeLessThan(3600);
-  expect(() =>
-    shareLifetime({ ...config, sessionToken: 'temporary' }, 604800),
-  ).toThrow('到期时间');
+  expect(shareLifetime({ ...config, sessionToken: 'temporary' }, 3600)).toBe(
+    3600,
+  );
+  expect(shareLifetime(config, 604801)).toBe(604800);
 });
 
 test('image ID remapping preserves source text and code, including nested and reference images', () => {
@@ -247,9 +272,29 @@ for (const provider of ['oss', 'cos', 'minio'] as const) {
     await configure(page, provider);
     await page.getByRole('button', { name: '测试连接', exact: true }).click();
     await expect(
-      page.getByRole('status').filter({ hasText: '连接正常' }),
+      page.getByRole('status', { name: '连接测试成功', exact: true }),
     ).toBeVisible();
     expect(objects.size).toBe(0);
+    await expect(page.getByText('连接正常', { exact: true })).toHaveCount(0);
+    if (provider === 'oss' && process.env.SHARING_QA_SCREENSHOTS) {
+      await page.getByText('高级设置', { exact: true }).click();
+      await page
+        .getByRole('dialog')
+        .screenshot({ path: '/tmp/mojian-connection-check-desktop.png' });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page
+        .getByRole('dialog')
+        .screenshot({ path: '/tmp/mojian-connection-check-mobile.png' });
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
+    const region = await page
+      .getByLabel('Region', { exact: true })
+      .inputValue();
+    await page.getByLabel('Region', { exact: true }).fill(region + '-changed');
+    await expect(
+      page.getByRole('status', { name: '连接测试成功', exact: true }),
+    ).toHaveCount(0);
+    await page.getByLabel('Region', { exact: true }).fill(region);
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
     await page
       .getByRole('button', { name: '生成分享链接', exact: true })
@@ -279,7 +324,8 @@ for (const provider of ['oss', 'cos', 'minio'] as const) {
       await page
         .getByRole('button', { name: '生成新链接', exact: true })
         .click();
-      await page.getByLabel('有效期', { exact: true }).selectOption('3600');
+      await page.getByRole('combobox', { name: '有效期', exact: true }).click();
+      await page.getByRole('option', { name: '1 小时', exact: true }).click();
       await expect(
         page.getByRole('button', { name: '复制分享链接', exact: true }),
       ).toHaveCount(0);
@@ -311,6 +357,9 @@ for (const provider of ['oss', 'cos', 'minio'] as const) {
     const friend = await recipient.newPage();
     friend.on('pageerror', (e) => errors.push(e.message));
     await friend.goto(link);
+    await friend
+      .getByRole('button', { name: '导入到本地', exact: true })
+      .click();
     await expect(friend.getByRole('dialog')).toHaveCount(0);
     await expect
       .poll(() => friend.evaluate(() => window.__mojian?.getMarkdown()))
@@ -357,6 +406,9 @@ for (const provider of ['oss', 'cos', 'minio'] as const) {
     // object disappears or the original link expires.
     objects.clear();
     await friend.goto(link);
+    await friend
+      .getByRole('button', { name: '导入到本地', exact: true })
+      .click();
     await expect
       .poll(() => friend.evaluate(() => window.__mojian?.getMarkdown()))
       .toBe('# 好友自己的修改');
@@ -510,7 +562,7 @@ test('another tab remembering credentials cannot persist this tab session-only s
   }));
   expect(stored.persistent).not.toContain(own.accessKeySecret);
   expect(stored.session).toContain(own.accessKeySecret);
-  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await openStorageSettings(page);
   await expect(
     page.getByLabel('在此浏览器记住凭证', { exact: true }),
   ).not.toBeChecked();
@@ -557,6 +609,7 @@ test('bad and expired links preserve current drafts; credentials can be forgotte
   await page.evaluate(() => window.__mojian!.setMarkdown('# 必须保留的正文'));
   await expect(page.locator('.save-indicator')).toContainText('已保存到本地');
   await page.goto('/#share=broken');
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('分享链接不完整');
   await page.getByRole('button', { name: '返回编辑器' }).click();
   expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
@@ -573,6 +626,7 @@ test('bad and expired links preserve current drafts; credentials can be forgotte
     page.url(),
   );
   await page.goto(expired);
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('已过期');
   await page.getByRole('button', { name: '返回编辑器' }).click();
   await page.route('https://oss.share-test.example/tampered', async (route) => {
@@ -594,6 +648,7 @@ test('bad and expired links preserve current drafts; credentials can be forgotte
     page.url(),
   );
   await page.goto(tampered);
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('校验失败');
   await page.getByRole('button', { name: '返回编辑器' }).click();
   expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
@@ -606,20 +661,80 @@ test('bad and expired links preserve current drafts; credentials can be forgotte
   expect(
     await page.evaluate(() => localStorage.getItem('mojian-share-config-v1')),
   ).toContain(config.accessKeySecret);
-  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await openStorageSettings(page);
   await page.getByLabel('在此浏览器记住凭证', { exact: true }).uncheck();
   await page.getByRole('button', { name: '保存配置', exact: true }).click();
   expect(
     await page.evaluate(() => localStorage.getItem('mojian-share-config-v1')),
   ).not.toContain(config.accessKeySecret);
-  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await openStorageSettings(page);
   if (
-    !(await page
+    await page
       .locator('.share-advanced')
-      .evaluate((element) => (element as HTMLDetailsElement).open))
+      .evaluate((element) => (element as HTMLDetailsElement).open)
   )
     await page.getByText('高级设置', { exact: true }).click();
+  const credentialsBefore = await page.evaluate(() => ({
+    local: localStorage.getItem('mojian-share-config-v1'),
+    session: sessionStorage.getItem('mojian-share-credentials-v1'),
+  }));
+  await page
+    .getByLabel('AccessKey Secret', { exact: true })
+    .fill('unsaved-secret');
   await page.getByRole('button', { name: '清除凭证', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '清除凭证', exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => ({
+      local: localStorage.getItem('mojian-share-config-v1'),
+      session: sessionStorage.getItem('mojian-share-credentials-v1'),
+    })),
+  ).toEqual(credentialsBefore);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(
+    page.getByLabel('AccessKey Secret', { exact: true }),
+  ).toHaveValue('unsaved-secret');
+  for (const dismiss of ['escape', 'close', 'backdrop']) {
+    await page.getByRole('button', { name: '清除凭证', exact: true }).click();
+    await expect(
+      page.getByRole('dialog', { name: '清除凭证', exact: true }),
+    ).toBeVisible();
+    if (dismiss === 'escape') await page.keyboard.press('Escape');
+    else if (dismiss === 'close')
+      await page.getByRole('button', { name: '关闭弹窗', exact: true }).click();
+    else
+      await page
+        .locator('.dialog-backdrop')
+        .click({ position: { x: 2, y: 2 } });
+    await expect(
+      page.getByRole('dialog', { name: '分享存储设置', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel('AccessKey Secret', { exact: true }),
+    ).toHaveValue('unsaved-secret');
+    expect(
+      await page.evaluate(() => ({
+        local: localStorage.getItem('mojian-share-config-v1'),
+        session: sessionStorage.getItem('mojian-share-credentials-v1'),
+      })),
+    ).toEqual(credentialsBefore);
+  }
+  await page.getByRole('button', { name: '清除凭证', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '清除凭证', exact: true }),
+  ).toBeVisible();
+  if (process.env.SHARING_QA_SCREENSHOTS) {
+    await page
+      .getByRole('dialog')
+      .screenshot({ path: '/tmp/mojian-clear-confirm-mobile.png' });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole('dialog')
+      .screenshot({ path: '/tmp/mojian-clear-confirm-desktop.png' });
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+  await page.getByRole('button', { name: '确认清除', exact: true }).click();
   await expect(
     page.getByLabel('AccessKey Secret', { exact: true }),
   ).toHaveValue('');
@@ -674,7 +789,6 @@ test('temporary credentials sign GET only; session credentials remain bound to t
               : 'us-east-1',
         endpoint: `https://${provider}.share-test.example`,
         sessionToken: 'test-temporary-token',
-        credentialExpiresAt: new Date(Date.now() + 3600000).toISOString(),
       };
       const storage = await createShareStorage(config);
       urls.push({
@@ -765,12 +879,14 @@ test('changing share links during a download aborts the old import and opens the
         .catch(() => {});
     },
   );
-  await page.route('https://oss.share-test.example/race-second', (route) =>
-    route.fulfill({
+  let secondDownloads = 0;
+  await page.route('https://oss.share-test.example/race-second', (route) => {
+    secondDownloads++;
+    return route.fulfill({
       contentType: 'application/octet-stream',
       body: Buffer.from(packages[1].bytes),
-    }),
-  );
+    });
+  });
   const links = packages.map((p, index) =>
     encodeShareLink(
       {
@@ -784,10 +900,16 @@ test('changing share links during a download aborts the old import and opens the
     ),
   );
   await page.goto(links[0]);
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
   await requested;
   await page.evaluate((hash) => {
     location.hash = hash;
   }, new URL(links[1]).hash);
+  await expect(
+    page.getByRole('button', { name: '导入到本地', exact: true }),
+  ).toBeVisible();
+  expect(secondDownloads).toBe(0);
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.__mojian?.getMarkdown()))
     .toBe('# 新分享');
@@ -841,7 +963,7 @@ test('blocked browser settings storage does not crash the sharing dialog', async
       },
     });
   });
-  await page.getByRole('button', { name: '分享当前文章', exact: true }).click();
+  await page.getByRole('button', { name: '存储设置', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: '分享存储设置' }),
   ).toBeVisible();
@@ -996,4 +1118,685 @@ test('worker failures and aborts release resources without importing partial dra
   expect(cancelled.after).toBe(cancelled.before);
   await page.evaluate(() => window.__mojian!.setMarkdown('# 编辑仍然可用'));
   await expect(page.locator('.article-editor')).toContainText('编辑仍然可用');
+});
+
+for (const provider of ['oss', 'cos', 'minio'] as const) {
+  test(`${provider}: STS works without an expiry field and server expiry prompts renewal`, async ({
+    page,
+    context,
+    browser,
+  }) => {
+    test.setTimeout(90000);
+    const objects = new Map<string, Buffer>();
+    await mockBucket(context, objects);
+    const code = provider === 'oss' ? 'SecurityTokenExpired' : 'ExpiredToken';
+    let expired = false;
+    await context.route('https://*.share-test.example/**', async (route) => {
+      if (!expired || route.request().method() === 'OPTIONS')
+        return route.fallback();
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/xml',
+        body: `<Error><Code>${code}</Code><Message>private SDK detail ${config.accessKeySecret}</Message></Error>`,
+      });
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await ready(page);
+    await page.evaluate(() => window.__mojian!.setMarkdown('# 临时凭证分享'));
+    await configure(page, provider);
+    if (provider === 'minio')
+      await page.getByText('高级设置', { exact: true }).click();
+    await page
+      .getByLabel('临时凭证 Token（可选）', { exact: true })
+      .fill('test-temporary-token');
+    await expect(page.locator('input[type="datetime-local"]')).toHaveCount(0);
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await expect(
+      page.getByText('有效期受临时凭证限制', { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('button', { name: '生成分享链接', exact: true })
+      .click();
+    await expect(page.getByLabel('分享链接', { exact: true })).toBeVisible();
+    await expect(page.locator('.share-record-meta')).toContainText('最晚');
+    const link = await page
+      .getByLabel('分享链接', { exact: true })
+      .inputValue();
+    expired = true;
+    await page.getByRole('button', { name: '取消分享', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText(
+      '临时凭证已过期，请更新 AccessKey 和 Token 后重试。',
+    );
+    await expect(page.getByLabel('分享链接', { exact: true })).toHaveValue(
+      link,
+    );
+    await page.getByRole('button', { name: '生成新链接', exact: true }).click();
+    await page
+      .getByRole('button', { name: '生成分享链接', exact: true })
+      .click();
+    await expect(page.getByRole('alert')).toHaveText(
+      '临时凭证已过期，请更新 AccessKey 和 Token 后重试。',
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem('mojian-share-records-v1')!).length,
+      ),
+    ).toBe(1);
+    if (provider === 'oss' && process.env.SHARING_QA_SCREENSHOTS)
+      await page
+        .getByRole('dialog')
+        .screenshot({ path: '/tmp/mojian-sts-expired-desktop.png' });
+    await openStorageSettings(page);
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText(
+      '临时凭证已过期，请更新 AccessKey 和 Token 后重试。',
+    );
+    await expect(
+      page.getByRole('status', { name: '连接测试失败', exact: true }),
+    ).toBeVisible();
+    if (provider === 'oss' && process.env.SHARING_QA_SCREENSHOTS)
+      await page
+        .locator('.share-settings-actions')
+        .screenshot({ path: '/tmp/mojian-connection-failure-circle.png' });
+    expired = false;
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await expect(
+      page.getByRole('status', { name: '连接测试成功', exact: true }),
+    ).toBeVisible();
+    if (provider === 'oss' && process.env.SHARING_QA_SCREENSHOTS) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page
+        .getByRole('dialog')
+        .screenshot({ path: '/tmp/mojian-sts-settings-mobile.png' });
+    }
+    const friendContext = await browser.newContext();
+    try {
+      const friend = await friendContext.newPage();
+      await friend.route('https://*.share-test.example/**', (route) =>
+        route.fulfill({
+          status: 403,
+          contentType: 'application/xml',
+          body: `<Error><Code>${code}</Code></Error>`,
+        }),
+      );
+      await friend.goto(link);
+      await friend
+        .getByRole('button', { name: '导入到本地', exact: true })
+        .click();
+      await expect(friend.getByRole('alert')).toHaveText(
+        '分享凭证已过期，请联系发送方重新分享。',
+      );
+      expect(
+        await friend.evaluate(
+          async () =>
+            (await (await import('/src/storage.ts')).loadDraftLibrary()).drafts
+              .length,
+        ),
+      ).toBe(1);
+    } finally {
+      await friendContext.close();
+    }
+    expect(errors).toEqual([]);
+  });
+}
+
+test('legacy saved credential expiry is ignored instead of blocking current STS credentials', async ({
+  page,
+}) => {
+  await ready(page);
+  const result = await page.evaluate(async (base) => {
+    const { loadShareConfig, shareLifetime, saveShareConfig } =
+      await import('/src/sharing/config.ts');
+    sessionStorage.setItem(
+      'mojian-share-credentials-v1',
+      JSON.stringify({
+        ...base,
+        sessionToken: 'new-token',
+        credentialExpiresAt: '2000-01-01T00:00:00Z',
+      }),
+    );
+    const loaded = loadShareConfig();
+    const seconds = shareLifetime(loaded.config, 3600);
+    saveShareConfig(loaded.config, loaded.remember);
+    return {
+      seconds,
+      stored: JSON.parse(
+        sessionStorage.getItem('mojian-share-credentials-v1')!,
+      ),
+    };
+  }, config);
+  expect(result.seconds).toBe(3600);
+  expect(result.stored).not.toHaveProperty('credentialExpiresAt');
+  expect(result.stored.sessionToken).toBe('new-token');
+});
+
+for (const width of [1440, 390]) {
+  test(`sharing selects support keyboard, dismissals and unclipped options at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    await ready(page);
+    await page
+      .getByRole('button', { name: '分享当前文章', exact: true })
+      .click();
+    await page.getByRole('button', { name: '配置存储', exact: true }).click();
+    const provider = page.getByRole('combobox', {
+      name: '存储类型',
+      exact: true,
+    });
+    await provider.click();
+    await expect(
+      page
+        .getByRole('listbox', { name: '存储类型', exact: true })
+        .getByRole('option'),
+    ).toHaveCount(3);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(provider).toHaveText('腾讯云 COS');
+    await provider.click();
+    await page.getByRole('option', { name: 'MinIO', exact: true }).click();
+    await page.getByLabel('Bucket', { exact: true }).fill('test-bucket');
+    await page
+      .getByLabel('S3 API 地址（HTTPS）', { exact: true })
+      .fill('https://minio.share-test.example');
+    await page.getByLabel('AccessKey ID', { exact: true }).fill('keep-id');
+    await page
+      .getByLabel('AccessKey Secret', { exact: true })
+      .fill('keep-secret');
+    await provider.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(
+      page.getByRole('dialog', { name: '分享存储设置', exact: true }),
+    ).toBeVisible();
+    await expect(provider).toHaveText('MinIO');
+    await provider.click();
+    await page.getByRole('option', { name: 'MinIO', exact: true }).click();
+    await expect(
+      page.getByLabel('AccessKey Secret', { exact: true }),
+    ).toHaveValue('keep-secret');
+    await provider.click();
+    await page.getByLabel('AccessKey ID', { exact: true }).click();
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await provider.click();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Bucket', { exact: true })).toBeFocused();
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await provider.click();
+    const providerOptionsVisible = await page
+      .getByRole('listbox')
+      .evaluate((element) =>
+        Array.from(element.children).every((option) => {
+          const rect = option.getBoundingClientRect();
+          return option.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          );
+        }),
+      );
+    expect(providerOptionsVisible).toBe(true);
+    if (process.env.SHARING_QA_SCREENSHOTS)
+      await page.screenshot({
+        path: `/tmp/mojian-storage-select-${width}.png`,
+      });
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    const duration = page.getByRole('combobox', {
+      name: '有效期',
+      exact: true,
+    });
+    await duration.click();
+    const durationOptionsVisible = await page
+      .getByRole('listbox')
+      .evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.x >= 0 &&
+          rect.y >= 0 &&
+          rect.right <= innerWidth &&
+          rect.bottom <= innerHeight &&
+          Array.from(element.children).every((option) => {
+            const box = option.getBoundingClientRect();
+            return option.contains(
+              document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              ),
+            );
+          })
+        );
+      });
+    expect(durationOptionsVisible).toBe(true);
+    if (process.env.SHARING_QA_SCREENSHOTS)
+      await page.screenshot({
+        path: `/tmp/mojian-duration-select-${width}.png`,
+      });
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Enter');
+    await expect(duration).toHaveText('1 小时');
+    await expect(
+      page.getByRole('dialog', { name: '分享当前文章', exact: true }),
+    ).toBeVisible();
+    await duration.click();
+    await page.keyboard.press('Escape');
+    await expect(
+      page.getByRole('dialog', { name: '分享当前文章', exact: true }),
+    ).toBeVisible();
+  });
+}
+
+test('a shared article is downloaded and imported only after explicit confirmation', async ({
+  page,
+}) => {
+  await ready(page);
+  await page.evaluate(() => window.__mojian!.setMarkdown('# 原有本地内容'));
+  await expect(page.locator('.save-indicator')).toContainText('已保存到本地');
+  const fixture = await page.evaluate(async () => {
+    const { createArticlePackage } =
+      await import('/src/sharing/articlePackage.ts');
+    const pkg = await createArticlePackage({
+      title: '需要确认的分享',
+      markdown: '# 需要确认的分享',
+      settings: window.__mojian!.getSettings(),
+    });
+    return {
+      sha256: pkg.sha256,
+      bytes: Array.from(new Uint8Array(await pkg.blob.arrayBuffer())),
+    };
+  });
+  let downloads = 0;
+  let releaseDownload!: () => void;
+  const pendingDownload = new Promise<void>((resolve) => {
+    releaseDownload = resolve;
+  });
+  await page.route('https://oss.share-test.example/consent', async (route) => {
+    downloads++;
+    await pendingDownload;
+    await route.fulfill({
+      contentType: 'application/octet-stream',
+      body: Buffer.from(fixture.bytes),
+    });
+  });
+  const link = encodeShareLink(
+    {
+      version: 1,
+      id: 'consent-share-1234567890',
+      url: 'https://oss.share-test.example/consent',
+      expiresAt: Date.now() + 600000,
+      sha256: fixture.sha256,
+    },
+    page.url(),
+  );
+  const snapshot = () =>
+    page.evaluate(async () => {
+      const library = await (await import('/src/storage.ts')).loadDrafts();
+      return {
+        activeId: library.activeId,
+        drafts: library.drafts.map(({ id, markdown }) => ({ id, markdown })),
+      };
+    });
+  const before = await snapshot();
+  for (const dismiss of ['cancel', 'escape', 'close', 'backdrop']) {
+    await page.evaluate((hash) => {
+      location.hash = hash;
+    }, new URL(link).hash);
+    await expect(
+      page.getByRole('button', { name: '导入到本地', exact: true }),
+    ).toBeVisible();
+    expect(downloads).toBe(0);
+    expect(await snapshot()).toEqual(before);
+    if (dismiss === 'cancel')
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+    else if (dismiss === 'escape') await page.keyboard.press('Escape');
+    else if (dismiss === 'close')
+      await page.getByRole('button', { name: '关闭弹窗', exact: true }).click();
+    else
+      await page
+        .locator('.dialog-backdrop')
+        .click({ position: { x: 2, y: 2 } });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(new URL(page.url()).hash).toBe('');
+    expect(downloads).toBe(0);
+    expect(await snapshot()).toEqual(before);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, new URL(link).hash);
+  await expect(
+    page.getByRole('button', { name: '导入到本地', exact: true }),
+  ).toBeVisible();
+  if (process.env.SHARING_QA_SCREENSHOTS) {
+    await page
+      .getByRole('dialog')
+      .screenshot({ path: '/tmp/mojian-share-import-confirm-mobile.png' });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole('dialog')
+      .screenshot({ path: '/tmp/mojian-share-import-confirm-desktop.png' });
+  }
+  expect(downloads).toBe(0);
+  await page.getByRole('button', { name: '导入到本地', exact: true }).click();
+  const progress = page
+    .getByRole('status')
+    .filter({ hasText: '正在下载并保存到本地草稿' });
+  await expect(progress).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeFocused();
+  expect(
+    await progress.locator('.spin').evaluate(async (element) => {
+      const animation = element.getAnimations()[0];
+      const before = Number(animation?.currentTime);
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      return Number(animation?.currentTime) > before;
+    }),
+  ).toBe(true);
+  await expect(
+    page.getByRole('button', { name: '关闭弹窗', exact: true }),
+  ).toBeDisabled();
+  releaseDownload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => window.__mojian!.getMarkdown()))
+    .toBe('# 需要确认的分享');
+  expect(downloads).toBe(1);
+  const after = await snapshot();
+  expect(after.drafts).toHaveLength(before.drafts.length + 1);
+  expect(after.drafts).toEqual(expect.arrayContaining(before.drafts));
+});
+
+test('toolbar storage settings are independent from article sharing and only persist on save', async ({
+  page,
+}) => {
+  await ready(page);
+  await page.evaluate(() => window.__mojian!.setMarkdown('# 独立的设置入口'));
+  await expect(page.locator('.save-indicator')).toContainText('已保存到本地');
+  await page.getByRole('button', { name: '分享当前文章', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '分享当前文章', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel('AccessKey Secret', { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: '配置存储', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '分享当前文章', exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  const before = await page.evaluate(() => ({
+    local: localStorage.getItem('mojian-share-config-v1'),
+    session: sessionStorage.getItem('mojian-share-credentials-v1'),
+  }));
+  await openStorageSettings(page);
+  await page.getByLabel('Bucket', { exact: true }).fill('unsaved-bucket');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(
+    await page.evaluate(() => ({
+      local: localStorage.getItem('mojian-share-config-v1'),
+      session: sessionStorage.getItem('mojian-share-credentials-v1'),
+    })),
+  ).toEqual(before);
+  await openStorageSettings(page);
+  await expect(page.getByLabel('Bucket', { exact: true })).toHaveValue('');
+  await page.getByLabel('Bucket', { exact: true }).fill('saved-bucket');
+  await page.getByLabel('Region', { exact: true }).fill('cn-hangzhou');
+  await page.getByLabel('AccessKey ID', { exact: true }).fill('saved-id');
+  await page
+    .getByLabel('AccessKey Secret', { exact: true })
+    .fill('saved-secret');
+  if (process.env.SHARING_QA_SCREENSHOTS)
+    await page.screenshot({
+      path: '/tmp/mojian-independent-storage-desktop.png',
+    });
+  await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: '分享当前文章', exact: true }).click();
+  const share = page.getByRole('dialog', { name: '分享当前文章', exact: true });
+  await expect(
+    share.getByRole('combobox', { name: '有效期', exact: true }),
+  ).toBeVisible();
+  await expect(share.getByLabel('Bucket', { exact: true })).toHaveCount(0);
+  await expect(
+    share.getByRole('button', { name: '存储设置', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    share.getByRole('button', { name: '测试连接', exact: true }),
+  ).toHaveCount(0);
+  await expect(share).toContainText('独立的设置入口');
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (process.env.SHARING_QA_SCREENSHOTS)
+    await page.screenshot({ path: '/tmp/mojian-independent-share-mobile.png' });
+  await page.keyboard.press('Escape');
+  await openStorageSettings(page);
+  await expect(page.getByLabel('Bucket', { exact: true })).toHaveValue(
+    'saved-bucket',
+  );
+  if (process.env.SHARING_QA_SCREENSHOTS)
+    await page.screenshot({
+      path: '/tmp/mojian-independent-storage-mobile.png',
+    });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
+    '# 独立的设置入口',
+  );
+});
+
+test('a failed standalone settings chunk leaves the editor usable', async ({
+  page,
+}) => {
+  await ready(page);
+  await page.evaluate(() =>
+    window.__mojian!.setMarkdown('# 设置加载失败也保留'),
+  );
+  await page.route('**/src/sharing/StorageSettings.tsx*', (route) =>
+    route.abort('failed'),
+  );
+  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '分享暂不可用', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: '返回编辑器', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
+    '# 设置加载失败也保留',
+  );
+});
+
+for (const entry of ['share', 'storage', 'setup', 'import'] as const) {
+  test(`Escape dismisses the ${entry} dialog while its module is loading`, async ({
+    page,
+  }) => {
+    await ready(page);
+    await page.evaluate(() => window.__mojian!.setMarkdown('# 保留本地正文'));
+    await expect(page.locator('.save-indicator')).toContainText('已保存到本地');
+    const moduleName =
+      entry === 'share'
+        ? 'ShareDialog'
+        : entry === 'import'
+          ? 'ShareImport'
+          : 'StorageSettings';
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**/src/sharing/${moduleName}.tsx*`, async (route) => {
+      await waiting;
+      await route.continue();
+    });
+    try {
+      if (entry === 'import') {
+        await page.evaluate(() => {
+          location.hash = '#share=delayed-import';
+        });
+      } else {
+        await page
+          .getByRole('button', {
+            name: entry === 'storage' ? '存储设置' : '分享当前文章',
+            exact: true,
+          })
+          .click();
+        if (entry === 'setup')
+          await page
+            .getByRole('button', { name: '配置存储', exact: true })
+            .click();
+      }
+      await expect(page.locator('.dialog-loading')).toBeVisible();
+      await page.keyboard.press('Escape');
+      if (entry === 'setup') {
+        await expect(
+          page.getByRole('button', { name: '配置存储', exact: true }),
+        ).toBeVisible();
+        await page.keyboard.press('Escape');
+      }
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      if (entry === 'import') expect(new URL(page.url()).hash).toBe('');
+      const loaded = page.waitForResponse((response) =>
+        response.url().includes(`/src/sharing/${moduleName}.tsx`),
+      );
+      release();
+      await loaded;
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
+        '# 保留本地正文',
+      );
+    } finally {
+      release();
+    }
+  });
+}
+
+test('settings show text, modal transitions and real loading feedback without narrow-screen overlap', async ({
+  page,
+  context,
+}) => {
+  await ready(page);
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
+    const entry = page.getByRole('button', { name: '存储设置', exact: true });
+    await expect(entry.locator('span')).toBeVisible();
+    await expect(entry).toHaveText('存储设置');
+    const layout = await page.locator('.header-actions').evaluate((element) => {
+      const buttons = Array.from(element.querySelectorAll('button'))
+        .filter((button) => button.getClientRects().length)
+        .map((button) => button.getBoundingClientRect());
+      return {
+        overflow: document.documentElement.scrollWidth > innerWidth,
+        overlap: buttons.some((a, i) =>
+          buttons
+            .slice(i + 1)
+            .some(
+              (b) =>
+                a.left < b.right - 1 &&
+                b.left < a.right - 1 &&
+                a.top < b.bottom - 1 &&
+                b.top < a.bottom - 1,
+            ),
+        ),
+      };
+    });
+    expect(layout).toEqual({ overflow: false, overlap: false });
+  }
+  let releaseModule!: () => void;
+  const waitingModule = new Promise<void>((resolve) => {
+    releaseModule = resolve;
+  });
+  await page.route('**/src/sharing/StorageSettings.tsx*', async (route) => {
+    await waitingModule;
+    await route.continue();
+  });
+  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  const fallback = page
+    .getByRole('status')
+    .filter({ hasText: '正在打开存储设置' });
+  await expect(fallback).toBeVisible();
+  expect(
+    await page
+      .getByRole('dialog')
+      .evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe('dialog-in');
+  expect(
+    await fallback.locator('.spin').evaluate(async (element) => {
+      const animation = element.getAnimations()[0];
+      const before = Number(animation?.currentTime);
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      return Number(animation?.currentTime) > before;
+    }),
+  ).toBe(true);
+  if (process.env.SHARING_QA_SCREENSHOTS)
+    await page.getByRole('dialog').screenshot({
+      path: '/tmp/mojian-settings-loading.png',
+      animations: 'allow',
+    });
+  releaseModule();
+  await expect(page.getByLabel('Bucket', { exact: true })).toBeVisible();
+  await mockBucket(context, new Map());
+  let releaseUpload!: () => void;
+  const waitingUpload = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  await context.route('https://*.share-test.example/**', async (route) => {
+    if (route.request().method() === 'PUT') await waitingUpload;
+    await route.fallback();
+  });
+  await page.getByLabel('Bucket', { exact: true }).fill('motion-test');
+  await page.getByLabel('Region', { exact: true }).fill('cn-hangzhou');
+  await page.getByLabel('AccessKey ID', { exact: true }).fill('motion-test-id');
+  await page
+    .getByLabel('AccessKey Secret', { exact: true })
+    .fill('motion-test-secret');
+  await page.getByText('高级设置', { exact: true }).click();
+  await page
+    .getByLabel('Endpoint（可选，HTTPS）', { exact: true })
+    .fill('https://oss.share-test.example');
+  await page.getByRole('button', { name: '测试连接', exact: true }).click();
+  const testing = page.getByRole('status', {
+    name: '正在测试连接',
+    exact: true,
+  });
+  await expect(testing).toBeVisible();
+  expect(
+    await testing
+      .locator('.spin')
+      .evaluate((element) =>
+        element
+          .getAnimations()
+          .some((animation) => animation.playState === 'running'),
+      ),
+  ).toBe(true);
+  await expect(
+    page.getByRole('button', { name: '关闭弹窗', exact: true }),
+  ).toBeDisabled();
+  releaseUpload();
+  await expect(
+    page.getByRole('status', { name: '连接测试成功', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.locator('.dialog-backdrop')).toHaveAttribute(
+    'data-closing',
+    'true',
+  );
+  expect(
+    await page
+      .getByRole('dialog')
+      .evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe('dialog-out');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: '存储设置', exact: true }).click();
+  await expect(page.getByLabel('Bucket', { exact: true })).toBeVisible();
+  expect(
+    await page
+      .getByRole('dialog')
+      .evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe('none');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });

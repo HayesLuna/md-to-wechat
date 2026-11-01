@@ -33,6 +33,7 @@ import {
   RotateCcw,
   HelpCircle,
   Share2,
+  Settings2,
 } from 'lucide-react';
 import { SAMPLE } from './sample';
 import { buildInfo, versionLabel, buildTime } from './buildInfo';
@@ -65,7 +66,7 @@ import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
 import { SettingsPanel } from './SettingsPanel';
-import { Dialog } from './Dialog';
+import { Dialog, DialogLoading } from './Dialog';
 import { DocumentSidebar } from './DocumentSidebar';
 const MediaPreview = lazy(() =>
   import('./MediaPreview').then((module) => ({ default: module.MediaPreview })),
@@ -73,6 +74,11 @@ const MediaPreview = lazy(() =>
 const ShareDialog = lazy(() =>
   import('./sharing/ShareDialog')
     .then((module) => ({ default: module.ShareDialog }))
+    .catch(() => ({ default: ShareUnavailable })),
+);
+const StorageSettings = lazy(() =>
+  import('./sharing/StorageSettings')
+    .then((module) => ({ default: module.StorageSettings }))
     .catch(() => ({ default: ShareUnavailable })),
 );
 const ShareImport = lazy(() =>
@@ -209,7 +215,9 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
-  const [shareOpen, setShareOpen] = useState(false);
+  const [sharePanel, setSharePanel] = useState<
+    'share' | 'storage' | 'setup' | null
+  >(null);
   const shareImportQueue = useRef<Promise<void>>(Promise.resolve());
   const [shareHash, setShareHash] = useState(() =>
     location.hash.startsWith('#share=') ? location.hash : '',
@@ -323,7 +331,7 @@ export default function App() {
         return;
       }
       if (e.key === 'Escape') {
-        if (shareOpen || shareHash) {
+        if (sharePanel || shareHash) {
           // Sharing dialogs handle their own busy state and Escape behavior.
           return;
         } else if (media) {
@@ -378,7 +386,7 @@ export default function App() {
     editor,
     saveNow,
     ready,
-    shareOpen,
+    sharePanel,
     shareHash,
   ]);
   useEffect(() => {
@@ -475,7 +483,7 @@ export default function App() {
           savedVersions.current.set(draft.id, draft.version);
           setDrafts((await loadDraftLibrary()).drafts);
           activateDraft(draft);
-          setShareOpen(false);
+          setSharePanel(null);
           notify('分享文章已保存到本地，修改只影响你的副本');
         } finally {
           switchingRef.current = false;
@@ -1167,13 +1175,27 @@ export default function App() {
             disabled={switching || !!shareHash}
             onClick={() => {
               readCurrent();
-              setShareOpen(true);
+              setSharePanel('share');
               setMenu(false);
               setContext(null);
             }}
           >
             <Share2 size={16} />
             <span>分享</span>
+          </button>
+          <button
+            className="storage-settings-launch"
+            aria-label="存储设置"
+            title="存储设置"
+            disabled={switching || !!shareHash}
+            onClick={() => {
+              setSharePanel('storage');
+              setMenu(false);
+              setContext(null);
+            }}
+          >
+            <Settings2 size={16} />
+            <span>存储设置</span>
           </button>
           <button
             className="import-export"
@@ -1630,14 +1652,15 @@ export default function App() {
           )}
         </div>
       )}
-      {shareOpen && !shareHash && (
+      {sharePanel === 'share' && !shareHash && (
         <Suspense
           fallback={
-            <Dialog title="分享当前文章" onClose={() => setShareOpen(false)}>
-              <p className="share-progress">
-                <Loader2 className="spin" size={16} />
-                正在打开分享设置…
-              </p>
+            <Dialog
+              title="分享当前文章"
+              closeOnEscape
+              onClose={() => setSharePanel(null)}
+            >
+              <DialogLoading label="正在打开分享…" />
             </Dialog>
           }
         >
@@ -1647,19 +1670,49 @@ export default function App() {
               readCurrent();
               return shareArticle();
             }}
-            onClose={() => setShareOpen(false)}
+            onClose={() => setSharePanel(null)}
+            onConfigure={() => setSharePanel('setup')}
+          />
+        </Suspense>
+      )}
+      {(sharePanel === 'storage' || sharePanel === 'setup') && !shareHash && (
+        <Suspense
+          fallback={
+            <Dialog
+              title="分享存储设置"
+              closeOnEscape
+              onClose={() =>
+                setSharePanel(sharePanel === 'setup' ? 'share' : null)
+              }
+            >
+              <DialogLoading label="正在打开存储设置…" />
+            </Dialog>
+          }
+        >
+          <StorageSettings
+            onClose={() =>
+              setSharePanel(sharePanel === 'setup' ? 'share' : null)
+            }
+            onSaved={() =>
+              setSharePanel(sharePanel === 'setup' ? 'share' : null)
+            }
           />
         </Suspense>
       )}
       {shareHash && (
         <Suspense
           fallback={
-            <div className="dialog-backdrop">
-              <p className="loading">正在打开分享文章…</p>
-            </div>
+            <Dialog
+              title="打开分享文章"
+              closeOnEscape
+              onClose={closeShareImport}
+            >
+              <DialogLoading label="正在加载分享…" />
+            </Dialog>
           }
         >
           <ShareImport
+            key={shareHash}
             hash={shareHash}
             onImport={receiveSharedArticle}
             onClose={closeShareImport}

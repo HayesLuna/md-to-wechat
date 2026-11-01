@@ -9,7 +9,6 @@ export type ShareStorageConfig = {
   accessKeyId: string;
   accessKeySecret: string;
   sessionToken: string;
-  credentialExpiresAt: string;
 };
 
 export interface ShareStorage {

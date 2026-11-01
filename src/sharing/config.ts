@@ -12,7 +12,6 @@ export const DEFAULT_SHARE_CONFIG: ShareStorageConfig = {
   accessKeyId: '',
   accessKeySecret: '',
   sessionToken: '',
-  credentialExpiresAt: '',
 };
 const fields = Object.keys(
   DEFAULT_SHARE_CONFIG,
@@ -61,18 +60,12 @@ export function loadShareConfig() {
   return { config, remember };
 }
 export function saveShareConfig(config: ShareStorageConfig, remember: boolean) {
-  const {
-    accessKeyId,
-    accessKeySecret,
-    sessionToken,
-    credentialExpiresAt,
-    ...publicConfig
-  } = normalizeConfig(config);
+  const { accessKeyId, accessKeySecret, sessionToken, ...publicConfig } =
+    normalizeConfig(config);
   const credentials = {
     accessKeyId,
     accessKeySecret,
     sessionToken,
-    credentialExpiresAt,
   };
   // Always remove an earlier persistent credential when opting out of remembering.
   localStorage.setItem(CONFIG_KEY, JSON.stringify(publicConfig));
@@ -98,7 +91,6 @@ export function clearShareCredentials() {
       accessKeyId: '',
       accessKeySecret: '',
       sessionToken: '',
-      credentialExpiresAt: '',
     },
     false,
   );
@@ -129,27 +121,15 @@ export function validateConfig(config: ShareStorageConfig) {
     )
       throw new Error('服务地址应是 HTTPS 地址，不含路径、参数或账号信息。');
   }
-  if (config.sessionToken && !config.credentialExpiresAt)
-    throw new Error('使用临时凭证时，请填写凭证到期时间。');
-  if (
-    config.credentialExpiresAt &&
-    (!Number.isFinite(Date.parse(config.credentialExpiresAt)) ||
-      Date.parse(config.credentialExpiresAt) <= Date.now() + 60_000)
-  )
-    throw new Error('访问凭证已过期或即将过期，请更新。');
 }
 export function shareLifetime(
   config: ShareStorageConfig,
   requestedSeconds: number,
 ) {
   validateConfig(config);
-  const credentialLimit = config.credentialExpiresAt
-    ? Math.floor((Date.parse(config.credentialExpiresAt) - Date.now()) / 1000) -
-      30
-    : 604800;
-  const seconds = Math.min(604800, requestedSeconds, credentialLimit);
+  const seconds = Math.min(604800, requestedSeconds);
   if (!Number.isFinite(seconds) || seconds < 60)
-    throw new Error('有效期不足一分钟，请更新凭证。');
+    throw new Error('分享有效期不能少于一分钟。');
   return seconds;
 }
 export function sameTarget(config: ShareStorageConfig, record: ShareRecord) {
