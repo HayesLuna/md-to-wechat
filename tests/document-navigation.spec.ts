@@ -105,8 +105,15 @@ for (const width of [390, 546, 586])
     await page.goto('/');
     await page.waitForFunction(() => !!(window as any).__mojian?.editor);
     const copyBounds = await page.locator('.copy-main').boundingBox();
-    expect(copyBounds!.width).toBe(144);
-    expect(copyBounds!.x + copyBounds!.width).toBe(width - 14);
+    const actions = page.locator('.header-actions > button:visible');
+    await expect(actions).toHaveCount(5);
+    for (const action of await actions.all()) {
+      const bounds = await action.boundingBox();
+      expect(Math.abs(bounds!.width - copyBounds!.width)).toBeLessThan(1);
+      expect(bounds!.height).toBe(40);
+      await expect(action.locator('span')).toBeHidden();
+    }
+    expect(copyBounds!.x + copyBounds!.width).toBeCloseTo(width - 14, 0);
     await page.evaluate(() =>
       (window as any).__mojian.setMarkdown(
         '# 标题\n\n正文\n\n## 目标标题\n\n更多正文',
