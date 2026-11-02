@@ -778,55 +778,46 @@ export const EditingRules = Extension.create({
                     state.doc.resolve(last),
                   ),
                 );
-              } else {
-                let itemDepth = 0;
-                for (let d = $from.depth; d > 0; d--)
-                  if (
-                    ['listItem', 'taskItem'].includes($from.node(d).type.name)
-                  ) {
-                    itemDepth = d;
-                    break;
-                  }
-                if (itemDepth) {
-                  selections.push(
-                    NodeSelection.create(state.doc, $from.before(itemDepth)),
-                  );
-                  for (let d = itemDepth - 1; d > 0; d--)
-                    if (
-                      ['bulletList', 'orderedList', 'taskList'].includes(
-                        $from.node(d).type.name,
-                      )
-                    )
-                      selections.push(
-                        NodeSelection.create(state.doc, $from.before(d)),
-                      );
-                }
               }
               if (
                 selection instanceof NodeSelection &&
                 selection.node.type.name === 'blockquote'
               )
                 selections.push(selection);
-              // Code has exactly three stages, including inside a quote/list:
-              // raw source, the fenced block, then the entire article.
+              // Code keeps its three stages. Other containers expand in ancestor
+              // order so a quote inside a list is selected before its list item.
+              let hasItem = false;
               for (
                 let d = $from.depth;
                 !codeDepth && !selectedCode && d > 0;
                 d--
-              )
-                if ($from.node(d).type.name === 'blockquote') {
-                  const quote = NodeSelection.create(
-                    state.doc,
-                    $from.before(d),
-                  );
-                  const previous = selections.at(-1);
-                  // Never shrink the selection when quotes and lists are interleaved.
-                  if (
-                    !previous ||
-                    (quote.from <= previous.from && quote.to >= previous.to)
-                  )
-                    selections.push(quote);
-                }
+              ) {
+                const name = $from.node(d).type.name;
+                const isItem = ['listItem', 'taskItem'].includes(name);
+                if (
+                  name !== 'blockquote' &&
+                  (table ||
+                    (isItem
+                      ? hasItem
+                      : !['bulletList', 'orderedList', 'taskList'].includes(
+                          name,
+                        )))
+                )
+                  continue;
+                if (isItem) hasItem = true;
+                const container = NodeSelection.create(
+                  state.doc,
+                  $from.before(d),
+                );
+                const previous = selections.at(-1);
+                // Table selections must also remain contained by the next stage.
+                if (
+                  !previous ||
+                  (container.from <= previous.from &&
+                    container.to >= previous.to)
+                )
+                  selections.push(container);
+              }
               selections.push(new AllSelection(state.doc));
               view.dispatch(
                 state.tr

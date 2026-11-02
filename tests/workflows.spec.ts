@@ -2098,6 +2098,79 @@ test('progressive quote selection covers full nested blocks, resets on caret edi
   ).toBe((await markdown(page)).length);
 });
 
+for (const key of ['Control+a', 'Meta+a'])
+  for (const marker of ['1.', '-'])
+    test(`${key} selects quotes inside ${marker} lists from the inside out`, async ({
+      page,
+      context,
+    }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await ready(page);
+      const indent = marker === '1.' ? '   ' : '  ';
+      await setDoc(
+        page,
+        `正文前\n\n${marker} 当前列表项\n\n${indent}> 外层引用\n${indent}>\n${indent}> > 内层第一段\n${indent}> >\n${indent}> > 内层第二段\n\n${marker} 另一个列表项\n\n正文后`,
+      );
+      await cursor(page, '内层第二段');
+      const original = await markdown(page);
+      for (const [node, included, excluded] of [
+        ['blockquote', '内层第一段', '外层引用'],
+        ['blockquote', '外层引用', '当前列表项'],
+        ['listItem', '当前列表项', '另一个列表项'],
+        [
+          marker === '1.' ? 'orderedList' : 'bulletList',
+          '另一个列表项',
+          '正文后',
+        ],
+      ]) {
+        await page.keyboard.press(key);
+        const current = await selection(page);
+        expect(current.node).toBe(node);
+        expect(current.text).toContain(included);
+        expect(current.text).not.toContain(excluded);
+        await expect(
+          page.locator('.article-editor .ProseMirror-selectednode'),
+        ).toHaveCount(1);
+      }
+      await page.keyboard.press(key);
+      expect((await selection(page)).type).toBe('all');
+      await cursor(page, '内层第二段');
+      await page.keyboard.press(key);
+      await page.keyboard.press('ControlOrMeta+c');
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+        '> 内层第一段\n>\n> 内层第二段',
+      );
+      expect(await markdown(page)).toBe(original);
+    });
+
+test('interleaved quotes and lists expand without skipping an enclosing quote', async ({
+  page,
+}) => {
+  await ready(page);
+  await setDoc(
+    page,
+    '1. 外层列表项\n\n   > 外层引用\n   >\n   > - 内层列表项\n   >\n   >   > 当前引用\n   >\n   > - 同层列表项\n\n2. 外层第二项\n\n正文后',
+  );
+  await cursor(page, '当前引用');
+  let previous = await selection(page);
+  for (const node of [
+    'blockquote',
+    'listItem',
+    'bulletList',
+    'blockquote',
+    'orderedList',
+  ]) {
+    await page.keyboard.press('ControlOrMeta+a');
+    const current = await selection(page);
+    expect(current.node).toBe(node);
+    expect(current.from).toBeLessThanOrEqual(previous.from);
+    expect(current.to).toBeGreaterThanOrEqual(previous.to);
+    previous = current;
+  }
+  await page.keyboard.press('ControlOrMeta+a');
+  expect((await selection(page)).type).toBe('all');
+});
+
 test('quoted lists and tables expand to the quote while code selects source then block then article', async ({
   page,
 }) => {
