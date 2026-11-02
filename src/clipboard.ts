@@ -98,7 +98,11 @@ async function readableImagePNG(image: HTMLImageElement, signal: AbortSignal) {
 
 // Start the write during the copy gesture; ClipboardItem accepts promises for
 // pixels fetched with CORS and for asynchronously encoded local images.
-export async function copyImage(image: HTMLImageElement, markdown?: string) {
+export async function copyImage(
+  image: HTMLImageElement,
+  markdown?: string,
+  { nativeCopied = false }: { nativeCopied?: boolean } = {},
+) {
   if (!navigator.clipboard?.write || !window.ClipboardItem)
     throw new Error('当前浏览器不支持图片复制。');
   if (!image.complete || !image.naturalWidth)
@@ -158,6 +162,9 @@ export async function copyImage(image: HTMLImageElement, markdown?: string) {
   } catch (error) {
     if (controller.signal.aborted) return;
     if (!pixelFailure) throw error;
+    // The editor's copy event already wrote this HTML. Avoid replacing it a
+    // second time while a paste or clipboard reader may be consuming it.
+    if (nativeCopied) return;
     // Servers that actually deny CORS can still be copied as rich HTML.
     await navigator.clipboard.write([
       new ClipboardItem({

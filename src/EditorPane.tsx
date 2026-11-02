@@ -233,7 +233,7 @@ export function EditorPane({
             typeof navigator.clipboard?.write === 'function' &&
             typeof window.ClipboardItem !== 'undefined'
           )
-            void copyImage(image, text).catch(() => {
+            void copyImage(image, text, { nativeCopied: true }).catch(() => {
               // The native text/HTML copy remains available if PNG writing fails.
             });
           return true;

@@ -256,7 +256,7 @@ test('a slow image copy cannot overwrite a later text copy', async ({
   );
 });
 
-test('selected image copies with the native shortcut and pastes as an image', async ({
+test('CORS-denied image keeps native rich copy without rewriting the clipboard', async ({
   page,
   context,
 }) => {
@@ -264,6 +264,9 @@ test('selected image copies with the native shortcut and pastes as an image', as
   await page.route('**/copy-image.svg', (route) =>
     route.fulfill({
       contentType: 'image/svg+xml',
+      headers: {
+        'access-control-allow-origin': 'https://different-origin.test',
+      },
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#ddd"/></svg>',
     }),
   );
@@ -272,27 +275,63 @@ test('selected image copies with the native shortcut and pastes as an image', as
     '![可复制图片](https://example.test/copy-image.svg "width=50%")\n\n粘贴位置',
   );
   await expect(page.locator('.image-box img')).toBeVisible();
+  await page.waitForFunction(
+    () =>
+      (document.querySelector('.image-box img') as HTMLImageElement)
+        ?.naturalWidth > 0,
+  );
   const box = await page.locator('.image-node').boundingBox();
   await page.mouse.click(box!.x - 20, box!.y + box!.height / 2);
   await expect(page.locator('.image-node')).toHaveClass(/selected/);
-  await page.evaluate(() => navigator.clipboard.writeText('old clipboard'));
+  await page.evaluate(async () => {
+    await navigator.clipboard.writeText('old clipboard');
+    const write = navigator.clipboard.write.bind(navigator.clipboard);
+    (window as any).__imageCopyAttempts = 0;
+    (window as any).__imageCopyFinished = false;
+    navigator.clipboard.write = async (items) => {
+      (window as any).__imageCopyAttempts++;
+      try {
+        return await write(items);
+      } finally {
+        (window as any).__imageCopyFinished = true;
+      }
+    };
+  });
   await page.keyboard.press('ControlOrMeta+c');
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain('![可复制图片]');
-  const clipboard = await page.evaluate(async () => {
-    const items = await navigator.clipboard.read();
-    const item = items[0];
-    return {
-      text: await (await item.getType('text/plain')).text(),
-      html: item.types.includes('text/html')
-        ? await (await item.getType('text/html')).text()
-        : '',
-    };
-  });
-  expect(clipboard.text).toContain('![可复制图片]');
-  expect(clipboard.html).toContain('<img');
-  expect(clipboard.html).toContain('copy-image.svg');
+  await page.waitForFunction(() => (window as any).__imageCopyFinished);
+  expect(await page.evaluate(() => (window as any).__imageCopyAttempts)).toBe(
+    1,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        try {
+          const item = (await navigator.clipboard.read())[0];
+          return {
+            text: await (await item.getType('text/plain')).text(),
+            html: item.types.includes('text/html')
+              ? await (await item.getType('text/html')).text()
+              : '',
+          };
+        } catch (error) {
+          if (
+            error instanceof DOMException &&
+            error.name === 'InvalidStateError'
+          )
+            return null;
+          throw error;
+        }
+      }),
+    )
+    .toMatchObject({
+      text: expect.stringContaining('![可复制图片]'),
+      html: expect.stringMatching(
+        /<img\b[^>]*src="https:\/\/example\.test\/copy-image\.svg"/,
+      ),
+    });
   await page.evaluate(() =>
     (window as any).__mojian.editor.commands.focus('end'),
   );
