@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { retainImageURL } from './storage';
+import { copyImage } from './clipboard';
 import type { MediaPreviewItem } from './mediaPreviewEvents';
 export function MediaPreview({
   item,
@@ -186,6 +187,28 @@ export function MediaPreview({
       className="media-preview-screen"
       onKeyDown={(e) => {
         if (!natural.width || failed) return;
+        if (
+          item.kind === 'image' &&
+          (e.ctrlKey || e.metaKey) &&
+          !e.altKey &&
+          !e.shiftKey &&
+          e.key.toLowerCase() === 'c'
+        ) {
+          const image = viewport.current?.querySelector('img');
+          if (image) {
+            e.preventDefault();
+            void copyImage(image).catch((error: unknown) => {
+              window.dispatchEvent(
+                new CustomEvent('mojian-notice', {
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : '图片复制失败，请重试。',
+                }),
+              );
+            });
+          }
+        }
         if (e.key === '+' || e.key === '=' || e.key === '-') {
           e.preventDefault();
           rememberAnchor();

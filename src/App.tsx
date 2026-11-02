@@ -9,7 +9,7 @@ import {
   useCallback,
   useDeferredValue,
 } from 'react';
-import type { Editor } from '@tiptap/core';
+import type { Editor, JSONContent } from '@tiptap/core';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import {
   Upload,
@@ -820,7 +820,11 @@ export default function App() {
       if (req === imageRequest.current) setProcessing(false);
     }
   };
-  const insertFile = async (file: File, fromPaste = false) => {
+  const insertFile = async (
+    file: File | null,
+    fromPaste = false,
+    image?: JSONContent,
+  ) => {
     if (processing || !editor || readOnlyRef.current) return;
     if (fromPaste) {
       target.current?.cancel();
@@ -833,7 +837,13 @@ export default function App() {
     setDialogError('');
     notify('正在检查并保存本地图片…');
     try {
-      const src = await storeImage(file);
+      const original = String(image?.attrs?.src || '');
+      const reusable = original.startsWith('local-image:')
+        ? await imageExists(original)
+        : /^https?:\/\//i.test(original);
+      if (!reusable && !file)
+        throw new Error('本地图片资源缺失，剪贴板中没有可导入的图片。');
+      const src = reusable ? original : await storeImage(file!);
       if (req !== imageRequest.current) return;
       savedTarget.restore();
       target.current = null;
@@ -842,7 +852,12 @@ export default function App() {
         .focus()
         .insertContent({
           type: 'image',
-          attrs: { src, alt: file.name || '剪贴板图片', percent: 100 },
+          attrs: {
+            ...image?.attrs,
+            src,
+            alt: image?.attrs?.alt ?? file?.name ?? '剪贴板图片',
+            percent: image?.attrs?.percent ?? 100,
+          },
         })
         .run();
       setModal(null);
@@ -1467,7 +1482,9 @@ export default function App() {
                       onDirty={editorDirty}
                       onSelection={updateSelection}
                       onContext={contextMenu}
-                      onPasteImage={(file) => void insertFile(file, true)}
+                      onPasteImage={(file, image) =>
+                        void insertFile(file, true, image)
+                      }
                     />
                   </div>
                   {mode === 'source' && (

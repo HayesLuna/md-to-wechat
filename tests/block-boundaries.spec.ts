@@ -65,6 +65,83 @@ async function bottomCaret(page: Page, block: Rect) {
   return caret!;
 }
 
+for (const [type, markdown] of cursorBlocks)
+  for (const [side, index] of [
+    ['before', 0],
+    ['after', 1],
+  ] as const)
+    test(`${type}: Tab ${side} inserts editable indentation without replacing the block`, async ({
+      page,
+    }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await ready(page, markdown);
+      const original = await doc(page);
+      await clickSide(page, index);
+      const boundary = await selection(page);
+      await page.keyboard.press('Shift+Tab');
+      expect(await doc(page)).toEqual(original);
+      expect(await selection(page)).toEqual(boundary);
+      await expect(page.locator('.article-editor')).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(page.locator('.article-editor')).toBeFocused();
+      const indented = await doc(page);
+      const blockIndex = indented.content.findIndex(
+        (node: any) => node.type === type,
+      );
+      const paragraphIndex = blockIndex + (side === 'before' ? -1 : 1);
+      expect(indented.content[paragraphIndex]).toMatchObject({
+        type: 'paragraph',
+        content: [{ type: 'text', text: '\t' }],
+      });
+      expect(indented.content[blockIndex]).toEqual(
+        original.content.find((node: any) => node.type === type),
+      );
+      expect(await selection(page)).toMatchObject({ type: 'text' });
+      const caretOffset = await page.evaluate(() => {
+        const e = (window as any).__mojian.editor;
+        const { from, $from } = e.state.selection;
+        return (
+          e.view.coordsAtPos(from).left - e.view.coordsAtPos($from.start()).left
+        );
+      });
+      expect(caretOffset).toBeGreaterThan(0);
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(await doc(page)).toEqual(original);
+      expect(await selection(page)).toEqual(boundary);
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      expect(await doc(page)).toEqual(indented);
+      await page.keyboard.press('Tab');
+      await page.keyboard.type('X');
+      expect((await doc(page)).content[paragraphIndex].content).toEqual([
+        { type: 'text', text: '\t\tX' },
+      ]);
+      await page.keyboard.press('Backspace');
+      await page.keyboard.press('Shift+Tab');
+      expect((await doc(page)).content[paragraphIndex].content).toEqual([
+        { type: 'text', text: '\t' },
+      ]);
+      await page
+        .getByRole('button', { name: 'Markdown 源码', exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: '所见即所得', exact: true })
+        .click();
+      expect(await doc(page)).toEqual(indented);
+      if (type === 'image' && side === 'before') {
+        await page.keyboard.press('ControlOrMeta+s');
+        await expect(page.locator('.save-indicator')).toContainText('已保存');
+        await page.reload();
+        await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+        expect(await doc(page)).toEqual(indented);
+        await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');
+        await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+        await page.screenshot({ path: '/tmp/md-to-wechat-image-tab.png' });
+      }
+      expect(errors).toEqual([]);
+    });
+
 for (const [type, markdown] of cursorBlocks) {
   for (const [side, index] of [
     ['before', 0],

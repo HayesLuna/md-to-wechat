@@ -15,11 +15,15 @@ import DOMPurify from 'dompurify';
 import { useEffect, useMemo, useRef } from 'react';
 import {
   Extension,
+  selectionToInsertionEnd,
   type Editor,
   type EditorOptions,
   type JSONContent,
 } from '@tiptap/core';
-import { Plugin } from '@tiptap/pm/state';
+import { NodeSelection, Plugin } from '@tiptap/pm/state';
+import { copyImage } from './clipboard';
+import { closeHistory } from '@tiptap/pm/history';
+import { Slice } from '@tiptap/pm/model';
 import {
   SizedImage,
   SmartCode,
@@ -112,7 +116,7 @@ export function EditorPane({
   onDirty: () => void;
   onSelection: () => void;
   onContext: (event: MouseEvent, editor: Editor) => boolean;
-  onPasteImage: (file: File) => void;
+  onPasteImage: (file: File | null, image?: JSONContent) => void;
 }) {
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
@@ -202,7 +206,38 @@ export function EditorPane({
           },
         ),
       handleDOMEvents: {
-        copy: (_view, event) => copyTaskMarkdown(editorRef.current, event),
+        copy: (view, event) => {
+          const editor = editorRef.current;
+          const selection = editor?.state.selection;
+          if (
+            !editor ||
+            !(selection instanceof NodeSelection) ||
+            selection.node.type.name !== 'image' ||
+            !event.clipboardData
+          )
+            return copyTaskMarkdown(editor, event);
+          // Always finish the native copy, including when Async Clipboard is
+          // unavailable or denied. PNG is an optional enhancement of this copy.
+          const { dom, text } = view.serializeForClipboard(selection.content());
+          dom.querySelector('img')?.setAttribute('data-mojian-image', 'true');
+          event.clipboardData.clearData();
+          event.clipboardData.setData('text/plain', text);
+          event.clipboardData.setData('text/html', dom.innerHTML);
+          event.preventDefault();
+          const node = view.nodeDOM(selection.from);
+          const image =
+            node instanceof HTMLElement ? node.querySelector('img') : null;
+          if (
+            image?.complete &&
+            image.naturalWidth &&
+            typeof navigator.clipboard?.write === 'function' &&
+            typeof window.ClipboardItem !== 'undefined'
+          )
+            void copyImage(image, text).catch(() => {
+              // The native text/HTML copy remains available if PNG writing fails.
+            });
+          return true;
+        },
         cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
         keydown: (_view, event) => {
           plainPaste.current = !!(
@@ -235,17 +270,39 @@ export function EditorPane({
         const literal = plainPaste.current;
         plainPaste.current = false;
         const data = event.clipboardData;
+        const editor = editorRef.current;
+        const text = data?.getData('text/plain') || '';
+        const html = data?.getData('text/html') || '';
         const file = Array.from(data?.files || []).find((f) =>
           f.type.startsWith('image/'),
         );
+        // Our image clipboard also contains PNG pixels. Prefer its Markdown
+        // inside the editor to retain the asset reference and configured width.
+        if (
+          editor &&
+          !literal &&
+          !editor.isActive('codeBlock') &&
+          !editor.isActive('code') &&
+          html.includes('data-mojian-image') &&
+          new DOMParser()
+            .parseFromString(html, 'text/html')
+            .querySelector('img[data-mojian-image="true"]')
+        ) {
+          const parsed = safeDocument(editor, text);
+          if (
+            parsed.content?.length === 1 &&
+            parsed.content[0].type === 'image'
+          ) {
+            event.preventDefault();
+            props.current.onPasteImage(file ?? null, parsed.content[0]);
+            return true;
+          }
+        }
         if (file) {
           event.preventDefault();
           props.current.onPasteImage(file);
           return true;
         }
-        const editor = editorRef.current;
-        const text = data?.getData('text/plain') || '';
-        const html = data?.getData('text/html') || '';
         if (
           !editor ||
           literal ||
@@ -254,6 +311,67 @@ export function EditorPane({
           !shouldParseMarkdownPaste(text, html)
         )
           return false;
+        const { selection } = editor.state;
+        const { $from, $to } = selection;
+        const prefix = $from.parent.textBetween(
+          0,
+          $from.parentOffset,
+          '',
+          '\ufffc',
+        );
+        // Input rules only see typing. A paste can supply the space/content
+        // after typed hashes, so parse that paragraph prefix together with it.
+        if (
+          $from.sameParent($to) &&
+          $from.parent.type.name === 'paragraph' &&
+          /^#{1,6}[ \t]*$/.test(prefix) &&
+          /^#{1,6}[ \t]+\S/.test(prefix + text) &&
+          $from
+            .node(-1)
+            .canReplaceWith(
+              $from.index(-1),
+              $from.indexAfter(-1),
+              editor.schema.nodes.heading,
+            )
+        ) {
+          const heading = centerUnalignedPastedTables(
+            safeDocument(editor, prefix + text),
+          );
+          const first = heading.content?.[0];
+          if (
+            first?.type === 'heading' &&
+            editor
+              .chain()
+              .command(({ tr }) => {
+                const content = editor.schema.nodeFromJSON(heading).content;
+                closeHistory(tr);
+                tr.replaceRange(
+                  $from.start(),
+                  selection.to,
+                  new Slice(
+                    content,
+                    1,
+                    content.lastChild?.isTextblock &&
+                      !content.lastChild.type.spec.code
+                      ? 1
+                      : 0,
+                  ),
+                );
+                selectionToInsertionEnd(tr, tr.steps.length - 1, -1);
+                tr.setBlockType(
+                  $from.start(),
+                  $from.start(),
+                  editor.schema.nodes.heading,
+                  first.attrs,
+                );
+                return true;
+              })
+              .run()
+          ) {
+            event.preventDefault();
+            return true;
+          }
+        }
         const parsed = centerUnalignedPastedTables(safeDocument(editor, text));
         if (!editor.commands.insertContent(parsed.content || [])) return false;
         event.preventDefault();

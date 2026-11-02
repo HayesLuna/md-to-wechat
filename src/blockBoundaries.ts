@@ -535,16 +535,24 @@ export const BlockBoundaries = Extension.create({
           handleKeyDown(view, event) {
             if (
               !view.editable ||
+              view.composing ||
               event.isComposing ||
               event.keyCode === 229 ||
               event.metaKey ||
               event.ctrlKey ||
-              event.altKey ||
-              event.shiftKey
+              event.altKey
             )
               return false;
             const { state } = view;
             const { selection } = state;
+            // Side/gap cursors have no textblock for EditingRules to indent.
+            // Insert prose at the boundary, just like typing, keeping the block.
+            if (event.key === 'Tab' && inputBoundary(selection) !== null) {
+              event.preventDefault();
+              if (!event.shiftKey) insertBoundaryText(view, '\t');
+              return true;
+            }
+            if (event.shiftKey) return false;
             const backwards = event.key === 'Backspace';
             const deleting = backwards || event.key === 'Delete';
             // A held deletion key must not confirm removal of a whole block.
