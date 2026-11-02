@@ -7,7 +7,7 @@ import { diagram } from './mermaid';
 import { DEFAULT_SETTINGS, type Settings } from './sample';
 import { codeCardRenderer, addCodeDecorations } from './codeOutput';
 import { workBudget } from './workBudget';
-import { outputKey } from './outputUtils';
+import { outputKey, imageIndentPadding } from './outputUtils';
 import { parseArticleAsync } from './articleParserClient';
 export type Asset = {
   kind: 'image' | 'diagram';
@@ -93,6 +93,14 @@ async function inlineStyles(
       el.style.width = imageWidth + '%';
       el.removeAttribute('data-width');
     }
+    if (el.hasAttribute('data-image-indent')) {
+      el.style.display = 'block';
+      el.style.width = '100%';
+      el.style.boxSizing = 'border-box';
+      el.style.paddingLeft = imageIndentPadding(
+        el.getAttribute('data-image-indent'),
+      );
+    }
     if (el.matches('pre code'))
       el.setAttribute(
         'style',
@@ -153,8 +161,13 @@ async function inlineStyles(
         : parentLine;
     el.style.fontSize = Number(size.toFixed(2)) + 'px';
     el.style.lineHeight = Number(Math.max(size, line).toFixed(2)) + 'px';
-    if (el.matches('strong,em,s,a,code,span') && !el.matches('pre code'))
+    if (
+      el.matches('strong,em,s,a,code,span') &&
+      !el.matches('pre code') &&
+      !el.hasAttribute('data-image-indent')
+    )
       el.style.setProperty('display', 'inline', 'important');
+    el.removeAttribute('data-image-indent');
   }
   // Empty structural parents represent indentation of a first list item.
   for (const li of root.querySelectorAll<HTMLElement>('li')) {
@@ -368,6 +381,16 @@ export async function renderArticle(
         const copyTarget = clipboard.querySelector(
           `[data-image-index="${i}"]`,
         )!;
+        const place = (target: Element, content: HTMLElement) => {
+          if (!img.indent) {
+            target.replaceWith(content);
+            return;
+          }
+          const frame = document.createElement('span');
+          frame.setAttribute('data-image-indent', String(img.indent));
+          frame.append(content);
+          target.replaceWith(frame);
+        };
         if (img.src.startsWith('local-image:')) {
           let url = '';
           try {
@@ -381,27 +404,29 @@ export async function renderArticle(
             src: img.src,
             missing: !url,
           });
-          const placeholder = document.createElement('p');
+          // Image slots already sit in a paragraph. Nested paragraphs would
+          // be reparsed outside the indentation frame when pasting the HTML.
+          const placeholder = document.createElement('span');
           placeholder.textContent = `[请在此处上传本地图片：${img.alt || `图片 ${i + 1}`}]`;
-          copyTarget.replaceWith(placeholder);
+          place(copyTarget, placeholder);
           if (url) {
             const image = document.createElement('img');
             image.src = url;
             image.alt = img.alt;
             image.setAttribute('data-width', String(img.width));
-            previewTarget.replaceWith(image);
+            place(previewTarget, image);
           } else {
-            const missing = document.createElement('p');
+            const missing = document.createElement('span');
             missing.textContent = `[本地图片缺失：${img.alt || img.src}]`;
-            previewTarget.replaceWith(missing);
+            place(previewTarget, missing);
           }
         } else if (/^https?:\/\//i.test(img.src)) {
           const image = document.createElement('img');
           image.src = img.src;
           image.alt = img.alt;
           image.setAttribute('data-width', String(img.width));
-          previewTarget.replaceWith(image);
-          copyTarget.replaceWith(image.cloneNode(true));
+          place(previewTarget, image);
+          place(copyTarget, image.cloneNode(true) as HTMLImageElement);
         } else {
           previewTarget.remove();
           copyTarget.remove();

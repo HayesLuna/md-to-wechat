@@ -38,11 +38,14 @@ async function clickSide(page: Page, index: number) {
   const box = await target.boundingBox();
   expect(box).toBeTruthy();
   const edge = index === 0 ? 'left' : 'right';
+  const surface = (await page.locator('.writing-scroll').boundingBox())!;
   const type = await target.evaluate((el) =>
     el.classList.contains('image-node') ? 'imageSide' : 'blockCursor',
   );
   await page.mouse.click(
-    edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
+    edge === 'left'
+      ? Math.max(box!.x - 20, surface.x + 2)
+      : Math.min(box!.x + box!.width + 20, surface.x + surface.width - 2),
     box!.y + box!.height / 2,
   );
   await expect.poll(() => selection(page)).toMatchObject({ type, edge });
@@ -65,7 +68,9 @@ async function bottomCaret(page: Page, block: Rect) {
   return caret!;
 }
 
-for (const [type, markdown] of cursorBlocks)
+for (const [type, markdown] of cursorBlocks.filter(
+  ([type]) => type !== 'image',
+))
   for (const [side, index] of [
     ['before', 0],
     ['after', 1],
@@ -129,18 +134,322 @@ for (const [type, markdown] of cursorBlocks)
         .getByRole('button', { name: '所见即所得', exact: true })
         .click();
       expect(await doc(page)).toEqual(indented);
-      if (type === 'image' && side === 'before') {
-        await page.keyboard.press('ControlOrMeta+s');
-        await expect(page.locator('.save-indicator')).toContainText('已保存');
-        await page.reload();
-        await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-        expect(await doc(page)).toEqual(indented);
-        await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');
-        await expect(page.locator('vite-error-overlay')).toHaveCount(0);
-        await page.screenshot({ path: '/tmp/md-to-wechat-image-tab.png' });
-      }
       expect(errors).toEqual([]);
     });
+
+for (const side of ['before', 'after', 'selected'] as const)
+  test(`image: Tab changes image indentation from ${side}, with undo and persistence`, async ({
+    page,
+  }) => {
+    await ready(
+      page,
+      '前文\n\n![图片](https://example.test/boundary.svg "width=50%")\n\n后文',
+    );
+    const original = await doc(page);
+    if (side === 'selected') {
+      await page.evaluate(() => {
+        const e = (window as any).__mojian.editor;
+        e.state.doc.descendants((node: any, pos: number) => {
+          if (node.type.name === 'image') e.commands.setNodeSelection(pos);
+        });
+        e.commands.focus();
+      });
+    } else await clickSide(page, side === 'before' ? 0 : 1);
+    await expect(page.locator('.article-editor')).toBeFocused();
+    const cursor = await selection(page);
+    const image = () =>
+      page.evaluate(() => {
+        const e = (window as any).__mojian.editor;
+        let attrs: any;
+        e.state.doc.descendants((node: any) => {
+          if (node.type.name === 'image') attrs = node.attrs;
+        });
+        return attrs;
+      });
+    const left = (await page.locator('.image-box').boundingBox())!.x;
+    await page.keyboard.press('Shift+Tab');
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    expect(await image()).toMatchObject({ indent: 2, percent: 50 });
+    expect((await doc(page)).content).toHaveLength(original.content.length);
+    expect(await selection(page)).toEqual(cursor);
+    await expect(page.locator('.article-editor')).toBeFocused();
+    expect((await page.locator('.image-box').boundingBox())!.x).toBeGreaterThan(
+      left,
+    );
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await image()).toMatchObject({ indent: 1 });
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    expect(await image()).toMatchObject({ indent: 2 });
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.press('Tab');
+    const raw = await page.evaluate(() =>
+      (window as any).__mojian.getMarkdown(),
+    );
+    expect(raw).toContain('width=50% indent=1');
+    await page
+      .getByRole('button', { name: 'Markdown 源码', exact: true })
+      .click();
+    await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+    expect(await image()).toMatchObject({ indent: 1, percent: 50 });
+    await page.keyboard.press('ControlOrMeta+s');
+    await expect(page.locator('.save-indicator')).toContainText('已保存');
+    await page.reload();
+    await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+    expect(await image()).toMatchObject({ indent: 1, percent: 50 });
+    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+    const preview = page.locator('.preview-paper img');
+    await expect
+      .poll(() =>
+        preview.evaluate(
+          (el) => getComputedStyle(el.parentElement!).paddingLeft,
+        ),
+      )
+      .toBe('24px');
+    expect(await preview.evaluate((el) => el.style.width)).toBe('50%');
+    const geometry = await preview.evaluate((el) => {
+      const image = el.getBoundingClientRect();
+      const frame = el.parentElement!;
+      const style = getComputedStyle(frame);
+      return {
+        display: style.display,
+        width: image.width,
+        available:
+          frame.clientWidth -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight),
+        left: image.left,
+        contentLeft:
+          frame.getBoundingClientRect().left + parseFloat(style.paddingLeft),
+      };
+    });
+    expect(geometry.display).toBe('block');
+    expect(geometry.width).toBeCloseTo(geometry.available / 2, 0);
+    expect(geometry.left).toBeGreaterThanOrEqual(geometry.contentLeft);
+    expect(
+      await page.evaluate(() => {
+        const root = new DOMParser().parseFromString(
+          (window as any).__mojian.getOutput().html,
+          'text/html',
+        );
+        return root.querySelector('img')!.parentElement!.style.paddingLeft;
+      }),
+    ).toBe('min(24px, 40%)');
+  });
+
+for (const [arrow, pos] of [
+  ['ArrowLeft', 0],
+  ['ArrowRight', 1],
+] as const)
+  test(`arrow-key gap cursor ${arrow} beside an image supports indentation and keeps focus`, async ({
+    page,
+  }) => {
+    await ready(page, blocks[1][1] + '\n\n---');
+    const original = await doc(page);
+    await page.evaluate(() =>
+      (window as any).__mojian.editor.chain().setNodeSelection(0).focus().run(),
+    );
+    await expect(page.locator('.article-editor')).toBeFocused();
+    await page.keyboard.press(arrow);
+    const cursor = await selection(page);
+    expect(cursor).toEqual({ type: 'gapcursor', pos });
+    await page.keyboard.press('Tab');
+    expect((await doc(page)).content[0].attrs.indent).toBe(1);
+    expect(await selection(page)).toEqual(cursor);
+    await expect(page.locator('.article-editor')).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.press('ControlOrMeta+z');
+    expect((await doc(page)).content[0].attrs.indent).toBe(1);
+    await expect(page.locator('.article-editor')).toBeFocused();
+  });
+
+for (const container of ['table', 'nested quote'])
+  test(`image indentation stays visible inside a narrow ${container} in editor, preview and clipboard HTML`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await ready(page, '');
+    await page.evaluate((container) => {
+      const paragraph = (text = '') => ({
+        type: 'paragraph',
+        ...(text ? { content: [{ type: 'text', text }] } : {}),
+      });
+      const image = {
+        type: 'image',
+        attrs: { src: 'https://example.test/boundary.svg', percent: 100 },
+      };
+      const cell = (content: any[]) => ({ type: 'tableCell', content });
+      const content =
+        container === 'table'
+          ? [
+              {
+                type: 'table',
+                content: [
+                  {
+                    type: 'tableRow',
+                    content: [
+                      cell([paragraph(), image]),
+                      cell([paragraph('第二列')]),
+                      cell([paragraph('第三列')]),
+                    ],
+                  },
+                ],
+              },
+            ]
+          : [
+              {
+                type: 'bulletList',
+                content: [
+                  {
+                    type: 'listItem',
+                    content: [
+                      paragraph('外层'),
+                      {
+                        type: 'bulletList',
+                        content: [
+                          {
+                            type: 'listItem',
+                            content: [
+                              paragraph('内层'),
+                              {
+                                type: 'blockquote',
+                                content: [
+                                  { type: 'blockquote', content: [image] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ];
+      const e = (window as any).__mojian.editor;
+      e.commands.setContent({ type: 'doc', content });
+      e.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name === 'image') e.commands.setNodeSelection(pos);
+      });
+      e.commands.focus();
+    }, container);
+    await expect(page.locator('.article-editor')).toBeFocused();
+    const originalWidth = (await page.locator('.image-box').boundingBox())!
+      .width;
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
+    expect(
+      (await page.locator('.image-box').boundingBox())!.width,
+    ).toBeGreaterThanOrEqual(originalWidth * 0.59);
+    for (const width of [1440, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const geometry = await page.locator('.image-box').evaluate((el) => {
+        const frame = el.parentElement!.parentElement!;
+        return {
+          image: el.getBoundingClientRect().width,
+          frame: frame.clientWidth,
+          padding: parseFloat(getComputedStyle(frame).paddingLeft),
+        };
+      });
+      expect(geometry.image).toBeGreaterThan(0);
+      expect(geometry.padding).toBeLessThanOrEqual(geometry.frame * 0.4 + 1);
+    }
+    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+    const preview = page.locator('.preview-paper img');
+    await expect(preview).toBeVisible();
+    expect((await preview.boundingBox())!.width).toBeGreaterThan(0);
+    const copiedWidth = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.style.cssText =
+        'position:fixed;left:-10000px;width:240px;visibility:hidden;';
+      host.innerHTML = (window as any).__mojian.getOutput().html;
+      document.body.append(host);
+      const width = host.querySelector('img')!.getBoundingClientRect().width;
+      host.remove();
+      return width;
+    });
+    expect(copiedWidth).toBeGreaterThan(0);
+  });
+
+test('image indentation is bounded, remains visible on mobile and is protected by read-only mode', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await ready(page, blocks[1][1]);
+  await clickSide(page, 0);
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Tab');
+  const indented = await doc(page);
+  expect(indented.content[0].attrs.indent).toBe(6);
+  expect(
+    indented.content.filter((node: any) => node.type === 'image'),
+  ).toHaveLength(1);
+  expect(
+    (await page.locator('.image-box').boundingBox())!.width,
+  ).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    320,
+  );
+  await page.getByRole('switch', { name: '只读模式' }).click();
+  await page
+    .locator('.article-editor')
+    .dispatchEvent('keydown', { key: 'Tab', code: 'Tab' });
+  expect(await doc(page)).toEqual(indented);
+  await page.getByRole('switch', { name: '只读模式' }).click();
+  await clickSide(page, 0);
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Shift+Tab');
+  expect((await doc(page)).content[0].attrs.indent).toBe(0);
+});
+
+test('indented local images keep enlarged scrolling and indentation around copied upload placeholders', async ({
+  page,
+}) => {
+  await ready(page, '');
+  await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 16;
+    canvas.getContext('2d')!.fillRect(0, 0, 32, 16);
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((blob) => resolve(blob!)),
+    );
+    const { storeImage } = await import('/src/storage.ts');
+    const src = await storeImage(blob);
+    (window as any).__mojian.setMarkdown(
+      `![本地图](${src} "width=150% indent=3")`,
+    );
+  });
+  await expect(page.locator('.image-box img')).toBeVisible();
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper img')).toBeVisible();
+  await expect(page.locator('.preview-paper [data-image-scroll]')).toHaveCount(
+    1,
+  );
+  expect(
+    await page.evaluate(() => {
+      const root = new DOMParser().parseFromString(
+        (window as any).__mojian.getOutput().html,
+        'text/html',
+      );
+      let el = Array.from(root.querySelectorAll('*')).find(
+        (el) =>
+          !el.children.length &&
+          el.textContent?.startsWith('[请在此处上传本地图片'),
+      ) as HTMLElement | undefined;
+      while (el) {
+        if (el.style.paddingLeft === 'min(72px, 40%)') return true;
+        el = el.parentElement ?? undefined;
+      }
+      return false;
+    }),
+  ).toBe(true);
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    320,
+  );
+});
 
 for (const [type, markdown] of cursorBlocks) {
   for (const [side, index] of [

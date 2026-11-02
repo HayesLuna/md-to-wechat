@@ -29,7 +29,11 @@ import TaskItem from '@tiptap/extension-task-item';
 import StarterKit from '@tiptap/starter-kit';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageView, CodeView } from './nodeViews';
-import { widthFromTitle } from './outputUtils';
+import {
+  widthFromTitle,
+  imageIndent,
+  imageIndentFromTitle,
+} from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
 
@@ -122,6 +126,18 @@ export const SizedImage = Image.extend({
         default: 100,
         parseHTML: (el) => widthFromTitle(el.getAttribute('title') || ''),
       },
+      indent: {
+        default: 0,
+        parseHTML: (el) =>
+          imageIndent(
+            el.getAttribute('data-image-indent') ??
+              imageIndentFromTitle(el.getAttribute('title') || ''),
+          ),
+        renderHTML: (attrs) =>
+          imageIndent(attrs.indent)
+            ? { 'data-image-indent': imageIndent(attrs.indent) }
+            : {},
+      },
     };
   },
   parseMarkdown(token, h) {
@@ -130,6 +146,7 @@ export const SizedImage = Image.extend({
       alt: token.text,
       title: null,
       percent: widthFromTitle(token.title || ''),
+      indent: imageIndentFromTitle(token.title || ''),
     });
   },
   renderMarkdown(node) {
@@ -137,7 +154,8 @@ export const SizedImage = Image.extend({
     const src = String(node.attrs?.src || '')
       .replace(/ /g, '%20')
       .replace(/\)/g, '%29');
-    return `![${alt}](${src} "width=${node.attrs?.percent ?? 100}%")`;
+    const indent = imageIndent(node.attrs?.indent);
+    return `![${alt}](${src} "width=${node.attrs?.percent ?? 100}%${indent ? ` indent=${indent}` : ''}")`;
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);

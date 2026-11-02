@@ -1,12 +1,13 @@
 import MarkdownIt from 'markdown-it';
 import { markdownHighlight } from './highlight';
-import { safeURL, widthFromTitle } from './outputUtils';
+import { safeURL, widthFromTitle, imageIndentFromTitle } from './outputUtils';
 import type { CodeSource } from './codeOutput';
 
 export function parseArticle(markdown: string) {
   const codeSources: CodeSource[] = [];
   const sources: string[] = [];
-  const images: { src: string; alt: string; width: number }[] = [];
+  const images: { src: string; alt: string; width: number; indent: number }[] =
+    [];
   const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
   md.use(markdownHighlight);
   md.validateLink = (url) => safeURL(url) || url.startsWith('local-image:');
@@ -16,6 +17,7 @@ export function parseArticle(markdown: string) {
       src: t.attrGet('src') || '',
       alt: t.content,
       width: widthFromTitle(t.attrGet('title') || ''),
+      indent: imageIndentFromTitle(t.attrGet('title') || ''),
     };
     images.push(item);
     return `<span data-image-index="${images.length - 1}"></span>`;

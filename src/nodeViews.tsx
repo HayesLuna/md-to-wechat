@@ -18,6 +18,7 @@ import {
 import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
 import { copyText } from './clipboard';
+import { imageIndentPadding } from './outputUtils';
 import { diagram, downloadDiagram } from './mermaid';
 import { indentJSON, compactJSON } from './jsonIndentation';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
@@ -162,54 +163,60 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
         );
       }}
     >
-      <div className="image-scroll">
-        <div
-          ref={box}
-          className="image-box"
-          style={{ width: `${dragWidth ?? node.attrs.percent}%` }}
-          contentEditable={false}
-          onMouseDown={selectImage}
-        >
-          {url ? (
-            <button
-              type="button"
-              className="image-preview-trigger"
-              aria-label={`预览图片：${node.attrs.alt || '图片'}`}
-              title="点击放大预览"
-              disabled={missing}
-              onClick={(e) => {
-                e.stopPropagation();
-                requestMediaPreview({
-                  kind: 'image',
-                  url,
-                  title: node.attrs.alt || '图片',
-                });
-              }}
-            >
-              <img
-                src={url}
-                alt={node.attrs.alt || '图片'}
-                draggable={false}
-                onError={() => setMissing(true)}
+      <div
+        style={{
+          paddingLeft: imageIndentPadding(node.attrs.indent),
+        }}
+      >
+        <div className="image-scroll">
+          <div
+            ref={box}
+            className="image-box"
+            style={{ width: `${dragWidth ?? node.attrs.percent}%` }}
+            contentEditable={false}
+            onMouseDown={selectImage}
+          >
+            {url ? (
+              <button
+                type="button"
+                className="image-preview-trigger"
+                aria-label={`预览图片：${node.attrs.alt || '图片'}`}
+                title="点击放大预览"
+                disabled={missing}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestMediaPreview({
+                    kind: 'image',
+                    url,
+                    title: node.attrs.alt || '图片',
+                  });
+                }}
+              >
+                <img
+                  src={url}
+                  alt={node.attrs.alt || '图片'}
+                  draggable={false}
+                  onError={() => setMissing(true)}
+                />
+              </button>
+            ) : (
+              <div className="missing-image">
+                <ImageOff size={24} />
+                {missing ? '本地图片缺失，请重新选择图片' : '图片加载中…'}
+                <small>{node.attrs.alt}</small>
+              </div>
+            )}
+            {missing && url && (
+              <span className="image-failed">图片无法加载，请检查地址</span>
+            )}
+            {selected && editable && (
+              <button
+                className="resize-handle"
+                aria-label="拖拽调整图片宽度"
+                onPointerDown={resize}
               />
-            </button>
-          ) : (
-            <div className="missing-image">
-              <ImageOff size={24} />
-              {missing ? '本地图片缺失，请重新选择图片' : '图片加载中…'}
-              <small>{node.attrs.alt}</small>
-            </div>
-          )}
-          {missing && url && (
-            <span className="image-failed">图片无法加载，请检查地址</span>
-          )}
-          {selected && editable && (
-            <button
-              className="resize-handle"
-              aria-label="拖拽调整图片宽度"
-              onPointerDown={resize}
-            />
-          )}
+            )}
+          </div>
         </div>
       </div>
       {selected && editable && (

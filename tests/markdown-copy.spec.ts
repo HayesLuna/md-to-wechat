@@ -63,7 +63,9 @@ async function selectLocalImage(page: Page) {
   });
   await page.evaluate(
     (src) =>
-      (window as any).__mojian.setMarkdown(`![跨存储图片](${src} "width=40%")`),
+      (window as any).__mojian.setMarkdown(
+        `![跨存储图片](${src} "width=40% indent=2")`,
+      ),
     src,
   );
   await page.waitForFunction(
@@ -116,6 +118,7 @@ test('image clipboard imports pixels into independent storage and preserves imag
     );
     expect(attrs.src).not.toBe(src);
     expect(attrs.percent).toBe(40);
+    expect(attrs.indent).toBe(2);
     await expect(target.locator('.missing-image')).toHaveCount(0);
     await target.keyboard.press('ControlOrMeta+z');
     await expect(target.locator('.image-node')).toHaveCount(0);

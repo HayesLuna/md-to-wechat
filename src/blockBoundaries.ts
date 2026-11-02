@@ -17,6 +17,8 @@ import {
   textPointMatches,
 } from './textHitTesting';
 import { placeCodeCaret } from './codeFolding';
+import { closeHistory } from '@tiptap/pm/history';
+import { imageIndent } from './outputUtils';
 
 const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
@@ -545,6 +547,35 @@ export const BlockBoundaries = Extension.create({
               return false;
             const { state } = view;
             const { selection } = state;
+            const imagePos =
+              selection instanceof NodeSelection &&
+              selection.node.type.name === 'image'
+                ? selection.from
+                : selection instanceof GapCursor &&
+                    selection.$from.nodeAfter?.type.name === 'image'
+                  ? selection.from
+                  : selection instanceof GapCursor &&
+                      selection.$from.nodeBefore?.type.name === 'image'
+                    ? selection.from - selection.$from.nodeBefore.nodeSize
+                    : null;
+            if (event.key === 'Tab' && imagePos !== null) {
+              event.preventDefault();
+              const image = state.doc.nodeAt(imagePos)!;
+              const indent = imageIndent(
+                imageIndent(image.attrs.indent) + (event.shiftKey ? -1 : 1),
+              );
+              if (indent !== imageIndent(image.attrs.indent)) {
+                const tr = closeHistory(state.tr).setNodeMarkup(
+                  imagePos,
+                  undefined,
+                  { ...image.attrs, indent },
+                );
+                // Attribute updates must retain the image side cursor/selection.
+                tr.setSelection(Selection.fromJSON(tr.doc, selection.toJSON()));
+                view.dispatch(tr.scrollIntoView());
+              }
+              return true;
+            }
             // Side/gap cursors have no textblock for EditingRules to indent.
             // Insert prose at the boundary, just like typing, keeping the block.
             if (event.key === 'Tab' && inputBoundary(selection) !== null) {
