@@ -24,7 +24,7 @@ npm run dev
 
 `npm run lint` 检查源码规范、类型及未使用代码；`npm run format:check` 检查统一格式，`npm run format` 自动整理源码。发布流水线会先完成这些检查和交互测试，再构建。
 
-`npm test` 在独立的 localhost:5175 服务上运行 Chromium 中的实际交互测试，端口被占用时直接失败，避免误用其他项目的服务。Linux 默认使用随依赖提供的 Chromium；macOS/Windows 首次运行可执行 `npx playwright install chromium`，也可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定已安装的浏览器。云环境公网示例图片由测试夹具通过已有 HTTPS 客户端代理获得真实且通过 TLS 校验的响应，再交给浏览器解码；这不代表 Chromium 直接公网访问已验证。未禁用 TLS/网页安全，也未修改持久证书信任。浏览器由带 npm integrity 校验的 `@sparticuz/chromium` 提供，不依赖环境中被拦截的 Playwright 浏览器下载域名。
+`npm test` 在独立的 localhost:5175 服务上运行 Chromium 中的实际交互测试，端口被占用时直接失败，避免误用其他项目的服务。GitHub Actions 安装并使用 Playwright 配套的 Chromium；其他 Linux 环境默认使用带 npm integrity 校验的 `@sparticuz/chromium`，适用于浏览器下载域名被拦截的受限云环境。macOS/Windows 首次运行可执行 `npx playwright install chromium`，也可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定已安装的浏览器。云环境公网示例图片由测试夹具通过已有 HTTPS 客户端代理获得真实且通过 TLS 校验的响应，再交给浏览器解码；这不代表 Chromium 直接公网访问已验证。未禁用 TLS/网页安全，也未修改持久证书信任。
 
 ## 内容与本地资源
 

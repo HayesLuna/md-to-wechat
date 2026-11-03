@@ -5,9 +5,11 @@ import chromium from '@sparticuz/chromium';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5175';
 const port = new URL(baseURL).port || '5175';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+// GitHub runners install Playwright's matching browser. Keep the packaged
+// serverless browser only for Linux environments with restricted downloads.
 const launchOptions = executablePath
   ? { executablePath }
-  : process.platform === 'linux'
+  : process.platform === 'linux' && process.env.GITHUB_ACTIONS !== 'true'
     ? {
         executablePath: await chromium.executablePath(),
         args: chromium.args.filter(
