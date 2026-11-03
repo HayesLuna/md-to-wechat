@@ -1693,8 +1693,7 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
   await expect(page.locator('.source-editor')).toHaveValue(/width=1%/);
   expect(await markdown(page)).toContain('width=1%');
   await page.getByRole('button', { name: '所见即所得', exact: true }).click();
-  await page.locator('.image-box img').click();
-  await page.keyboard.press('Escape');
+  // At 1% the resize handle covers the tiny image; resize it directly.
   await dragImageWidth(page, 200);
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-indicator')).toContainText('已保存');

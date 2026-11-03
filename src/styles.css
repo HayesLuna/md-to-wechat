@@ -671,7 +671,6 @@ button.primary:hover {
 .image-box {
   position: relative;
   margin: 0 auto;
-  min-height: 40px;
 }
 .image-box img {
   width: 100%;
@@ -681,7 +680,11 @@ button.primary:hover {
 }
 .image-node.selected .image-box {
   outline: 2px solid #a6493d88;
-  outline-offset: 3px;
+  outline-offset: 0;
+}
+.node-image.ProseMirror-selectednode,
+.node-inlineImage.ProseMirror-selectednode {
+  outline: none;
 }
 .resize-handle {
   position: absolute;

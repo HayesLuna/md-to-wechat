@@ -319,6 +319,36 @@ test('code block: Tab at the left side indents the whole block, while text still
   expect((await doc(page)).content[1].attrs.indent).toBe(1);
 });
 
+for (const key of ['Backspace', 'Delete'])
+  test(`code block: ${key} before the block removes one indentation step before deleting content`, async ({
+    page,
+  }) => {
+    await ready(page, '前文\n\n' + blocks[0][1]);
+    const original = await doc(page);
+    await clickSide(page, 0);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    const cursor = await selection(page);
+    for (const indent of [1, 0]) {
+      await page.keyboard.press(key);
+      const current = await doc(page);
+      expect(current.content[1].attrs.indent).toBe(indent);
+      expect(current.content[1].content).toEqual(original.content[1].content);
+      expect(current.content[0]).toEqual(original.content[0]);
+      expect(await selection(page)).toEqual(cursor);
+    }
+    await page.keyboard.press('ControlOrMeta+z');
+    expect((await doc(page)).content[1].attrs.indent).toBe(1);
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    expect((await doc(page)).content[1].attrs.indent).toBe(0);
+    // Once indentation is gone, forward deletion resumes block selection.
+    if (key === 'Delete') {
+      await page.keyboard.press(key);
+      expect(await selection(page)).toMatchObject({ type: 'node' });
+      expect((await doc(page)).content[1].type).toBe('codeBlock');
+    }
+  });
+
 test('mixed image paragraphs keep text on the same line, wrap naturally, and preserve indentation and copy', async ({
   page,
   context,
@@ -998,7 +1028,7 @@ test('removing one block leaves a protected gap beside the next block', async ({
 
 const blockSelectors = {
   codeBlock: '.code-node',
-  image: '.image-node',
+  image: '.image-box',
   horizontalRule: '.article-editor hr',
   table: '.tableWrapper',
 };
@@ -1222,7 +1252,7 @@ test('divider side whitespace places a cursor before or after without selecting 
 
 const smallImage = '![图片](https://example.test/boundary.svg "width=35%")';
 for (const edge of ['left', 'right'] as const)
-  test(`small image: the ${edge} caret reuses the selected outer frame`, async ({
+  test(`small image: the ${edge} caret and selection frame follow the visible image`, async ({
     page,
   }) => {
     await ready(page, '前文\n\n' + smallImage + '\n\n后文');
@@ -1238,13 +1268,17 @@ for (const edge of ['left', 'right'] as const)
       page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
     ).toBeVisible();
     const selected = await page.locator('.image-node').boundingBox();
-    const frameStyle = await page.locator('.node-image').evaluate((el) => {
-      (window as any).__selectedImageElement = el;
-      return {
-        outline: getComputedStyle(el).outline,
-        offset: getComputedStyle(el).outlineOffset,
-      };
-    });
+    await expect(page.locator('.node-image')).toHaveCSS(
+      'outline-style',
+      'none',
+    );
+    const frame = page.locator('.image-box');
+    await expect(frame).toHaveCSS('outline-style', 'solid');
+    await expect(frame).toHaveCSS('outline-offset', '0px');
+    const image = (await page.locator('.image-box img').boundingBox())!;
+    const frameBounds = (await frame.boundingBox())!;
+    expect(frameBounds.width).toBeCloseTo(image.width, 1);
+    expect(frameBounds.height).toBeCloseTo(image.height, 1);
     const inner = await page.locator('.image-box').boundingBox();
     expect(inner!.width).toBeLessThan(selected!.width * 0.4);
     await page.mouse.click(
@@ -1263,16 +1297,8 @@ for (const edge of ['left', 'right'] as const)
     );
     await expect(
       page.locator('.node-image.ProseMirror-selectednode'),
-    ).toHaveCSS('outline', frameStyle.outline);
-    await expect(
-      page.locator('.node-image.ProseMirror-selectednode'),
-    ).toHaveCSS('outline-offset', frameStyle.offset);
+    ).toHaveCSS('outline-style', 'none');
     await expect(page.locator('.image-node')).toHaveClass(/selected/);
-    expect(
-      await page
-        .locator('.node-image')
-        .evaluate((el) => el === (window as any).__selectedImageElement),
-    ).toBe(true);
     expect(
       await page.evaluate(() =>
         (window as any).__mojian.editor.isActive('image'),
@@ -1282,7 +1308,7 @@ for (const edge of ['left', 'right'] as const)
     let caret: Rect | null = null;
     await expect
       .poll(async () => {
-        const outer = await page.locator('.image-node').boundingBox();
+        const outer = await page.locator('.image-box').boundingBox();
         caret = await page.locator('.block-side-cursor').boundingBox();
         if (!outer || !caret) return Infinity;
         return Math.max(
@@ -1328,16 +1354,73 @@ for (const [edge, key] of [
     expect(await doc(page)).toEqual(original);
   });
 
-test('blank space inside the image outer frame does not create an outside cursor', async ({
+for (const percent of [1, 35, 150])
+  test(`mobile image at ${percent}%: the frame fits the image and its trailing caret stays inside the viewport`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await ready(
+      page,
+      `![图片](https://example.test/boundary.svg "width=${percent}%")`,
+    );
+    const outer = (await page.locator('.image-node').boundingBox())!;
+    const image = (await page.locator('.image-box img').boundingBox())!;
+    const surface = (await page.locator('.writing-scroll').boundingBox())!;
+    await page.mouse.click(
+      Math.min(outer.x + outer.width + 12, surface.x + surface.width - 2),
+      image.y + image.height / 2,
+    );
+    await expect
+      .poll(() => selection(page))
+      .toMatchObject({ type: 'imageSide', edge: 'right' });
+    const frame = (await page.locator('.image-box').boundingBox())!;
+    expect(frame.width).toBeCloseTo(image.width, 1);
+    expect(frame.height).toBeCloseTo(image.height, 1);
+    await expect(page.locator('.node-image')).toHaveCSS(
+      'outline-style',
+      'none',
+    );
+    const checkCaret = async () => {
+      await expect(page.locator('.block-side-cursor')).toBeVisible();
+      await expect
+        .poll(async () => {
+          const caret = (await page
+            .locator('.block-side-cursor')
+            .boundingBox())!;
+          const currentImage = (await page
+            .locator('.image-box img')
+            .boundingBox())!;
+          return (
+            caret.x >= surface.x &&
+            caret.x + caret.width < surface.x + surface.width &&
+            Math.abs(
+              caret.y + caret.height - currentImage.y - currentImage.height,
+            ) < 1
+          );
+        })
+        .toBe(true);
+    };
+    await checkCaret();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await checkCaret();
+    await page.keyboard.insertText('后文');
+    expectInlineImageText(await doc(page), 'right', '后文');
+  });
+
+test('blank space beside the visible image places a side cursor', async ({
   page,
 }) => {
   await ready(page, smallImage);
   const outer = await page.locator('.image-node').boundingBox();
   const inner = await page.locator('.image-box').boundingBox();
   await page.mouse.click(inner!.x - 20, inner!.y + inner!.height / 2);
-  expect((await selection(page)).type).not.toBe('imageSide');
+  expect(await selection(page)).toMatchObject({
+    type: 'imageSide',
+    edge: 'left',
+  });
   expect(inner!.x - 20).toBeGreaterThan(outer!.x);
-  await expect(page.locator('.block-side-cursor')).toBeHidden();
+  await expect(page.locator('.block-side-cursor')).toBeVisible();
 });
 
 for (const edge of ['left', 'right'] as const)

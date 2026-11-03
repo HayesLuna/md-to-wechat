@@ -181,9 +181,33 @@ const key = new PluginKey<BoundaryState>('blockBoundaries');
 function paintedBlock(view: EditorView, pos: number) {
   const dom = view.nodeDOM(pos);
   if (!(dom instanceof HTMLElement)) return null;
-  return view.state.doc.nodeAt(pos)?.type.name === 'codeBlock'
-    ? dom.querySelector<HTMLElement>('.code-node') || dom
-    : dom;
+  const type = view.state.doc.nodeAt(pos)?.type.name;
+  const selector =
+    type === 'codeBlock'
+      ? '.code-node'
+      : type === 'image'
+        ? '.image-box'
+        : null;
+  return (selector && dom.querySelector<HTMLElement>(selector)) || dom;
+}
+
+function paintedBlockRect(block: HTMLElement) {
+  const rect = block.getBoundingClientRect();
+  const scroller = block.classList.contains('image-box')
+    ? block.closest<HTMLElement>('.image-scroll')
+    : null;
+  if (!scroller) return rect;
+  const viewport = scroller.getBoundingClientRect();
+  const style = getComputedStyle(scroller);
+  const left = Math.max(
+    rect.left,
+    viewport.left + parseFloat(style.paddingLeft),
+  );
+  const right = Math.min(
+    rect.right,
+    viewport.right - parseFloat(style.paddingRight),
+  );
+  return new DOMRect(left, rect.top, Math.max(0, right - left), rect.height);
 }
 
 function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
@@ -207,7 +231,8 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   )) {
     const node = view.state.doc.nodeAt(pos);
     if (!isBlock(node)) continue;
-    const rect = paintedBlock(view, pos)?.getBoundingClientRect();
+    const block = paintedBlock(view, pos);
+    const rect = block && paintedBlockRect(block);
     if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
       continue;
     if (node!.type.name === 'horizontalRule') {
@@ -285,6 +310,19 @@ function deleteBlock(view: EditorView, from: number, to: number) {
       ),
     );
   view.dispatch(tr.scrollIntoView());
+}
+
+function updateBlockIndent(view: EditorView, pos: number, indent: number) {
+  const { state } = view;
+  const block = state.doc.nodeAt(pos)!;
+  const tr = closeHistory(state.tr).setNodeMarkup(pos, undefined, {
+    ...block.attrs,
+    indent,
+  });
+  tr.setSelection(Selection.fromJSON(tr.doc, state.selection.toJSON()));
+  view.dispatch(tr.scrollIntoView());
+  // Keep the next edit in its own undo step.
+  view.dispatch(closeHistory(view.state.tr));
 }
 
 function insertBoundaryText(view: EditorView, text: string) {
@@ -399,7 +437,7 @@ export const BlockBoundaries = Extension.create({
                     (selection.$from.nodeBefore?.nodeSize || 0);
             const block = paintedBlock(view, pos);
             observe(block);
-            const rect = block?.getBoundingClientRect();
+            const rect = block && paintedBlockRect(block);
             const scroll = view.dom
               .closest('.writing-scroll')
               ?.getBoundingClientRect();
@@ -409,7 +447,9 @@ export const BlockBoundaries = Extension.create({
             const y = rect.bottom - 9;
             caret.style.visibility =
               scroll && (y < scroll.top || y > scroll.bottom) ? 'hidden' : '';
-            caret.style.left = `${selection.edge === 'left' ? rect.left - 8 : rect.right + 7}px`;
+            const x =
+              selection.edge === 'left' ? rect.left - 8 : rect.right + 7;
+            caret.style.left = `${scroll ? Math.max(scroll.left + 2, Math.min(scroll.right - 4, x)) : x}px`;
             caret.style.top = `${y - 9}px`;
           };
           const schedule = () => {
@@ -504,7 +544,13 @@ export const BlockBoundaries = Extension.create({
           doc.addEventListener('scroll', schedule, true);
           window.addEventListener('resize', schedule);
           return {
-            update,
+            update() {
+              update();
+              // React NodeViews can commit new image geometry after this update.
+              // Recheck even when quick indent/outdent edits cancel each other
+              // before ResizeObserver sees a size change.
+              schedule();
+            },
             destroy() {
               cancelAnimationFrame(frame);
               resizeObserver.disconnect();
@@ -618,16 +664,7 @@ export const BlockBoundaries = Extension.create({
                 imageIndent(block.attrs.indent) + (event.shiftKey ? -1 : 1),
               );
               if (indent !== imageIndent(block.attrs.indent)) {
-                const tr = closeHistory(state.tr).setNodeMarkup(
-                  blockPos,
-                  undefined,
-                  { ...block.attrs, indent },
-                );
-                // Attribute updates must retain the image side cursor/selection.
-                tr.setSelection(Selection.fromJSON(tr.doc, selection.toJSON()));
-                view.dispatch(tr.scrollIntoView());
-                // Typing beside the block is a separate undo action.
-                view.dispatch(closeHistory(view.state.tr));
+                updateBlockIndent(view, blockPos, indent);
               }
               return true;
             }
@@ -649,6 +686,20 @@ export const BlockBoundaries = Extension.create({
                 (selection instanceof NodeSelection && isBlock(selection.node)))
             )
               return true;
+            if (
+              deleting &&
+              selection instanceof GapCursor &&
+              codePos !== null &&
+              imageIndent(state.doc.nodeAt(codePos)!.attrs.indent) > 0
+            ) {
+              event.preventDefault();
+              updateBlockIndent(
+                view,
+                codePos,
+                imageIndent(state.doc.nodeAt(codePos)!.attrs.indent) - 1,
+              );
+              return true;
+            }
             if (deleting && selection instanceof GapCursor) {
               const adjacent = backwards
                 ? selection.$from.nodeBefore
