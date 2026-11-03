@@ -157,7 +157,7 @@ for (const [type, markdown] of cursorBlocks.filter(
       expect(errors).toEqual([]);
     });
 
-for (const side of ['before', 'after', 'selected'] as const)
+for (const side of ['before', 'selected'] as const)
   test(`image: Tab changes image indentation from ${side}, with undo and persistence`, async ({
     page,
   }) => {
@@ -174,7 +174,7 @@ for (const side of ['before', 'after', 'selected'] as const)
         });
         e.commands.focus();
       });
-    } else await clickSide(page, side === 'before' ? 0 : 1);
+    } else await clickSide(page, 0);
     await expect(page.locator('.article-editor')).toBeFocused();
     const cursor = await selection(page);
     const image = () =>
@@ -258,6 +258,71 @@ for (const side of ['before', 'after', 'selected'] as const)
         return root.querySelector('img')!.parentElement!.style.paddingLeft;
       }),
     ).toBe('min(24px, 40%)');
+  });
+
+for (const width of [1440, 390])
+  test(`standalone images align left in the editor and publication output at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await ready(page, '![图片](https://example.test/boundary.svg "width=35%")');
+    const outer = (await page.locator('.image-node').boundingBox())!;
+    const image = (await page.locator('.image-box img').boundingBox())!;
+    expect(image.x).toBeCloseTo(outer.x, 1);
+    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+    const preview = page.locator('.preview-paper img');
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveCSS('margin-left', '0px');
+    const alignment = await preview.evaluate((el) => {
+      const parent = el.parentElement!;
+      return (
+        el.getBoundingClientRect().left -
+        parent.getBoundingClientRect().left -
+        parseFloat(getComputedStyle(parent).paddingLeft)
+      );
+    });
+    expect(alignment).toBeCloseTo(0, 1);
+    const margins = await page.evaluate(() => {
+      const html = new DOMParser().parseFromString(
+        window.__mojian!.getOutput()!.html,
+        'text/html',
+      );
+      return html.querySelector('img')!.style.marginLeft;
+    });
+    expect(margins).toBe('0px');
+  });
+
+for (const inline of [false, true])
+  test(`image: Tab after ${inline ? 'an inline' : 'a standalone'} image inserts text without changing its indentation`, async ({
+    page,
+  }) => {
+    const image =
+      '![图片](https://example.test/boundary.svg "width=35% indent=2")';
+    await ready(page, inline ? '前文 ' + image : image);
+    const original = await doc(page);
+    if (inline) {
+      await page.evaluate(() => {
+        const editor = window.__mojian!.editor!;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.type.name === 'inlineImage')
+            editor.commands.setTextSelection(pos + node.nodeSize);
+        });
+        editor.commands.focus();
+      });
+    } else await clickSide(page, 1);
+    await expect(page.locator('.article-editor')).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    expect(await doc(page)).toEqual(original);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    const line = (await doc(page)).content[0];
+    expect(
+      line.content.find((node: any) => node.type === 'inlineImage').attrs,
+    ).toMatchObject({ indent: 2, percent: 35 });
+    expect(line.content.at(-1)).toMatchObject({ type: 'text', text: '\t\t' });
+    await page.keyboard.press('Shift+Tab');
+    expect((await doc(page)).content[0].content.at(-1).text).toBe('\t');
+    await expect(page.locator('.article-editor')).toBeFocused();
   });
 
 test('code block: Tab at the left side indents the whole block, while text still goes above it', async ({
@@ -506,6 +571,14 @@ for (const [arrow, pos] of [
     await page.keyboard.press(arrow);
     const cursor = await selection(page);
     expect(cursor).toEqual({ type: 'gapcursor', pos });
+    if (arrow === 'ArrowRight') {
+      await page.keyboard.press('Tab');
+      expectInlineImageText(await doc(page), 'right', '\t');
+      expect((await doc(page)).content[0].content[0].attrs.indent).toBe(0);
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(await doc(page)).toEqual(original);
+      return;
+    }
     await page.keyboard.press('Tab');
     expect((await doc(page)).content[0].attrs.indent).toBe(1);
     expect(await selection(page)).toEqual(cursor);
@@ -1401,9 +1474,6 @@ for (const percent of [1, 35, 150])
         .toBe(true);
     };
     await checkCaret();
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Shift+Tab');
-    await checkCaret();
     await page.keyboard.insertText('后文');
     expectInlineImageText(await doc(page), 'right', '后文');
   });
@@ -1414,12 +1484,15 @@ test('blank space beside the visible image places a side cursor', async ({
   await ready(page, smallImage);
   const outer = await page.locator('.image-node').boundingBox();
   const inner = await page.locator('.image-box').boundingBox();
-  await page.mouse.click(inner!.x - 20, inner!.y + inner!.height / 2);
+  await page.mouse.click(
+    inner!.x + inner!.width + 20,
+    inner!.y + inner!.height / 2,
+  );
   expect(await selection(page)).toMatchObject({
     type: 'imageSide',
-    edge: 'left',
+    edge: 'right',
   });
-  expect(inner!.x - 20).toBeGreaterThan(outer!.x);
+  expect(inner!.x + inner!.width + 20).toBeLessThan(outer!.x + outer!.width);
   await expect(page.locator('.block-side-cursor')).toBeVisible();
 });
 

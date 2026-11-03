@@ -670,7 +670,7 @@ button.primary:hover {
 }
 .image-box {
   position: relative;
-  margin: 0 auto;
+  margin: 0;
 }
 .image-box img {
   width: 100%;

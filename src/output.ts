@@ -75,7 +75,7 @@ async function inlineStyles(
     td: 'border:1px solid #ddd;padding:9px 12px;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word;',
     pre: `margin:20px 0;padding:16px;background:${dark ? '#25272b' : '#f5f5f5'};color:${dark ? '#e2e4e8' : '#373a40'};font-size:13px;line-height:1.7;white-space:pre;overflow-x:auto;border-radius:3px;font-family:Consolas,Menlo,monospace;tab-size:4;`,
     code: 'font-family:Consolas,Menlo,monospace;font-size:0.88em;background:#f0f0ef;padding:2px 4px;border-radius:3px;',
-    img: 'height:auto;max-width:100%;display:block;margin:20px auto;',
+    img: 'height:auto;max-width:100%;display:block;margin:20px 0;',
   };
   for (const el of root.querySelectorAll<HTMLElement>('*')) {
     const pause = checkpoint();

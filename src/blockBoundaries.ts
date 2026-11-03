@@ -631,23 +631,17 @@ export const BlockBoundaries = Extension.create({
             const { selection } = state;
             const imagePos =
               selection instanceof NodeSelection &&
-              isImageName(selection.node.type.name)
+              isImageName(selection.node.type.name) &&
+              !(selection instanceof ImageSide && selection.edge === 'right')
                 ? selection.from
                 : selection instanceof GapCursor &&
                     selection.$from.nodeAfter?.type.name === 'image'
                   ? selection.from
-                  : selection instanceof GapCursor &&
-                      selection.$from.nodeBefore?.type.name === 'image'
-                    ? selection.from - selection.$from.nodeBefore.nodeSize
-                    : selection.empty &&
-                        selection instanceof TextSelection &&
-                        isImageName(selection.$from.nodeAfter?.type.name)
-                      ? selection.from
-                      : selection.empty &&
-                          selection instanceof TextSelection &&
-                          isImageName(selection.$from.nodeBefore?.type.name)
-                        ? selection.from - selection.$from.nodeBefore!.nodeSize
-                        : null;
+                  : selection.empty &&
+                      selection instanceof TextSelection &&
+                      isImageName(selection.$from.nodeAfter?.type.name)
+                    ? selection.from
+                    : null;
             const codePos =
               selection instanceof NodeSelection &&
               selection.node.type.name === 'codeBlock'
