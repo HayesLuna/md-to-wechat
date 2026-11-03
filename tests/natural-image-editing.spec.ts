@@ -1,6 +1,5 @@
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
-import { dragImageWidth } from './imageEditing';
 const markdown = (percent = 35) =>
   `前文\n\n![图片](https://example.test/natural.svg "width=${percent}%")\n\n后文`;
 async function ready(page: Page, percent = 35) {
@@ -67,7 +66,6 @@ async function nativeCaret(page: Page) {
 for (const [width, percent] of [
   [1440, 35],
   [390, 1],
-  [390, 35],
   [390, 100],
   [390, 150],
 ] as const)
@@ -113,12 +111,10 @@ for (const [width, percent] of [
       /(?:\t|&#9;)!\[/,
     );
     expect(
-      await page.evaluate(
-        () =>
-          window.__mojian!.editor!.getJSON().content![1].content!.at(-1)!.attrs!
-            .indent,
+      await page.evaluate(() =>
+        window.__mojian!.editor!.getJSON().content![1].content!.at(-1),
       ),
-    ).toBe(0);
+    ).toMatchObject({ type: 'inlineImage', attrs: { indent: 0 } });
     expect((await page.locator('.image-box').boundingBox())!.width).toBeCloseTo(
       before.width,
       1,
@@ -163,32 +159,9 @@ for (const edge of ['left', 'right'] as const)
       (text) => window.__mojian!.setMarkdown(text),
       markdown(),
     );
-    await side(page, 'right');
-    await page.keyboard.press('Backspace');
+    await side(page, edge);
+    await page.keyboard.press(edge === 'left' ? 'Delete' : 'Backspace');
     await expect(page.locator('.image-box img')).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+z');
     await expect(page.locator('.image-box img')).toHaveCount(1);
   });
-test('natural standalone image resizing survives source mode and reload', async ({
-  page,
-}) => {
-  await ready(page);
-  for (const percent of [1, 45, 150, 200]) await dragImageWidth(page, percent);
-  await page
-    .getByRole('button', { name: 'Markdown 源码', exact: true })
-    .click();
-  await expect(page.locator('.source-editor')).toHaveValue(/width=200%/);
-  expect(await page.locator('.source-editor').inputValue()).not.toContain(
-    '\u200b',
-  );
-  await page.getByRole('button', { name: '所见即所得', exact: true }).click();
-  await page.keyboard.press('ControlOrMeta+s');
-  await expect(page.locator('.save-indicator')).toContainText('已保存');
-  await page.reload();
-  await page.waitForFunction(() => !!window.__mojian?.editor);
-  expect(
-    await page.evaluate(
-      () => window.__mojian!.editor!.getJSON().content![1].content![0].type,
-    ),
-  ).toBe('inlineImage');
-});

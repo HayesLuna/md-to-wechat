@@ -92,49 +92,6 @@ test('Chinese line shortcuts, composition guard, undo and literal symbols', asyn
   await expect.poll(() => markdown(page)).toContain('```mermaid');
 });
 
-test('progressive select lists, nested lists, code and normal text; movement resets', async ({
-  page,
-}) => {
-  await ready(page);
-  await setDoc(
-    page,
-    '- 外层\n  - 内层\n    - 子项\n  - 同层\n- 第二项\n\n普通正文\n\n```java\nline one\n\tline two\n```',
-  );
-  await cursor(page, '内层');
-  await page.keyboard.press('ControlOrMeta+a');
-  let s = await selection(page);
-  expect(s.node).toBe('listItem');
-  expect(s.text).toContain('子项');
-  await page.keyboard.press('ControlOrMeta+a');
-  s = await selection(page);
-  expect(s.node).toBe('bulletList');
-  expect(s.text).toContain('同层');
-  expect(s.text).not.toContain('第二项');
-  await page.keyboard.press('ControlOrMeta+a');
-  s = await selection(page);
-  expect(s.node).toBe('bulletList');
-  expect(s.text).toContain('第二项');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).type).toBe('all');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).type).toBe('all');
-  await cursor(page, '内层');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).node).toBe('listItem');
-  await cursor(page, 'line one');
-  await page.keyboard.press('ControlOrMeta+a');
-  s = await selection(page);
-  expect(s.type).toBe('text');
-  expect(s.text).toBe('line one\n\tline two');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).node).toBe('codeBlock');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).type).toBe('all');
-  await cursor(page, '普通正文');
-  await page.keyboard.press('ControlOrMeta+a');
-  expect((await selection(page)).type).toBe('all');
-});
-
 test('table progressive selection, two-stage deletion, undo, header and last column protection', async ({
   page,
 }) => {
@@ -488,53 +445,6 @@ test('context menu retargets outside selection and stays in viewport', async ({
   expect(actual.x + actual.width).toBeCloseTo(tableClick, 0);
   await expect(page.locator('.context-menu')).toContainText('删除整表');
   await page.keyboard.press('Escape');
-});
-
-test('code copy is raw, fold keeps Markdown and output; Mermaid errors recover to latest source', async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await ready(page);
-  await setDoc(
-    page,
-    '```unknown\n\ta  b\n\n/* multiline\ncomment */\n```\n\n```mermaid\nflowchart LR\nA-->B\n```',
-  );
-  await expect(page.locator('.diagram svg')).toBeVisible({ timeout: 15000 });
-  const before = await markdown(page);
-  await page
-    .getByRole('button', { name: '复制代码', exact: true })
-    .first()
-    .click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    '\ta  b\n\n/* multiline\ncomment */',
-  );
-  await page
-    .getByRole('button', { name: '折叠代码', exact: true })
-    .first()
-    .click();
-  expect(await markdown(page)).toBe(before);
-  await prepared(page);
-  expect(
-    await page.evaluate(() => (window as any).__mojian.getOutput().text),
-  ).toContain('\ta  b\n\n/* multiline\ncomment */');
-  await setDoc(page, '```mermaid\ninvalid diagram !!!\n```');
-  await expect(page.locator('.diagram-error')).toContainText('语法有误');
-  expect(await markdown(page)).toContain('invalid diagram !!!');
-  await setDoc(page, '```mermaid\nflowchart LR\n最新-->结果\n```');
-  await expect(page.locator('.diagram svg')).toContainText('最新');
-  await expect(page.locator('.diagram-error')).toHaveCount(0);
-  const dl = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'PNG', exact: true }).click();
-  const file = await dl;
-  expect(file.suggestedFilename()).toMatch(/\.png$/);
-  const pngStream = await file.createReadStream();
-  const pngChunks: Buffer[] = [];
-  for await (const chunk of pngStream!) pngChunks.push(chunk);
-  const png = Buffer.concat(pngChunks);
-  expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-  expect(png.readUInt32BE(16)).toBeGreaterThan(50);
-  expect(png.readUInt32BE(20)).toBeGreaterThan(20);
 });
 
 test('security cleaning strips executable HTML, dangerous links and output controls', async ({

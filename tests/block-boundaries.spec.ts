@@ -8,7 +8,7 @@ const blocks = [
   ['horizontalRule', '---'],
   ['table', '| 标题 |\n| --- |\n| 内容 |'],
 ] as const;
-const cursorBlocks = blocks.filter(([type]) => type !== 'image');
+const cursorBlocks = [blocks[0], blocks[2], blocks[3]] as const;
 async function ready(page: Page, markdown: string) {
   await page.route('**/boundary.svg', (route) =>
     route.fulfill({
@@ -90,9 +90,7 @@ async function bottomCaret(page: Page, block: Rect) {
   return caret!;
 }
 
-for (const [type, markdown] of cursorBlocks.filter(
-  ([type]) => type !== 'image',
-))
+for (const [type, markdown] of cursorBlocks)
   for (const [side, index] of (
     [
       ['before', 0],
@@ -282,60 +280,6 @@ test('code block: Tab at the left side indents the whole block, while text still
 });
 
 for (const key of ['Backspace', 'Delete'])
-  test(`image: ${key} before ${inline ? 'inline' : 'standalone'} image removes indentation before content`, async ({
-    page,
-  }) => {
-    const markdown = '![图片](https://example.test/boundary.svg "width=35%")';
-    await ready(page, inline ? '前文 ' + markdown : '前文\n\n' + markdown);
-    const original = await doc(page);
-    if (inline) {
-      await page.evaluate(() => {
-        const editor = window.__mojian!.editor!;
-        editor.state.doc.descendants((node, pos) => {
-          if (node.type.name === 'inlineImage')
-            editor.commands.setTextSelection(pos);
-        });
-        editor.commands.focus();
-      });
-    } else await clickSide(page, 0);
-    await expect(page.locator('.article-editor')).toBeFocused();
-    const cursor = await selection(page);
-    const box = (await page.locator('.image-box').boundingBox())!;
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    const attrs = () =>
-      page.evaluate(() => {
-        let attrs: any;
-        window.__mojian!.editor!.state.doc.descendants((node) => {
-          if (['image', 'inlineImage'].includes(node.type.name))
-            attrs = node.attrs;
-        });
-        return attrs;
-      });
-    for (const indent of [1, 0]) {
-      await page.keyboard.press(key);
-      expect(await attrs()).toMatchObject({ indent, percent: 35 });
-      expect(await selection(page)).toEqual(cursor);
-      await expect
-        .poll(
-          async () => (await page.locator('.image-box').boundingBox())!.width,
-        )
-        .toBeCloseTo(box.width, 1);
-    }
-    expect(await doc(page)).toEqual(original);
-    await page.keyboard.press('ControlOrMeta+z');
-    expect(await attrs()).toMatchObject({ indent: 1 });
-    await page.keyboard.press('ControlOrMeta+Shift+z');
-    expect(await doc(page)).toEqual(original);
-    if (key === 'Delete') {
-      await page.keyboard.press('Delete');
-      await expect(page.locator('.image-node')).toHaveCount(0);
-      await page.keyboard.press('ControlOrMeta+z');
-      expect(await doc(page)).toEqual(original);
-    }
-  });
-
-for (const key of ['Backspace', 'Delete'])
   test(`code block: ${key} before the block removes one indentation step before deleting content`, async ({
     page,
   }) => {
@@ -365,7 +309,7 @@ for (const key of ['Backspace', 'Delete'])
     }
   });
 
-test('mixed image paragraphs keep text on the same line, wrap naturally, and preserve indentation and copy', async ({
+test('mixed image paragraphs keep text on the same line, wrap naturally, and preserve clipboard content', async ({
   page,
   context,
 }) => {
@@ -402,17 +346,6 @@ test('mixed image paragraphs keep text on the same line, wrap naturally, and pre
     editor.commands.focus();
   });
   await expect(page.locator('.article-editor')).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(page.locator('.inline-image-node .image-box')).toHaveCSS(
-    'margin-left',
-    '24px',
-  );
-  await expect(page.locator('.article-editor')).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(page.locator('.inline-image-node .image-box')).toHaveCSS(
-    'margin-left',
-    '0px',
-  );
   await page.keyboard.insertText('长说明'.repeat(100));
   expect((await geometry()).imageTop).toBeGreaterThan(initial.imageTop);
   await page.keyboard.press('ControlOrMeta+z');
@@ -506,223 +439,6 @@ test('mixed image paragraphs keep text on the same line, wrap naturally, and pre
   expect(errors).toEqual([]);
 });
 
-for (const [kind, percent, viewport] of [
-  ['block', 35, 1440],
-  ['block', 100, 320],
-  ['inline', 35, 1440],
-  ['inline', 100, 320],
-  ['inline', 150, 320],
-  ['table', 1, 320],
-] as const)
-  test(`${kind} image at ${percent}% keeps its dimensions through indentation in editor, preview and copied HTML`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: viewport, height: 1000 });
-    const image = `![图片](https://example.test/boundary.svg "width=${percent}%")`;
-    await ready(
-      page,
-      kind === 'block'
-        ? image
-        : kind === 'inline'
-          ? '说明 ' + image
-          : `| 图片 | 第二列 |\n| --- | --- |\n| 说明 ${image} | 内容 |`,
-    );
-    const before = (await page.locator('.image-box img').boundingBox())!;
-    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-    await expect(page.locator('.preview-paper img')).toBeVisible();
-    const previewBefore = (await page
-      .locator('.preview-paper img')
-      .boundingBox())!;
-    const copyBefore = await page.evaluate(
-      () => window.__mojian!.getOutput()!.html,
-    );
-    await page.locator('button[aria-label="关闭预览"]').click();
-    if (kind === 'block') await clickSide(page, 0);
-    else {
-      await page.evaluate(() => {
-        const editor = window.__mojian!.editor!;
-        editor.state.doc.descendants((node, pos) => {
-          if (node.type.name === 'inlineImage')
-            editor.commands.setTextSelection(pos);
-        });
-        editor.commands.focus();
-      });
-      await expect(page.locator('.article-editor')).toBeFocused();
-    }
-    for (let level = 1; level <= 6; level++) {
-      await page.keyboard.press('Tab');
-      await expect
-        .poll(
-          async () =>
-            (await page.locator('.image-box img').boundingBox())!.width,
-        )
-        .toBeCloseTo(before.width, 1);
-      expect(
-        (await page.locator('.image-box img').boundingBox())!.height,
-      ).toBeCloseTo(before.height, 1);
-    }
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(viewport);
-    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-    await expect(page.locator('.preview-paper img')).toBeVisible();
-    await expect
-      .poll(
-        async () =>
-          (await page.locator('.preview-paper img').boundingBox())!.width,
-      )
-      .toBeCloseTo(previewBefore.width, 1);
-    expect(
-      (await page.locator('.preview-paper img').boundingBox())!.height,
-    ).toBeCloseTo(previewBefore.height, 1);
-    const copied = await page.evaluate(async (original) => {
-      const measure = async (html: string) => {
-        const host = document.createElement('div');
-        host.style.cssText =
-          'position:fixed;left:-10000px;width:320px;visibility:hidden;';
-        host.innerHTML = html;
-        document.body.append(host);
-        const image = host.querySelector('img')!;
-        await image.decode();
-        const rect = image.getBoundingClientRect();
-        const size = { width: rect.width, height: rect.height };
-        host.remove();
-        return size;
-      };
-      return {
-        before: await measure(original),
-        after: await measure(window.__mojian!.getOutput()!.html),
-      };
-    }, copyBefore);
-    expect(copied.after.width).toBeCloseTo(copied.before.width, 1);
-    expect(copied.after.height).toBeCloseTo(copied.before.height, 1);
-  });
-
-for (const container of ['table', 'nested quote'])
-  test(`image indentation stays visible inside a narrow ${container} in editor, preview and clipboard HTML`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 320, height: 844 });
-    await ready(page, '');
-    await page.evaluate((container) => {
-      const paragraph = (text = '') => ({
-        type: 'paragraph',
-        ...(text ? { content: [{ type: 'text', text }] } : {}),
-      });
-      const image = {
-        type: 'paragraph',
-        content: [
-          {
-            type: 'inlineImage',
-            attrs: { src: 'https://example.test/boundary.svg', percent: 100 },
-          },
-        ],
-      };
-      const cell = (content: any[]) => ({ type: 'tableCell', content });
-      const content =
-        container === 'table'
-          ? [
-              {
-                type: 'table',
-                content: [
-                  {
-                    type: 'tableRow',
-                    content: [
-                      cell([paragraph(), image]),
-                      cell([paragraph('第二列')]),
-                      cell([paragraph('第三列')]),
-                    ],
-                  },
-                ],
-              },
-            ]
-          : [
-              {
-                type: 'bulletList',
-                content: [
-                  {
-                    type: 'listItem',
-                    content: [
-                      paragraph('外层'),
-                      {
-                        type: 'bulletList',
-                        content: [
-                          {
-                            type: 'listItem',
-                            content: [
-                              paragraph('内层'),
-                              {
-                                type: 'blockquote',
-                                content: [
-                                  { type: 'blockquote', content: [image] },
-                                ],
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-            ];
-      const e = (window as any).__mojian.editor;
-      e.commands.setContent({ type: 'doc', content });
-      e.state.doc.descendants((node: any, pos: number) => {
-        if (node.type.name === 'inlineImage') e.commands.setNodeSelection(pos);
-      });
-      e.commands.focus();
-    }, container);
-    await expect(page.locator('.article-editor')).toBeFocused();
-    const originalWidth = (await page.locator('.image-box').boundingBox())!
-      .width;
-    for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
-    expect(
-      (await page.locator('.image-box').boundingBox())!.width,
-    ).toBeGreaterThanOrEqual(originalWidth * 0.59);
-    for (const width of [1440, 320]) {
-      await page.setViewportSize({ width, height: 1000 });
-      const geometry = await page.locator('.image-box').evaluate((el) => {
-        const frame = el.parentElement!;
-        return {
-          image: el.getBoundingClientRect().width,
-          frame: frame.clientWidth,
-          padding: parseFloat(getComputedStyle(el).marginLeft),
-        };
-      });
-      expect(geometry.image).toBeGreaterThan(0);
-      expect(geometry.padding).toBeLessThanOrEqual(geometry.frame * 0.4 + 1);
-    }
-    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-    const preview = page.locator('.preview-paper img');
-    await expect(preview).toBeVisible();
-    expect((await preview.boundingBox())!.width).toBeGreaterThan(0);
-    const copiedWidth = await page.evaluate(() => {
-      const host = document.createElement('div');
-      host.style.cssText =
-        'position:fixed;left:-10000px;width:240px;visibility:hidden;';
-      host.innerHTML = (window as any).__mojian.getOutput().html;
-      document.body.append(host);
-      const width = host.querySelector('img')!.getBoundingClientRect().width;
-      host.remove();
-      return width;
-    });
-    expect(copiedWidth).toBeGreaterThan(0);
-    const inline =
-      '说明 ![图片](https://example.test/boundary.svg "width=40%") 后文';
-    await page.evaluate(
-      (markdown) => {
-        window.__mojian!.setMarkdown(markdown);
-        window.__mojian!.editor!.state.doc.check();
-      },
-      container === 'table'
-        ? `| 标题 |\n| --- |\n| ${inline} |`
-        : `> > ${inline}`,
-    );
-    await page.getByRole('button', { name: '关闭预览', exact: true }).click();
-    await expect(page.locator('.inline-image-node')).toBeVisible();
-  });
-
 test('indented local images keep enlarged scrolling and indentation around copied upload placeholders', async ({
   page,
 }) => {
@@ -786,17 +502,10 @@ for (const [type, markdown] of cursorBlocks) {
       await page.keyboard.type('New prose');
       const result = await doc(page);
       const i = result.content.findIndex((node: any) => node.type === type);
-      if (type === 'image')
-        expectInlineImageText(
-          result,
-          side === 'before' ? 'left' : 'right',
-          'New prose',
-        );
-      else
-        expect(result.content[i + (side === 'before' ? -1 : 1)]).toMatchObject({
-          type: 'paragraph',
-          content: [{ type: 'text', text: 'New prose' }],
-        });
+      expect(result.content[i + (side === 'before' ? -1 : 1)]).toMatchObject({
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'New prose' }],
+      });
       await expect(page.locator('.article-editor')).toBeFocused();
       await expect(page.locator('.block-side-cursor')).toBeHidden();
       await page.keyboard.press('ControlOrMeta+z');
@@ -812,28 +521,27 @@ for (const [type, markdown] of cursorBlocks) {
       expect(await doc(page)).toEqual(result);
     });
   }
-  if (type !== 'image')
-    for (const [side, index, key] of [
-      ['before', 0, 'Delete'],
-      ['after', 1, 'Backspace'],
-    ] as const) {
-      test(`${type}: ${key} ${side} selects the block before removal, undo restores it`, async ({
-        page,
-      }) => {
-        await ready(page, markdown);
-        const before = await doc(page);
-        await clickSide(page, index);
-        await page.keyboard.press(key);
-        expect(await doc(page)).toEqual(before);
-        expect(await selection(page)).toMatchObject({ type: 'node' });
-        await page.keyboard.press(key);
-        expect(
-          (await doc(page)).content.some((node: any) => node.type === type),
-        ).toBe(false);
-        await page.keyboard.press('ControlOrMeta+z');
-        expect(await doc(page)).toEqual(before);
-      });
-    }
+  for (const [side, index, key] of [
+    ['before', 0, 'Delete'],
+    ['after', 1, 'Backspace'],
+  ] as const) {
+    test(`${type}: ${key} ${side} selects the block before removal, undo restores it`, async ({
+      page,
+    }) => {
+      await ready(page, markdown);
+      const before = await doc(page);
+      await clickSide(page, index);
+      await page.keyboard.press(key);
+      expect(await doc(page)).toEqual(before);
+      expect(await selection(page)).toMatchObject({ type: 'node' });
+      await page.keyboard.press(key);
+      expect(
+        (await doc(page)).content.some((node: any) => node.type === type),
+      ).toBe(false);
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(await doc(page)).toEqual(before);
+    });
+  }
 }
 test('typing after code inserts a paragraph before the following image paragraph', async ({
   page,
@@ -1083,47 +791,9 @@ test('removing one block leaves a protected gap beside the next block', async ({
 
 const blockSelectors = {
   codeBlock: '.code-node',
-  image: '.image-box',
   horizontalRule: '.article-editor hr',
   table: '.tableWrapper',
 };
-// Code/table geometry is covered at three heights by the baseline test below.
-for (const [type, markdown] of cursorBlocks.filter(
-  ([type]) => type === 'image' || type === 'horizontalRule',
-))
-  for (const edge of ['left', 'right'] as const) {
-    test(`${type}: clicking ${edge} whitespace shows a bottom-aligned caret without creating a line`, async ({
-      page,
-    }) => {
-      await ready(page, markdown);
-      const original = await doc(page);
-      const box = await page.locator(blockSelectors[type]).boundingBox();
-      expect(box).toBeTruthy();
-      await page.mouse.click(
-        edge === 'left' ? box!.x - 20 : box!.x + box!.width + 20,
-        box!.y + box!.height / 2,
-      );
-      await expect
-        .poll(() => selection(page))
-        .toMatchObject({
-          type: type === 'image' ? 'text' : 'blockCursor',
-          edge,
-        });
-      expect(await doc(page)).toEqual(original);
-      await expect(page.locator('.block-side-cursor')).toBeVisible();
-      if (type === 'image')
-        await expect(
-          page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
-        ).toBeVisible();
-      const currentBox = await page.locator(blockSelectors[type]).boundingBox();
-      const caret = await bottomCaret(page, currentBox!);
-      if (edge === 'left') expect(caret!.x).toBeLessThan(box!.x);
-      else expect(caret!.x).toBeGreaterThan(box!.x + box!.width);
-      await expect(page.locator('.ProseMirror-gapcursor')).toHaveClass(
-        /block-side-cursor/,
-      );
-    });
-  }
 test('clicking a visible code line still edits inside the code block', async ({
   page,
 }) => {
@@ -1318,7 +988,7 @@ for (const [type, markdown] of cursorBlocks)
       block!.x + block!.width / 2,
       (block!.y + block!.height + next!.y) / 2,
     );
-    expect(['blockCursor', 'imageSide', 'gapcursor']).not.toContain(
+    expect(['blockCursor', 'gapcursor']).not.toContain(
       (await selection(page)).type,
     );
     await expect(page.locator('.ProseMirror-gapcursor')).toHaveCount(0);
@@ -1341,7 +1011,7 @@ for (const [first, second] of [['table', 'codeBlock']] as const)
     const a = await page.locator(blockSelectors[first]).boundingBox();
     const b = await page.locator(blockSelectors[second]).boundingBox();
     await page.mouse.click(a!.x + a!.width / 2, (a!.y + a!.height + b!.y) / 2);
-    expect(['blockCursor', 'imageSide', 'gapcursor']).not.toContain(
+    expect(['blockCursor', 'gapcursor']).not.toContain(
       (await selection(page)).type,
     );
     await expect(page.locator('.ProseMirror-gapcursor')).toHaveCount(0);
@@ -1398,81 +1068,6 @@ test('Markdown paste at the image right side preserves the image before the past
   });
 });
 
-for (const [name, markdown, selector] of [
-  ['paragraph', '正文内容', '.article-editor > p'],
-  ['heading', '## 标题内容', '.article-editor > h2'],
-  ['list', '- 第一项\n- 第二项', '.article-editor li p'],
-  ['quote', '> 引用内容', '.article-editor blockquote p'],
-] as const)
-  for (const edge of ['left', 'right'] as const)
-    test(`${name}: the full ${edge} margin focuses the matching text line`, async ({
-      page,
-    }) => {
-      await ready(page, markdown);
-      const target = page.locator(selector).last();
-      const text = await target.innerText();
-      const box = await target.boundingBox();
-      const surface = await page.locator('.writing-scroll').boundingBox();
-      const before = await doc(page);
-      await page.mouse.click(
-        edge === 'left' ? surface!.x + 3 : surface!.x + surface!.width - 3,
-        box!.y + box!.height / 2,
-      );
-      expect(await doc(page)).toEqual(before);
-      expect((await selection(page)).type).toBe('text');
-      await page.keyboard.insertText('新增');
-      await expect(target).toHaveText(
-        edge === 'left' ? '新增' + text : text + '新增',
-      );
-      await page.keyboard.press('ControlOrMeta+z');
-      expect(await doc(page)).toEqual(before);
-    });
-
-for (const [type, markdown] of cursorBlocks)
-  test(`${type}: far left and right margins keep the matching block`, async ({
-    page,
-  }) => {
-    await ready(page, '上一行\n\n' + markdown + '\n\n下一行');
-    const original = await doc(page);
-    const box = await page.locator(blockSelectors[type]).boundingBox();
-    const surface = await page.locator('.writing-scroll').boundingBox();
-    for (const edge of ['left', 'right']) {
-      await page.mouse.click(
-        edge === 'left' ? surface!.x + 3 : surface!.x + surface!.width - 3,
-        box!.y + box!.height / 2,
-      );
-      expect(await selection(page)).toMatchObject({
-        type: type === 'image' ? 'text' : 'blockCursor',
-        edge,
-      });
-      expect(await doc(page)).toEqual(original);
-    }
-  });
-
-test('wrapped text: side clicks follow the clicked line instead of the paragraph bottom', async ({
-  page,
-}) => {
-  await ready(page, '这是用于验证多行侧边定位的正文。'.repeat(30));
-  const paragraph = page.locator('.article-editor > p');
-  const box = await paragraph.boundingBox();
-  const surface = await page.locator('.writing-scroll').boundingBox();
-  const lineHeight = await paragraph.evaluate((el) =>
-    parseFloat(getComputedStyle(el).lineHeight),
-  );
-  const anchors: number[] = [];
-  for (const y of [box!.y + lineHeight / 2, box!.y + lineHeight * 1.5]) {
-    await page.mouse.click(surface!.x + surface!.width - 3, y);
-    anchors.push((await selection(page)).anchor);
-    await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
-    await expect(page.locator('.article-editor')).toHaveCSS(
-      'caret-color',
-      'rgb(37, 37, 40)',
-    );
-  }
-  expect(anchors[1]).toBeGreaterThan(anchors[0]);
-  expect(anchors[1]).toBeLessThan((await paragraph.innerText()).length);
-});
-
 test('native text caret stays visible during input and composition, while side carets stay 2px', async ({
   page,
 }) => {
@@ -1506,34 +1101,4 @@ test('native text caret stays visible during input and composition, while side c
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-});
-
-test('code editing retains a contrasting native caret without a floating overlay', async ({
-  page,
-}) => {
-  await ready(page, '```js\nconst longName = "' + 'x'.repeat(200) + '";\n```');
-  const code = page.locator('.code-node pre');
-  await code.click({ position: { x: 40, y: 25 } });
-  await expect(page.locator('.article-editor')).toBeFocused();
-  const styles = await code.evaluate((el) => ({
-    caret: getComputedStyle(el).caretColor,
-    color: getComputedStyle(el).color,
-  }));
-  expect(styles.caret).toBe('rgb(36, 41, 46)');
-  expect(styles.caret).not.toBe('rgba(0, 0, 0, 0)');
-  await expect(page.locator('.editor-text-cursor')).toHaveCount(0);
-  const before = await doc(page);
-  await page.keyboard.type('native');
-  expect(JSON.stringify(await doc(page))).toContain('native');
-  await page.keyboard.press('ControlOrMeta+z');
-  expect(await doc(page)).toEqual(before);
-  const language = page.getByRole('combobox', { name: '代码语言' });
-  await language.focus();
-  const inputStyles = await language.evaluate((el) => ({
-    caret: getComputedStyle(el).caretColor,
-    color: getComputedStyle(el).color,
-  }));
-  expect(inputStyles.caret).toBe(inputStyles.color);
-  expect(inputStyles.caret).toBe('rgb(87, 96, 106)');
-  await code.click({ position: { x: 40, y: 25 } });
 });

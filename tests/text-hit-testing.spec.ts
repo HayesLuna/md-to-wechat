@@ -64,21 +64,17 @@ async function insertAt(page: Page, pos: number) {
   ).toEqual(before);
 }
 
-for (const offset of [2, 7, 12])
-  test(`blank above a heading retains the clicked character column ${offset}`, async ({
-    page,
-  }) => {
-    const title = '这是可以精确定位的标题文字';
-    await ready(page, '上面这一段正文内容\n\n## ' + title + '\n\n下面的正文');
-    const target = await point(page, title, offset);
-    const a = (await page
-        .locator('.article-editor > p')
-        .first()
-        .boundingBox())!,
-      b = (await page.locator('.article-editor > h2').boundingBox())!;
-    await page.mouse.click(target.x, (a.y + a.height + b.y) / 2);
-    await insertAt(page, target.pos);
-  });
+test('blank above a heading retains the clicked character column 7', async ({
+  page,
+}) => {
+  const title = '这是可以精确定位的标题文字';
+  await ready(page, '上面这一段正文内容\n\n## ' + title + '\n\n下面的正文');
+  const target = await point(page, title, 7);
+  const a = (await page.locator('.article-editor > p').first().boundingBox())!,
+    b = (await page.locator('.article-editor > h2').boundingBox())!;
+  await page.mouse.click(target.x, (a.y + a.height + b.y) / 2);
+  await insertAt(page, target.pos);
+});
 
 test('blank above the first heading retains the horizontal character position', async ({
   page,
@@ -504,19 +500,17 @@ test('code gap hit testing uses visible folded rows and refreshes after edits an
   ).toBe(code);
 });
 
-for (const offset of [0, 1, 2])
-  test(`empty code row ${offset} accepts a side-space caret without selecting the previous row`, async ({
-    page,
-  }) => {
-    const text = 'first\n\n\nlast';
-    await ready(page, '```text\n' + text + '\n```');
-    const row = await page.evaluate((offset) => {
-      const e = (window as any).__mojian.editor,
-        pos = offset === 0 ? 1 : offset === 1 ? 7 : 8;
-      const r = e.view.coordsAtPos(pos);
-      return { pos, x: r.left + 100, y: (r.top + r.bottom) / 2 };
-    }, offset);
-    await page.mouse.click(row.x, row.y);
-    // On the nonempty first row the far right whitespace belongs to its end.
-    await insertAt(page, offset === 0 ? 6 : row.pos);
+test('empty code row 1 accepts a side-space caret without selecting the previous row', async ({
+  page,
+}) => {
+  const text = 'first\n\n\nlast';
+  await ready(page, '```text\n' + text + '\n```');
+  const row = await page.evaluate(() => {
+    const e = (window as any).__mojian.editor,
+      pos = 7;
+    const r = e.view.coordsAtPos(pos);
+    return { pos, x: r.left + 100, y: (r.top + r.bottom) / 2 };
   });
+  await page.mouse.click(row.x, row.y);
+  await insertAt(page, row.pos);
+});

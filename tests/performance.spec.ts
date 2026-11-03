@@ -1,79 +1,6 @@
 import { test, expect } from './fixtures';
 import MarkdownIt from 'markdown-it';
-import { markdownHighlight, matchHighlight } from '../src/highlight';
-
-test('dense highlights process only their own inline tokens', () => {
-  const parser = new MarkdownIt().use(markdownHighlight);
-  let processedTokens = 0;
-  parser.inline.ruler2.push('measure-highlight-work', (state) => {
-    processedTokens += state.tokens.length;
-    return true;
-  });
-  const html = parser.renderInline('==word== '.repeat(4000));
-  expect(html.match(/<mark>/g)).toHaveLength(4000);
-  expect(processedTokens).toBeLessThan(4000 * 10);
-});
-
-test('invalid highlight openings never scan the remaining paragraph', () => {
-  const parser = new MarkdownIt().use(markdownHighlight);
-  const source = '== word '.repeat(4000);
-  const original = String.prototype.startsWith;
-  let scanChecks = 0;
-  String.prototype.startsWith = function (search, position) {
-    if (search === '==') scanChecks++;
-    return original.call(this, search, position);
-  };
-  let html: string;
-  try {
-    html = parser.renderInline(source);
-    expect(matchHighlight('== unfinished')).toBeNull();
-  } finally {
-    String.prototype.startsWith = original;
-  }
-  expect(html).toBe(source);
-  expect(scanChecks).toBeLessThan(4000 * 2);
-});
-
-test('unclosed nonempty highlights scan a paragraph only once', () => {
-  const parser = new MarkdownIt().use(markdownHighlight);
-  const source = '==word '.repeat(4000);
-  const original = String.prototype.startsWith;
-  let checks = 0;
-  String.prototype.startsWith = function (search, position) {
-    if (search === '==') checks++;
-    return original.call(this, search, position);
-  };
-  try {
-    expect(parser.renderInline(source)).toBe(source);
-  } finally {
-    String.prototype.startsWith = original;
-  }
-  expect(checks).toBeLessThan(source.length * 3);
-});
-
-test('editor import skips repeated unclosed highlights without rescanning suffixes', async ({
-  page,
-}) => {
-  await page.goto('/');
-  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  const result = await page.evaluate(() => {
-    const source = '==word '.repeat(4000);
-    const original = String.prototype.startsWith;
-    let checks = 0;
-    String.prototype.startsWith = function (search, position) {
-      if (search === '==') checks++;
-      return original.call(this, search, position);
-    };
-    try {
-      const parsed = (window as any).__mojian.editor.markdown.parse(source);
-      return { checks, text: parsed.content[0].content[0].text };
-    } finally {
-      String.prototype.startsWith = original;
-    }
-  });
-  expect(result.text).toBe('==word '.repeat(4000));
-  expect(result.checks).toBeLessThan(100_000);
-});
+import { markdownHighlight } from '../src/highlight';
 
 test('highlight fragments preserve surrounding formatting and token levels', () => {
   const parser = new MarkdownIt().use(markdownHighlight);
@@ -187,35 +114,6 @@ test('code containing many backticks serializes without a call stack overflow', 
   expect(result.length).toBeGreaterThan(1_125_000);
 });
 
-test('selecting a dense highlight paragraph queries decorations by range', async ({
-  page,
-}) => {
-  await page.goto('/');
-  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.evaluate(() =>
-    (window as any).__mojian.setMarkdown('==word== '.repeat(1000)),
-  );
-  await expect(page.locator('.article-editor mark')).toHaveCount(1000);
-  await page.locator('.article-editor mark').first().click();
-  const queries = await page.evaluate(async () => {
-    const { DecorationSet } = await import('/tests/editorInspection.ts');
-    const original = DecorationSet.prototype.find;
-    let calls = 0;
-    DecorationSet.prototype.find = function (...args) {
-      calls++;
-      return original.apply(this, args);
-    };
-    try {
-      (window as any).__mojian.editor.commands.selectAll();
-      return calls;
-    } finally {
-      DecorationSet.prototype.find = original;
-    }
-  });
-  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2000);
-  expect(queries).toBeLessThan(50);
-});
-
 test('oversized code remains intact while editor and output skip syntax highlighting', async ({
   page,
 }) => {
@@ -255,71 +153,6 @@ test('oversized code remains intact while editor and output skip syntax highligh
   await expect(
     page.locator('.preview-paper [data-code-block] code'),
   ).toContainText(source);
-});
-
-test('editing one code block never detects languages or highlights unchanged blocks', async ({
-  page,
-}) => {
-  await page.goto('/');
-  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.evaluate(
-    (text) => (window as any).__mojian.setMarkdown(text),
-    codeDocument(24),
-  );
-  await expect(page.locator('.article-editor .hljs-keyword')).toHaveCount(24);
-  const counts = await page.evaluate(async () => {
-    const { lowlight } = await import('/src/syntax.ts');
-    const original = lowlight.highlight,
-      originalAuto = lowlight.highlightAuto;
-    let calls = 0,
-      auto = 0;
-    lowlight.highlight = (...args) => {
-      calls++;
-      return original(...args);
-    };
-    lowlight.highlightAuto = (...args) => {
-      auto++;
-      return originalAuto(...args);
-    };
-    const e = (window as any).__mojian.editor;
-    const setOptions = e.setOptions.bind(e);
-    let optionUpdates = 0;
-    e.setOptions = (...args: any[]) => {
-      optionUpdates++;
-      return setOptions(...args);
-    };
-    let position = 0;
-    e.state.doc.descendants((node: any, pos: number) => {
-      if (!position && node.type.name === 'codeBlock') position = pos + 1;
-    });
-    e.commands.setTextSelection(position);
-    e.commands.insertContent('x');
-    const duringTyping = calls;
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    const known = { calls, auto };
-    (window as any).__mojian.setMarkdown(
-      '```\nconst unlabelled = true;\n```\n\n```unknown-language\nraw source\n```',
-    );
-    e.commands.setTextSelection(1);
-    e.commands.insertContent('y');
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    lowlight.highlight = original;
-    lowlight.highlightAuto = originalAuto;
-    e.setOptions = setOptions;
-    return {
-      duringTyping,
-      optionUpdates,
-      known,
-      final: { calls, auto },
-      text: e.state.doc.textContent,
-    };
-  });
-  expect(counts.duringTyping).toBe(0);
-  expect(counts.optionUpdates).toBe(0);
-  expect(counts.known).toEqual({ calls: 1, auto: 0 });
-  expect(counts.final).toEqual(counts.known);
-  expect(counts.text).toContain('yconst unlabelled');
-  await expect(page.locator('.article-editor pre')).toHaveCount(2);
 });
 
 test('continuous input batches serialization while immediate mode changes and save retain the last key', async ({

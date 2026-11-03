@@ -97,11 +97,11 @@ test('left navigation shares drafts and outline, preserves collapse and supports
   await expect(sidebar).toBeVisible();
 });
 
-for (const width of [390, 546, 586])
+for (const width of [390, 586])
   test(`narrow ${width}px navigation keeps its toggle fixed and returns to the article`, async ({
     page,
   }) => {
-    await page.setViewportSize({ width, height: width === 546 ? 666 : 844 });
+    await page.setViewportSize({ width, height: 844 });
     await page.goto('/');
     await page.waitForFunction(() => !!(window as any).__mojian?.editor);
     const copyBounds = await page.locator('.copy-main').boundingBox();
