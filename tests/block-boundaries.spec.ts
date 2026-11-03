@@ -186,12 +186,16 @@ for (const side of ['before', 'selected'] as const)
         });
         return attrs;
       });
-    const left = (await page.locator('.image-box').boundingBox())!.x;
+    const originalBox = (await page.locator('.image-box').boundingBox())!;
+    const left = originalBox.x;
     await page.keyboard.press('Shift+Tab');
     expect(await doc(page)).toEqual(original);
     await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     expect(await image()).toMatchObject({ indent: 2, percent: 50 });
+    const shiftedBox = (await page.locator('.image-box').boundingBox())!;
+    expect(shiftedBox.width).toBeCloseTo(originalBox.width, 1);
+    expect(shiftedBox.height).toBeCloseTo(originalBox.height, 1);
     expect((await doc(page)).content).toHaveLength(original.content.length);
     expect(await selection(page)).toEqual(cursor);
     await expect(page.locator('.article-editor')).toBeFocused();
@@ -223,11 +227,7 @@ for (const side of ['before', 'selected'] as const)
     await page.getByRole('button', { name: '公众号预览', exact: true }).click();
     const preview = page.locator('.preview-paper img');
     await expect
-      .poll(() =>
-        preview.evaluate(
-          (el) => getComputedStyle(el.parentElement!).paddingLeft,
-        ),
-      )
+      .poll(() => preview.evaluate((el) => getComputedStyle(el).marginLeft))
       .toBe('24px');
     expect(await preview.evaluate((el) => el.style.width)).toBe('50%');
     const geometry = await preview.evaluate((el) => {
@@ -255,7 +255,7 @@ for (const side of ['before', 'selected'] as const)
           (window as any).__mojian.getOutput().html,
           'text/html',
         );
-        return root.querySelector('img')!.parentElement!.style.paddingLeft;
+        return root.querySelector('img')!.style.marginLeft;
       }),
     ).toBe('min(24px, 40%)');
   });
@@ -384,6 +384,61 @@ test('code block: Tab at the left side indents the whole block, while text still
   expect((await doc(page)).content[1].attrs.indent).toBe(1);
 });
 
+for (const inline of [false, true])
+  for (const key of ['Backspace', 'Delete'])
+    test(`image: ${key} before ${inline ? 'inline' : 'standalone'} image removes indentation before content`, async ({
+      page,
+    }) => {
+      const markdown = '![图片](https://example.test/boundary.svg "width=35%")';
+      await ready(page, inline ? '前文 ' + markdown : '前文\n\n' + markdown);
+      const original = await doc(page);
+      if (inline) {
+        await page.evaluate(() => {
+          const editor = window.__mojian!.editor!;
+          editor.state.doc.descendants((node, pos) => {
+            if (node.type.name === 'inlineImage')
+              editor.commands.setTextSelection(pos);
+          });
+          editor.commands.focus();
+        });
+      } else await clickSide(page, 0);
+      await expect(page.locator('.article-editor')).toBeFocused();
+      const cursor = await selection(page);
+      const box = (await page.locator('.image-box').boundingBox())!;
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      const attrs = () =>
+        page.evaluate(() => {
+          let attrs: any;
+          window.__mojian!.editor!.state.doc.descendants((node) => {
+            if (['image', 'inlineImage'].includes(node.type.name))
+              attrs = node.attrs;
+          });
+          return attrs;
+        });
+      for (const indent of [1, 0]) {
+        await page.keyboard.press(key);
+        expect(await attrs()).toMatchObject({ indent, percent: 35 });
+        expect(await selection(page)).toEqual(cursor);
+        await expect
+          .poll(
+            async () => (await page.locator('.image-box').boundingBox())!.width,
+          )
+          .toBeCloseTo(box.width, 1);
+      }
+      expect(await doc(page)).toEqual(original);
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(await attrs()).toMatchObject({ indent: 1 });
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      expect(await doc(page)).toEqual(original);
+      if (key === 'Delete') {
+        await page.keyboard.press('Delete');
+        await expect(page.locator('.image-node')).toHaveCount(0);
+        await page.keyboard.press('ControlOrMeta+z');
+        expect(await doc(page)).toEqual(original);
+      }
+    });
+
 for (const key of ['Backspace', 'Delete'])
   test(`code block: ${key} before the block removes one indentation step before deleting content`, async ({
     page,
@@ -452,14 +507,14 @@ test('mixed image paragraphs keep text on the same line, wrap naturally, and pre
   });
   await expect(page.locator('.article-editor')).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.locator('.inline-image-node > span')).toHaveCSS(
-    'padding-left',
+  await expect(page.locator('.inline-image-node .image-box')).toHaveCSS(
+    'margin-left',
     '24px',
   );
   await expect(page.locator('.article-editor')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.locator('.inline-image-node > span')).toHaveCSS(
-    'padding-left',
+  await expect(page.locator('.inline-image-node .image-box')).toHaveCSS(
+    'margin-left',
     '0px',
   );
   await page.keyboard.insertText('长说明'.repeat(100));
@@ -590,9 +645,105 @@ for (const [arrow, pos] of [
     await expect(page.locator('.article-editor')).toBeFocused();
     const indented = await doc(page);
     await page.keyboard.press(arrow === 'ArrowLeft' ? 'Delete' : 'Backspace');
+    expect((await doc(page)).content[0].attrs.indent).toBe(0);
+    await page.keyboard.press('Delete');
     await expect(page.locator('.image-node')).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+z');
+    expect((await doc(page)).content[0].attrs.indent).toBe(0);
+    await page.keyboard.press('ControlOrMeta+z');
     expect(await doc(page)).toEqual(indented);
+  });
+
+for (const [kind, percent, viewport] of [
+  ['block', 35, 1440],
+  ['block', 100, 320],
+  ['inline', 35, 1440],
+  ['inline', 100, 320],
+  ['inline', 150, 320],
+  ['table', 1, 320],
+] as const)
+  test(`${kind} image at ${percent}% keeps its dimensions through indentation in editor, preview and copied HTML`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: viewport, height: 1000 });
+    const image = `![图片](https://example.test/boundary.svg "width=${percent}%")`;
+    await ready(
+      page,
+      kind === 'block'
+        ? image
+        : kind === 'inline'
+          ? '说明 ' + image
+          : `| 图片 | 第二列 |\n| --- | --- |\n| 说明 ${image} | 内容 |`,
+    );
+    const before = (await page.locator('.image-box img').boundingBox())!;
+    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+    await expect(page.locator('.preview-paper img')).toBeVisible();
+    const previewBefore = (await page
+      .locator('.preview-paper img')
+      .boundingBox())!;
+    const copyBefore = await page.evaluate(
+      () => window.__mojian!.getOutput()!.html,
+    );
+    await page.locator('button[aria-label="关闭预览"]').click();
+    if (kind === 'block') await clickSide(page, 0);
+    else {
+      await page.evaluate(() => {
+        const editor = window.__mojian!.editor!;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.type.name === 'inlineImage')
+            editor.commands.setTextSelection(pos);
+        });
+        editor.commands.focus();
+      });
+      await expect(page.locator('.article-editor')).toBeFocused();
+    }
+    for (let level = 1; level <= 6; level++) {
+      await page.keyboard.press('Tab');
+      await expect
+        .poll(
+          async () =>
+            (await page.locator('.image-box img').boundingBox())!.width,
+        )
+        .toBeCloseTo(before.width, 1);
+      expect(
+        (await page.locator('.image-box img').boundingBox())!.height,
+      ).toBeCloseTo(before.height, 1);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBe(viewport);
+    await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+    await expect(page.locator('.preview-paper img')).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await page.locator('.preview-paper img').boundingBox())!.width,
+      )
+      .toBeCloseTo(previewBefore.width, 1);
+    expect(
+      (await page.locator('.preview-paper img').boundingBox())!.height,
+    ).toBeCloseTo(previewBefore.height, 1);
+    const copied = await page.evaluate(async (original) => {
+      const measure = async (html: string) => {
+        const host = document.createElement('div');
+        host.style.cssText =
+          'position:fixed;left:-10000px;width:320px;visibility:hidden;';
+        host.innerHTML = html;
+        document.body.append(host);
+        const image = host.querySelector('img')!;
+        await image.decode();
+        const rect = image.getBoundingClientRect();
+        const size = { width: rect.width, height: rect.height };
+        host.remove();
+        return size;
+      };
+      return {
+        before: await measure(original),
+        after: await measure(window.__mojian!.getOutput()!.html),
+      };
+    }, copyBefore);
+    expect(copied.after.width).toBeCloseTo(copied.before.width, 1);
+    expect(copied.after.height).toBeCloseTo(copied.before.height, 1);
   });
 
 for (const container of ['table', 'nested quote'])
@@ -675,11 +826,11 @@ for (const container of ['table', 'nested quote'])
     for (const width of [1440, 320]) {
       await page.setViewportSize({ width, height: 1000 });
       const geometry = await page.locator('.image-box').evaluate((el) => {
-        const frame = el.parentElement!.parentElement!;
+        const frame = el.parentElement!;
         return {
           image: el.getBoundingClientRect().width,
           frame: frame.clientWidth,
-          padding: parseFloat(getComputedStyle(frame).paddingLeft),
+          padding: parseFloat(getComputedStyle(el).marginLeft),
         };
       });
       expect(geometry.image).toBeGreaterThan(0);
@@ -780,7 +931,7 @@ test('indented local images keep enlarged scrolling and indentation around copie
           el.textContent?.startsWith('[请在此处上传本地图片'),
       ) as HTMLElement | undefined;
       while (el) {
-        if (el.style.paddingLeft === 'min(72px, 40%)') return true;
+        if (el.style.marginLeft === 'min(72px, 40%)') return true;
         el = el.parentElement ?? undefined;
       }
       return false;

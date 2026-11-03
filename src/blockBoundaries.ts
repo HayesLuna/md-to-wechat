@@ -680,17 +680,25 @@ export const BlockBoundaries = Extension.create({
                 (selection instanceof NodeSelection && isBlock(selection.node)))
             )
               return true;
+            const indentPos =
+              selection instanceof GapCursor && codePos !== null
+                ? codePos
+                : imagePos !== null &&
+                    (selection instanceof ImageSide ||
+                      selection instanceof GapCursor ||
+                      (selection instanceof TextSelection && selection.empty))
+                  ? imagePos
+                  : null;
             if (
               deleting &&
-              selection instanceof GapCursor &&
-              codePos !== null &&
-              imageIndent(state.doc.nodeAt(codePos)!.attrs.indent) > 0
+              indentPos !== null &&
+              imageIndent(state.doc.nodeAt(indentPos)!.attrs.indent) > 0
             ) {
               event.preventDefault();
               updateBlockIndent(
                 view,
-                codePos,
-                imageIndent(state.doc.nodeAt(codePos)!.attrs.indent) - 1,
+                indentPos,
+                imageIndent(state.doc.nodeAt(indentPos)!.attrs.indent) - 1,
               );
               return true;
             }

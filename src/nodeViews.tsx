@@ -18,7 +18,7 @@ import {
 import { requestMediaPreview } from './mediaPreviewEvents';
 import { acquireImageURL, download } from './storage';
 import { copyText } from './clipboard';
-import { imageIndentPadding } from './outputUtils';
+import { imageIndentPadding, inlineImageLayout } from './outputUtils';
 import { diagram, downloadDiagram } from './mermaid';
 import { indentJSON, compactJSON } from './jsonIndentation';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
@@ -74,6 +74,8 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   const [missing, setMissing] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const percent = dragWidth ?? node.attrs.percent;
+  const layout = inlineImageLayout(percent, node.attrs.indent);
   const setWidth = (percent: number) => {
     if (!editor.isEditable) return;
     const pos = getPos();
@@ -152,11 +154,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
       as={inline ? 'span' : 'div'}
       contentEditable={false}
       className={`image-node ${inline ? 'inline-image-node' : ''} ${selected ? 'selected' : ''}`}
-      style={
-        inline
-          ? { width: `${Math.min(100, dragWidth ?? node.attrs.percent)}%` }
-          : undefined
-      }
+      style={inline ? { width: layout.width } : undefined}
       onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
         if (window.matchMedia('(pointer: coarse)').matches) return;
         e.preventDefault();
@@ -167,17 +165,16 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
         );
       }}
     >
-      <Frame
-        style={{
-          paddingLeft: imageIndentPadding(node.attrs.indent),
-        }}
-      >
+      <Frame>
         <Frame className="image-scroll">
           <Frame
             ref={box}
             className="image-box"
             style={{
-              width: `${inline ? Math.max(100, dragWidth ?? node.attrs.percent) : (dragWidth ?? node.attrs.percent)}%`,
+              width: inline ? layout.imageWidth : `${percent}%`,
+              marginLeft: inline
+                ? layout.offset
+                : imageIndentPadding(node.attrs.indent),
             }}
             contentEditable={false}
             onMouseDown={selectImage}

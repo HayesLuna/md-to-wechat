@@ -42,9 +42,28 @@ export function codeInfo(info: string) {
   };
 }
 
-// Keep logical indentation on resize, while leaving at least 60% of a narrow
-// cell/list/quote's content width for the image itself.
+// Cap the visual offset at 40% of a narrow cell/list/quote. Image callers apply
+// this as a margin so indentation never consumes the image's percentage width.
 export function imageIndentPadding(value: unknown) {
   const pixels = imageIndent(value) * IMAGE_INDENT_STEP;
   return pixels ? `min(${pixels}px, 40%)` : '0px';
+}
+
+// An inline image reserves its width plus the indentation, capped at one line.
+// Resolve the inner offset against that reserved width, so the image keeps the
+// same percentage of the original paragraph even when the wrapper is capped.
+export function inlineImageLayout(percent: number, indent: unknown) {
+  const level = imageIndent(indent);
+  if (!level)
+    return {
+      width: `${Math.min(100, percent)}%`,
+      imageWidth: `${Math.max(100, percent)}%`,
+      offset: '0px',
+    };
+  const offset = `min(${level * IMAGE_INDENT_STEP}px, ${Math.max(40, 40 / (percent / 100 + 0.4))}%)`;
+  return {
+    width: `min(100%, calc(${percent}% + ${imageIndentPadding(level)}))`,
+    imageWidth: `max(calc(100% - ${offset}), ${percent}%)`,
+    offset,
+  };
 }

@@ -7,7 +7,11 @@ import { diagram } from './mermaid';
 import { DEFAULT_SETTINGS, type Settings } from './sample';
 import { codeCardRenderer, addCodeDecorations } from './codeOutput';
 import { workBudget } from './workBudget';
-import { outputKey, imageIndentPadding } from './outputUtils';
+import {
+  outputKey,
+  imageIndentPadding,
+  inlineImageLayout,
+} from './outputUtils';
 import { parseArticleAsync } from './articleParserClient';
 export type Asset = {
   kind: 'image' | 'diagram';
@@ -99,14 +103,31 @@ async function inlineStyles(
       el.style.margin = '0';
     }
     if (el.hasAttribute('data-image-indent')) {
-      el.style.display = el.hasAttribute('data-inline-image')
-        ? 'inline-block'
-        : 'block';
-      el.style.width = (el.getAttribute('data-inline-width') || '100') + '%';
+      const inline = el.hasAttribute('data-inline-image');
+      el.style.display = inline ? 'inline-block' : 'block';
+      el.style.width = inline
+        ? inlineImageLayout(
+            Number(el.getAttribute('data-inline-width')),
+            el.getAttribute('data-image-indent'),
+          ).width
+        : '100%';
       el.style.boxSizing = 'border-box';
-      el.style.paddingLeft = imageIndentPadding(
-        el.getAttribute('data-image-indent'),
-      );
+      el.style.overflowX = 'auto';
+      el.style.setProperty('-webkit-overflow-scrolling', 'touch');
+    }
+    if (el.hasAttribute('data-image-child-indent')) {
+      const indent = el.getAttribute('data-image-child-indent');
+      if (el.hasAttribute('data-inline-image')) {
+        const layout = inlineImageLayout(
+          Number(el.getAttribute('data-image-child-width')),
+          indent,
+        );
+        el.style.width = layout.imageWidth;
+        el.style.marginLeft = layout.offset;
+      } else el.style.marginLeft = imageIndentPadding(indent);
+      el.style.maxWidth = 'none';
+      el.removeAttribute('data-image-child-indent');
+      el.removeAttribute('data-image-child-width');
     }
     if (el.hasAttribute('data-block-indent')) {
       el.style.marginLeft = imageIndentPadding(
@@ -256,7 +277,11 @@ async function inlineStyles(
   for (const image of root.querySelectorAll<HTMLImageElement>('img')) {
     const pause = checkpoint();
     if (pause) await pause;
-    if (parseFloat(image.style.width) <= 100) continue;
+    if (
+      image.closest('[data-image-scroll]') ||
+      parseFloat(image.style.width) <= 100
+    )
+      continue;
     image.style.maxWidth = 'none';
     image.setAttribute('data-ignore-width', '');
     const frame = document.createElement('span');
@@ -409,10 +434,14 @@ export async function renderArticle(
           }
           const frame = document.createElement('span');
           frame.setAttribute('data-image-indent', String(img.indent));
+          frame.setAttribute('data-image-scroll', '');
+          frame.setAttribute('data-ignore-width', '');
+          content.setAttribute('data-ignore-width', '');
+          content.setAttribute('data-image-child-indent', String(img.indent));
+          content.setAttribute('data-image-child-width', String(img.width));
           if (img.inline) {
             frame.setAttribute('data-inline-image', 'true');
             frame.setAttribute('data-inline-width', String(img.width));
-            content.setAttribute('data-width', '100');
           }
           frame.append(content);
           target.replaceWith(frame);
