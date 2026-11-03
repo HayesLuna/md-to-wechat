@@ -1,3 +1,4 @@
+import tableRule from 'markdown-it/lib/rules_block/table.mjs';
 import MarkdownIt from 'markdown-it';
 import { markdownHighlight } from './highlight';
 import {
@@ -5,6 +6,7 @@ import {
   widthFromTitle,
   imageIndentFromTitle,
   codeInfo,
+  imageIndent,
 } from './outputUtils';
 import type { CodeSource } from './codeOutput';
 
@@ -20,6 +22,23 @@ export function parseArticle(markdown: string) {
   }[] = [];
   const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
   md.use(markdownHighlight);
+  // Consume only our table metadata, leaving ordinary HTML disabled.
+  md.block.ruler.before('table', 'table_indent', (state, line, end, silent) => {
+    const text = state.src.slice(
+      state.bMarks[line] + state.tShift[line],
+      state.eMarks[line],
+    );
+    const marker = /^<!-- table-indent=(\d+) -->$/.exec(text);
+    if (!marker || line + 2 >= end) return false;
+    const start = state.tokens.length;
+    if (!tableRule(state, line + 1, end, silent)) return false;
+    if (!silent)
+      state.tokens[start].attrSet(
+        'data-block-indent',
+        String(imageIndent(marker[1])),
+      );
+    return true;
+  });
   md.validateLink = (url) => safeURL(url) || url.startsWith('local-image:');
   md.renderer.rules.image = (tokens, i) => {
     const t = tokens[i];

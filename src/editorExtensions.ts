@@ -163,7 +163,7 @@ export const InlineImage = Image.extend({
           alt: match[2],
           src: match[3],
           title: null,
-          percent: widthFromTitle(match[4] || ''),
+          percent: widthFromTitle(match[4] || '', 50),
           indent: imageIndentFromTitle(match[4] || ''),
         }),
       }),
@@ -173,11 +173,12 @@ export const InlineImage = Image.extend({
     return {
       ...this.parent?.(),
       percent: {
-        default: 100,
+        default: 50,
         parseHTML: (el) =>
           widthFromTitle(
             el.getAttribute('title') ||
-              `width=${el.getAttribute('data-image-percent') || 100}%`,
+              `width=${el.getAttribute('data-image-percent') || 50}%`,
+            50,
           ),
         renderHTML: (attrs) => ({ 'data-image-percent': attrs.percent }),
       },

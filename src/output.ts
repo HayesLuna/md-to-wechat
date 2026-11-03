@@ -315,6 +315,11 @@ async function inlineStyles(
       `display:block;width:100%;max-width:100%;min-width:0;margin:20px 0;overflow-x:auto;box-sizing:border-box;-webkit-overflow-scrolling:touch;font-size:${table.style.fontSize};line-height:${table.style.lineHeight};`,
     );
     table.replaceWith(scroll);
+    scroll.style.marginLeft = table.style.marginLeft;
+    table.style.marginLeft = '0';
+    scroll.style.width = scroll.style.marginLeft
+      ? `calc(100% - ${scroll.style.marginLeft || '0px'})`
+      : '100%';
     scroll.append(table);
   }
 

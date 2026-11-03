@@ -823,7 +823,7 @@ export default function App() {
           imageInsertion(editor, {
             src: address,
             alt: label.trim() || '图片',
-            percent: 100,
+            percent: 50,
           }),
         )
         .run();
@@ -869,7 +869,7 @@ export default function App() {
             ...image?.attrs,
             src,
             alt: image?.attrs?.alt ?? file?.name ?? '剪贴板图片',
-            percent: image?.attrs?.percent ?? 100,
+            percent: image?.attrs?.percent ?? 50,
           }),
         )
         .run();

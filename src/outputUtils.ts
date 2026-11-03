@@ -12,9 +12,9 @@ export function safeURL(url: string) {
   }
 }
 
-export function widthFromTitle(title: string) {
+export function widthFromTitle(title: string, fallback = 100) {
   const m = /^width=(\d{1,3})%(?: indent=\d+)?$/.exec(title || '');
-  return m ? Math.min(200, Math.max(1, Number(m[1]))) : 100;
+  return m ? Math.min(200, Math.max(1, Number(m[1]))) : fallback;
 }
 
 export const IMAGE_INDENT_STEP = 24;

@@ -146,10 +146,7 @@ function selectedImages(state: EditorState) {
 
 function inlineImageBoundary(selection: Selection) {
   if (!(selection instanceof TextSelection) || !selection.empty) return null;
-  if (
-    selection.$from.nodeAfter?.type.name === 'inlineImage' &&
-    !selection.$from.nodeBefore?.isText
-  )
+  if (selection.$from.nodeAfter?.type.name === 'inlineImage')
     return { pos: selection.from, edge: 'left' as const };
   if (
     selection.$from.nodeBefore?.type.name === 'inlineImage' &&
@@ -519,11 +516,20 @@ export const BlockBoundaries = Extension.create({
             // Give the browser an ordinary text baseline beside a non-editable
             // inline image. This is view-only; no character enters the document.
             return points.add(state.doc, [
+              ...(inline.edge === 'left'
+                ? [
+                    Decoration.node(
+                      selection.$from.before(),
+                      selection.$from.after(),
+                      { class: 'image-left-caret-line' },
+                    ),
+                  ]
+                : []),
               Decoration.widget(
                 selection.from,
                 () => {
                   const anchor = document.createElement('span');
-                  anchor.className = 'image-caret-anchor';
+                  anchor.className = `image-caret-anchor image-caret-${inline.edge}`;
                   anchor.setAttribute('aria-hidden', 'true');
                   // Non-breaking, so a full-width image cannot strand/trim the
                   // browser's text baseline when the last adjacent letter goes.
@@ -581,15 +587,15 @@ export const BlockBoundaries = Extension.create({
               );
               return false;
             }
-            const codePos =
-              selection instanceof NodeSelection &&
-              selection.node.type.name === 'codeBlock'
+            const indentable = (node: Node | null) =>
+              !!node && ['codeBlock', 'table'].includes(node.type.name);
+            const blockPos =
+              selection instanceof NodeSelection && indentable(selection.node)
                 ? selection.from
                 : selection instanceof GapCursor &&
-                    selection.$from.nodeAfter?.type.name === 'codeBlock'
+                    indentable(selection.$from.nodeAfter)
                   ? selection.from
                   : null;
-            const blockPos = codePos;
             if (event.key === 'Tab' && blockPos !== null) {
               event.preventDefault();
               const block = state.doc.nodeAt(blockPos)!;
@@ -619,7 +625,7 @@ export const BlockBoundaries = Extension.create({
                 (selection instanceof NodeSelection && isBlock(selection.node)))
             )
               return true;
-            const indentPos = selection instanceof GapCursor ? codePos : null;
+            const indentPos = selection instanceof GapCursor ? blockPos : null;
             if (
               deleting &&
               indentPos !== null &&

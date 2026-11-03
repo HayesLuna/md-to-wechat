@@ -2876,3 +2876,30 @@ button.primary:hover {
     border-radius: 6px;
   }
 }
+
+/* Chromium otherwise draws an atomic-image-height caret at this boundary.
+   Use the same thin baseline and blink as prose, including after literal Tabs. */
+.article-editor.ProseMirror-focused .image-left-caret-line {
+  caret-color: transparent;
+}
+.article-editor.ProseMirror-focused .image-caret-left::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -2px;
+  width: 1px;
+  height: 18px;
+  background: #252528;
+  z-index: 5;
+  pointer-events: none;
+  animation: image-caret-blink 1s step-end infinite;
+}
+@keyframes image-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}

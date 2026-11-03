@@ -502,6 +502,17 @@ test('local image async bookmark maps with edits, percent survives roundtrip/rel
   expect(text.indexOf('前插')).toBeLessThan(text.indexOf('local-image:'));
   expect(text.indexOf('local-image:')).toBeLessThan(text.indexOf('后文'));
   expect(text).not.toContain('blob:');
+  expect(text).toContain('width=50%');
+  expect(
+    await page
+      .locator('.image-box')
+      .evaluate(
+        (box) =>
+          box.getBoundingClientRect().width /
+          box.closest('p')!.getBoundingClientRect().width,
+      ),
+  ).toBeCloseTo(0.5, 2);
+  await page.screenshot({ path: '/tmp/mojian-default-image-50.png' });
   await page.locator('.image-box img').click();
   await page.keyboard.press('Escape');
   await dragImageWidth(page, 45);
@@ -741,6 +752,7 @@ test('public URL images load before insertion; failed URL and canceled loading l
       .locator('.image-box img')
       .evaluate((img: HTMLImageElement) => img.naturalWidth),
   ).toBeGreaterThan(0);
+  expect(await markdown(page)).toContain('width=50%');
   await page.locator('.image-box img').click({ button: 'right' });
   await expect(page.locator('.context-menu')).toContainText('删除选中图片');
   await page.keyboard.press('Escape');
