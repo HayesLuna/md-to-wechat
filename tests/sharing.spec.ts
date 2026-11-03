@@ -213,6 +213,10 @@ test('image ID remapping preserves source text and code, including nested and re
       '> - ![a][photo]\n>\n>   [photo]:\n>     <local-image:new> "title"',
     ],
     [
+      '> ![a][multi line]\n>\n> [multi\n> line]: local-image:old',
+      '> ![a][multi line]\n>\n> [multi\n> line]: local-image:new',
+    ],
+    [
       '# Heading\r\r![a](local-image:old)\r\r![b](local-image&#58;old)\r',
       '# Heading\r\r![a](local-image:new)\r\r![b](local-image:new)\r',
     ],

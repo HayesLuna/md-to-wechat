@@ -60,27 +60,26 @@ export function analyzeImageReferences(markdown: string): ImageReferences {
       const result = parseDestination(source, from, max);
       const id = result.ok && localId(parser.normalizeLink(result.str));
       if (id) {
-        // The reference rule builds its input from these exact line slices,
-        // stripping list/quote indentation. Map its destination back before
-        // the surrounding block rule restores bMarks/tShift.
-        let line = start;
-        let offset = from;
-        while (line < state.lineMax) {
-          const length =
-            state.eMarks[line] + 1 - state.bMarks[line] - state.tShift[line];
-          if (offset < length) break;
-          offset -= length;
-          line++;
+        // Markdown-it >=14.3.3 parses references directly in state.src, so
+        // destination offsets already refer to the normalized document.
+        // Strip container prefixes only from the label used for lookup.
+        const labelEnd = source.lastIndexOf(']:', from);
+        const label: string[] = [];
+        for (let line = start; line < state.lineMax; line++) {
+          const begin =
+            state.bMarks[line] + state.tShift[line] + (line === start ? 1 : 0);
+          if (begin > labelEnd) break;
+          label.push(
+            source.slice(begin, Math.min(state.eMarks[line], labelEnd)),
+          );
+          if (state.eMarks[line] >= labelEnd) break;
         }
-        const at = state.bMarks[line] + state.tShift[line] + offset;
         const angled = source[from] === '<';
         captured = {
-          label: parser.utils.normalizeReference(
-            source.slice(1, source.lastIndexOf(']:', from)),
-          ),
+          label: parser.utils.normalizeReference(label.join('\n')),
           destination: {
-            start: at + (angled ? 1 : 0),
-            end: at + result.pos - from - (angled ? 1 : 0),
+            start: from + (angled ? 1 : 0),
+            end: result.pos - (angled ? 1 : 0),
             id,
           },
         };

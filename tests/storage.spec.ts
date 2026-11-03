@@ -119,6 +119,7 @@ test('conflicting writes reject without changing content or active draft; deleti
       [{ ...original, markdown: '# 旧版本修改', version: 11 }, undefined],
       [{ ...original, markdown: '# 相同版本修改', version: 20 }, undefined],
       [{ ...original, markdown: '# 基于旧快照的新版本', version: 30 }, 10],
+      [{ ...latest, readOnly: true }, 20],
     ] as const) {
       try {
         await s.saveDraft(draft, expected);
@@ -147,7 +148,7 @@ test('conflicting writes reject without changing content or active draft; deleti
     };
   });
   expect(result).toEqual({
-    conflicts: [true, true, true],
+    conflicts: [true, true, true, true],
     activeUnchanged: true,
     retained: '# 新内容',
     content: '# 新内容',
@@ -222,58 +223,33 @@ test('local image URLs stay valid while owned and are released after all views c
   expect(result.bytes).toBeGreaterThan(0);
 });
 
-test('version 3 drafts migrate once and library/image collection never reread bodies', async ({
+test('current draft library and image collection never reread article bodies', async ({
   page,
 }) => {
-  await page.route('**/metadata-migration', (route) =>
+  await page.route('**/metadata-library', (route) =>
     route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
   );
-  await page.goto('/metadata-migration');
+  await page.goto('/metadata-library');
   const result = await page.evaluate(async () => {
-    const settings = {
-      theme: 'default',
-      color: '#a6493d',
-      fontSize: 16,
-      lineHeight: 1.85,
-      codeTheme: 'light',
-    };
-    const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('mojian-v1', 3);
-      request.onupgradeneeded = () => {
-        for (const name of ['draft', 'meta', 'images'])
-          request.result.createObjectStore(name);
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const tx = legacy.transaction(['draft', 'meta', 'images'], 'readwrite');
-      for (let i = 0; i < 40; i++)
-        tx.objectStore('draft').put(
-          {
-            id: String(i),
-            title: '旧标题',
-            markdown:
-              '# **文章 ' +
-              i +
-              '**\n\n' +
-              '内容'.repeat(2000) +
-              (i === 0 ? '\n![共享图片](local-image:shared)' : ''),
-            settings,
-            version: 1,
-            createdAt: i,
-            savedAt: 1,
-          },
-          String(i),
-        );
-      tx.objectStore('meta').put('0', 'active');
-      tx.objectStore('images').put(new Blob(['image']), 'shared');
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    legacy.close();
     const s = await import('/src/storage.ts');
-    const migrated = await s.loadDraftLibrary();
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 10;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    const src = await s.storeImage(blob);
+    for (let i = 0; i < 40; i++) {
+      const draft = s.newDraft(
+        '# **文章 ' +
+          i +
+          '**\n\n' +
+          '内容'.repeat(2000) +
+          (i === 0 ? '\n![共享图片](' + src + ')' : ''),
+        DEFAULT_SETTINGS,
+      );
+      await s.saveDraft({ ...draft, id: String(i) });
+    }
     let reads = 0;
     const getAll = IDBObjectStore.prototype.getAll,
       get = IDBObjectStore.prototype.get;
@@ -290,15 +266,15 @@ test('version 3 drafts migrate once and library/image collection never reread bo
     release();
     const libraryReads = reads;
     const selected = await s.loadDraft('0');
-    const image = await s.imageBlob('local-image:shared');
+    const image = await s.imageBlob(src);
     return {
       count: library.drafts.length,
-      title: migrated.drafts.find((d) => d.id === '0')?.title,
+      title: library.drafts.find((d) => d.id === '0')?.title,
       hasBody: 'markdown' in library.drafts[0],
       libraryReads,
       selectedReads: reads - libraryReads,
-      body: selected?.markdown.includes('local-image:shared'),
-      image: image?.size,
+      body: selected?.markdown.includes(src),
+      image: image?.size === blob.size,
     };
   });
   expect(result).toEqual({
@@ -308,6 +284,6 @@ test('version 3 drafts migrate once and library/image collection never reread bo
     libraryReads: 0,
     selectedReads: 1,
     body: true,
-    image: 5,
+    image: true,
   });
 });

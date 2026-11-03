@@ -107,6 +107,7 @@ export async function readArticlePackage(
     markdown: decoded.markdown,
     settings: decoded.settings,
     customTitle: true,
+    readOnly: false,
     createdAt: now,
     savedAt: now,
     version: now,

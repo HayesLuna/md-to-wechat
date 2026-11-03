@@ -439,7 +439,6 @@ export function EditorPane({
       clearTimeout(timer);
       timer = setTimeout(load, 150);
     };
-    editor.on('update', scheduleLoad);
     // setContent with emitUpdate:false is used when returning from source mode.
     // Transactions still report the replaced document and need language loading.
     const documentChanged = ({
@@ -456,7 +455,6 @@ export function EditorPane({
       unsubscribe();
       clearTimeout(timer);
       cancelEditorMarkdown(editor);
-      editor.off('update', scheduleLoad);
       editor.off('transaction', documentChanged);
     };
   }, [editor]);

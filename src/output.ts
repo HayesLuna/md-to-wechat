@@ -425,12 +425,14 @@ export async function renderArticle(
       clipboard.append(fragment.cloneNode(true));
       root.append(fragment);
     }
+    // Capture slots once before replacing them; per-resource selectors rescan
+    // the entire article and turn image-heavy output into quadratic work.
+    const previewImages = root.querySelectorAll('[data-image-index]');
+    const copyImages = clipboard.querySelectorAll('[data-image-index]');
     await Promise.all(
       images.map(async (img, i) => {
-        const previewTarget = root.querySelector(`[data-image-index="${i}"]`)!;
-        const copyTarget = clipboard.querySelector(
-          `[data-image-index="${i}"]`,
-        )!;
+        const previewTarget = previewImages[i];
+        const copyTarget = copyImages[i];
         const place = (target: Element, content: HTMLElement) => {
           if (img.inline) content.setAttribute('data-inline-image', 'true');
           if (!img.indent) {
@@ -494,10 +496,12 @@ export async function renderArticle(
       }),
     );
     signal?.throwIfAborted();
+    const previewDiagrams = root.querySelectorAll('[data-diagram-index]');
+    const copyDiagrams = clipboard.querySelectorAll('[data-diagram-index]');
     await Promise.all(
       sources.map(async (source, i) => {
-        const target = root.querySelector(`[data-diagram-index="${i}"]`)!;
-        const copy = clipboard.querySelector(`[data-diagram-index="${i}"]`)!;
+        const target = previewDiagrams[i];
+        const copy = copyDiagrams[i];
         assets.push({
           kind: 'diagram',
           label: `Mermaid 图形 ${i + 1}`,

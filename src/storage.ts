@@ -5,7 +5,7 @@ export type Draft = {
   id: string;
   title: string;
   customTitle?: boolean;
-  readOnly?: boolean;
+  readOnly: boolean;
   markdown: string;
   settings: Settings;
   version: number;
@@ -77,6 +77,7 @@ export function newDraft(markdown: string, settings: Settings): Draft {
   return {
     id: crypto.randomUUID(),
     title: draftTitle(markdown),
+    readOnly: false,
     markdown,
     settings,
     version: now,
@@ -101,51 +102,15 @@ function db() {
   if (connection) return connection;
   const pending = openDB<StorageSchema>('mojian-v1', 4, {
     upgrade(db, oldVersion, _newVersion, tx) {
-      if (oldVersion < 1) {
-        db.createObjectStore('draft');
-        db.createObjectStore('images');
+      // Support only the current schema. Never rewrite an obsolete database.
+      if (oldVersion !== 0) {
+        tx.abort();
+        return;
       }
-      if (oldVersion < 2) db.createObjectStore('meta');
-      if (oldVersion < 4) db.createObjectStore('draftInfo');
-      // Keep migration atomic: metadata and legacy bodies commit together.
-      void (async () => {
-        const store = tx.objectStore('draft');
-        if (oldVersion < 2) {
-          const legacy = await store.get('current');
-          if (legacy) {
-            const draft = {
-              ...legacy,
-              id: crypto.randomUUID(),
-              title: draftTitle(legacy.markdown),
-              createdAt: Date.now(),
-            };
-            await store.put(draft, draft.id);
-            await tx.objectStore('meta').put(draft.id, 'active');
-            await store.delete('current');
-          }
-        }
-        if (oldVersion < 4) {
-          // One migration pass; subsequent library loads never read article bodies.
-          let cursor = await store.openCursor();
-          while (cursor) {
-            const draft = cursor.value;
-            const normalized = draft.customTitle
-              ? draft
-              : { ...draft, title: draftTitle(draft.markdown) };
-            await cursor.update(normalized);
-            await tx
-              .objectStore('draftInfo')
-              .put(draftInfo(normalized), normalized.id);
-            cursor = await cursor.continue();
-          }
-        }
-      })().catch(() => {
-        try {
-          tx.abort();
-        } catch {
-          /* The transaction may already be aborted. */
-        }
-      });
+      db.createObjectStore('draft');
+      db.createObjectStore('images');
+      db.createObjectStore('meta');
+      db.createObjectStore('draftInfo');
     },
     blocking() {
       // Release the connection when another tab upgrades the database.
@@ -290,6 +255,7 @@ export async function saveDraft(draft: Draft, expectedVersion?: number) {
           (previous.markdown !== draft.markdown ||
             previous.title !== draft.title ||
             previous.customTitle !== draft.customTitle ||
+            previous.readOnly !== draft.readOnly ||
             JSON.stringify(previous.settings) !==
               JSON.stringify(draft.settings)))))
   ) {

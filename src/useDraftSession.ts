@@ -24,19 +24,6 @@ import {
 import { flushEditorMarkdown } from './editorMarkdown';
 import { outputKey } from './outputUtils';
 type SaveStatus = 'saving' | 'saved' | 'failed';
-function validSettings(s?: Settings): Settings {
-  if (!s) return DEFAULT_SETTINGS;
-  return {
-    ...DEFAULT_SETTINGS,
-    theme: ['default', 'simple', 'elegant'].includes(s.theme)
-      ? s.theme
-      : 'default',
-    color: /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : DEFAULT_SETTINGS.color,
-    fontSize: Math.max(14, Math.min(20, s.fontSize || 16)),
-    lineHeight: Math.max(1.5, Math.min(2.3, s.lineHeight || 1.85)),
-    codeTheme: s.codeTheme === 'dark' ? 'dark' : 'light',
-  };
-}
 
 export function useDraftSession({
   editor: latestEditor,
@@ -94,10 +81,10 @@ export function useDraftSession({
         if (!active) return;
         activeDraft.current = d;
         setDrafts(library.drafts.length ? library.drafts : [summarizeDraft(d)]);
-        setReadOnly(d.readOnly === true);
+        setReadOnly(d.readOnly);
         setMarkdown(d.markdown);
         setInitial(d.markdown);
-        setSettings(validSettings(d.settings));
+        setSettings(d.settings);
         version.current = Math.max(Date.now(), d.version + 1);
         setSaveTime(d.savedAt);
         setReady(true);
@@ -155,6 +142,7 @@ export function useDraftSession({
     outputRevision.current++;
     current.current = { ...current.current, settings: s };
     version.current++;
+    statusRef.current = 'saving';
     setSettings(s);
     setSaveStatus('saving');
   };
@@ -221,11 +209,11 @@ export function useDraftSession({
     activeDraft.current = d;
     version.current = Math.max(version.current + 1, d.version);
     current.current = {
-      readOnly: d.readOnly === true,
+      readOnly: d.readOnly,
       markdown: d.markdown,
-      settings: validSettings(d.settings),
+      settings: d.settings,
     };
-    setReadOnly(d.readOnly === true);
+    setReadOnly(d.readOnly);
     setMarkdown(d.markdown);
     setSettings(current.current.settings);
     setInitial(d.markdown);

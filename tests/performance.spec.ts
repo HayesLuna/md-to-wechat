@@ -1,6 +1,16 @@
 import { test, expect } from './fixtures';
 import MarkdownIt from 'markdown-it';
 import { markdownHighlight } from '../src/highlight';
+import { headings } from '../src/headings';
+
+test('unclosed multiline references do not block heading extraction', () => {
+  const markdown =
+    '[ref]: https://example.com "' + 'x\n'.repeat(200_000) + '\n# 尾部标题\n';
+  const start = performance.now();
+  const result = headings(markdown);
+  expect(performance.now() - start).toBeLessThan(2000);
+  expect(result.map((heading) => heading.text)).toEqual(['尾部标题']);
+});
 
 test('highlight fragments preserve surrounding formatting and token levels', () => {
   const parser = new MarkdownIt().use(markdownHighlight);
@@ -308,6 +318,81 @@ test('large code articles share highlighting between preview, copy and unchanged
   expect(result.last).toContain('value_23');
   expect(result.largeCalls).toBe(80);
   expect(result.repeatedCalls).toBeLessThanOrEqual(16);
+});
+
+test('image-heavy output resolves resource slots with bounded document scans', async ({
+  page,
+}) => {
+  await page.route('**/performance-images', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await page.goto('/performance-images');
+  const result = await page.evaluate(async () => {
+    const { renderArticle } = await import('/src/output.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const query = Element.prototype.querySelector;
+    const queryAll = Element.prototype.querySelectorAll;
+    let scans = 0;
+    const count = (selector: string) => {
+      if (/^\[data-(?:image|diagram)-index/.test(selector)) scans++;
+    };
+    Element.prototype.querySelector = function (
+      this: Element,
+      selector: string,
+    ) {
+      count(selector);
+      return query.call(this, selector);
+    } as typeof query;
+    Element.prototype.querySelectorAll = function (
+      this: Element,
+      selector: string,
+    ) {
+      count(selector);
+      return queryAll.call(this, selector);
+    } as typeof queryAll;
+    try {
+      const markdown =
+        Array.from(
+          { length: 400 },
+          (_, i) => `![图片 ${i}](local-image:missing-${i})`,
+        ).join('\n\n') +
+        '\n\n' +
+        Array.from(
+          { length: 40 },
+          () => '```mermaid\ngraph LR; A-->B\n```',
+        ).join('\n\n');
+      const output = await renderArticle(
+        markdown,
+        DEFAULT_SETTINGS,
+        undefined,
+        {
+          diagrams: false,
+        },
+      );
+      const result = {
+        scans,
+        images: output.assets.filter((asset) => asset.kind === 'image').length,
+        diagrams: output.assets.filter((asset) => asset.kind === 'diagram')
+          .length,
+        first: output.previewHTML.includes('本地图片缺失：图片 0'),
+        last: output.html.includes('请在此处上传本地图片：图片 399'),
+        lastDiagram: output.html.includes('Mermaid 图形 40'),
+      };
+      output.dispose();
+      return result;
+    } finally {
+      Element.prototype.querySelector = query;
+      Element.prototype.querySelectorAll = queryAll;
+    }
+  });
+  expect(result.scans).toBeLessThanOrEqual(4);
+  expect(result).toMatchObject({
+    images: 400,
+    diagrams: 40,
+    first: true,
+    last: true,
+    lastDiagram: true,
+  });
 });
 
 test('superseded batched output stops and never produces a mixed snapshot', async ({

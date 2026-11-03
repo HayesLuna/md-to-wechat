@@ -123,75 +123,61 @@ test('drafts preserve immediate edits, titles, settings and active article acros
   expect(errors).toEqual([]);
 });
 
-test('legacy draft and local images migrate without replacing content or settings', async ({
+test('obsolete databases are rejected without rewriting or deleting their data', async ({
   page,
 }) => {
-  await page.route('**/seed-empty', (r) =>
-    r.fulfill({
-      contentType: 'text/html',
-      body: '<html><title>seed</title></html>',
-    }),
+  await page.route('**/obsolete-storage', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
   );
-  await page.goto('/seed-empty');
-  await page.evaluate(async () => {
+  await page.goto('/obsolete-storage');
+  const result = await page.evaluate(async () => {
+    const open = (version: number) =>
+      new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('mojian-v1', version);
+        request.onupgradeneeded = () =>
+          request.result.createObjectStore('draft');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    const obsolete = await open(1);
+    const tx = obsolete.transaction('draft', 'readwrite');
+    tx.objectStore('draft').put('original content', 'current');
     await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.deleteDatabase('mojian-v1');
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
-    await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open('mojian-v1', 1);
-      req.onupgradeneeded = () => {
-        req.result.createObjectStore('draft');
-        req.result.createObjectStore('images');
-      };
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => {
-        const db = req.result;
-        const tx = db.transaction(['draft', 'images'], 'readwrite');
-        tx.objectStore('draft').put(
-          {
-            markdown: '# 旧文章\n\n![旧图片](local-image:old-image)',
-            settings: {
-              theme: 'elegant',
-              color: '#123456',
-              fontSize: 18,
-              lineHeight: 2,
-              codeTheme: 'dark',
-            },
-            version: 1,
-            savedAt: 1,
-          },
-          'current',
-        );
-        tx.objectStore('images').put(
-          new Blob(['old image bytes'], { type: 'image/png' }),
-          'old-image',
-        );
-        tx.oncomplete = () => {
-          db.close();
-          resolve();
-        };
-        tx.onerror = () => reject(tx.error);
-      };
+    obsolete.close();
+    const storage = await import('/src/storage.ts');
+    let rejected = false;
+    try {
+      await storage.loadDraftLibrary();
+    } catch {
+      rejected = true;
+    }
+    const retained = await open(1);
+    const request = retained
+      .transaction('draft')
+      .objectStore('draft')
+      .get('current');
+    const content = await new Promise<unknown>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
+    const result = {
+      rejected,
+      content,
+      version: retained.version,
+      stores: [...retained.objectStoreNames],
+    };
+    retained.close();
+    return result;
   });
-  await ready(page);
-  await expect(page.locator('.article-editor h1')).toHaveText('旧文章');
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__mojian.getSettings().fontSize),
-    )
-    .toBe(18);
-  await box(page);
-  await expect(page.locator('.draft-list li')).toHaveCount(1);
-  await expect(page.locator('.draft-select')).toContainText('旧文章');
-  expect(
-    await page.evaluate(async () => {
-      const { imageBlob } = await import('/src/storage.ts');
-      return (await imageBlob('local-image:old-image'))?.size;
-    }),
-  ).toBe(15);
+  expect(result).toEqual({
+    rejected: true,
+    content: 'original content',
+    version: 1,
+    stores: ['draft'],
+  });
 });
 
 test('failed save blocks switching and creation, preserving current content', async ({
