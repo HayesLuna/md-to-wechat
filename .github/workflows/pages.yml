@@ -7,6 +7,12 @@ permissions:
   contents: read
   pages: write
   id-token: write
+# Bound registry retries so a slow download cannot consume the test budget.
+env:
+  npm_config_fetch_timeout: '30000'
+  npm_config_fetch_retries: '2'
+  npm_config_fetch_retry_mintimeout: '1000'
+  npm_config_fetch_retry_maxtimeout: '10000'
 concurrency:
   group: github-pages
   cancel-in-progress: true
@@ -24,11 +30,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-      - run: npm ci --no-audit --no-fund
+      # Reuse downloaded packages even when package-lock.json changes.
+      # npm ci still installs and verifies exactly the locked dependencies.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: node-cache-${{ runner.os }}-x64-npm-
+      - name: Install dependencies
+        id: dependencies
+        timeout-minutes: 5
+        run: npm ci --prefer-offline --no-audit --no-fund --timing
+      - name: Upload dependency diagnostics
+        if: failure() && steps.dependencies.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-logs-test-${{ matrix.group }}
+          path: ~/.npm/_logs
+          retention-days: 7
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-      - run: npm test -- --project=${{ matrix.group }}
+        timeout-minutes: 5
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Run tests
+        run: npm test -- --project=${{ matrix.group }} --reporter=list,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/mojian-test-report.json
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ matrix.group }}
+          path: /tmp/mojian-test-report.json
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -37,13 +71,30 @@ jobs:
           retention-days: 7
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-      - run: npm ci --no-audit --no-fund
+      # Reuse downloaded packages even when package-lock.json changes.
+      # npm ci still installs and verifies exactly the locked dependencies.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: node-cache-${{ runner.os }}-x64-npm-
+      - name: Install dependencies
+        id: dependencies
+        timeout-minutes: 5
+        run: npm ci --prefer-offline --no-audit --no-fund --timing
+      - name: Upload dependency diagnostics
+        if: failure() && steps.dependencies.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-logs-build
+          path: ~/.npm/_logs
+          retention-days: 7
       - run: npm run lint
       - run: npm run format:check
       - run: npm run build
