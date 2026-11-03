@@ -201,6 +201,14 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   const $hit = view.state.doc.resolve(hit.pos);
   const candidates = new Set<number>();
   if (hit.inside >= 0) candidates.add(hit.inside);
+  // WebKit can map the tall area beside an inline image into adjacent text.
+  // Inspect only this textblock so its image boundary remains reachable.
+  if ($hit.parent.inlineContent) {
+    $hit.parent.forEach((node, offset) => {
+      if (node.type.name === 'inlineImage')
+        candidates.add($hit.start() + offset);
+    });
+  }
   if ($hit.nodeAfter) candidates.add($hit.pos);
   if ($hit.nodeBefore) candidates.add($hit.pos - $hit.nodeBefore.nodeSize);
   for (let depth = $hit.depth; depth > 0; depth--)
@@ -227,11 +235,32 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
           ? 'right'
           : null;
     if (!edge) continue;
-    if (node!.type.name === 'inlineImage')
+    if (node!.type.name === 'inlineImage') {
+      // Real text beside the image belongs to the browser's native selection.
+      // Safari inflates its text rectangles, so use the font-sized baseline.
+      const dom = view.domAtPos(hit.pos);
+      if (dom.node.nodeType === 3 && dom.node.textContent?.length) {
+        const range = view.dom.ownerDocument.createRange();
+        const offset = Math.min(dom.offset, dom.node.textContent.length - 1);
+        range.setStart(dom.node, offset);
+        range.setEnd(dom.node, offset + 1);
+        const glyph = range.getBoundingClientRect();
+        const font = parseFloat(
+          getComputedStyle(dom.node.parentElement!).fontSize,
+        );
+        if (
+          event.clientX >= glyph.left - 1 &&
+          event.clientX <= glyph.right + 1 &&
+          event.clientY >= glyph.bottom - font * 1.4 &&
+          event.clientY <= glyph.bottom
+        )
+          return null;
+      }
       return TextSelection.create(
         view.state.doc,
         pos + (edge === 'right' ? node!.nodeSize : 0),
       );
+    }
     const $pos = view.state.doc.resolve(
       edge === 'left' ? pos : pos + node!.nodeSize,
     );
@@ -415,12 +444,38 @@ export const BlockBoundaries = Extension.create({
             )
               return;
             if (event.target.closest('.image-caret-anchor')) {
-              event.preventDefault();
-              view.focus();
+              if (event.type === 'pointerdown') return;
+              const selection = view.state.selection;
+              if (
+                event.type === 'mousedown' &&
+                selection instanceof TextSelection
+              ) {
+                beginTextSelection(
+                  view,
+                  event,
+                  { selection, line: view.coordsAtPos(selection.head) },
+                  (point) => ordinaryTextAtCoords(view, point),
+                );
+              } else {
+                event.preventDefault();
+                view.focus();
+              }
               return true;
             }
             const selection = blockSelectionAtCoords(view, event);
             if (!selection) return;
+            if (selection instanceof TextSelection) {
+              if (event.type === 'pointerdown') return;
+              if (event.type === 'mousedown') {
+                beginTextSelection(
+                  view,
+                  event,
+                  { selection, line: view.coordsAtPos(selection.head) },
+                  (point) => ordinaryTextAtCoords(view, point),
+                );
+                return true;
+              }
+            }
             event.preventDefault();
             const scrollTop = surface.scrollTop;
             const scrollLeft = surface.scrollLeft;
@@ -451,7 +506,7 @@ export const BlockBoundaries = Extension.create({
               !(event.target instanceof Element) ||
               !surface?.contains(event.target) ||
               event.target.closest(
-                'button,input,select,textarea,a,[role="separator"],.image-node,.tableWrapper',
+                'button,input,select,textarea,a,[role="separator"],.tableWrapper',
               )
             )
               return;

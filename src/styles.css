@@ -670,8 +670,9 @@ button.primary:hover {
 .image-node.inline-image-node {
   display: inline-block;
   vertical-align: bottom;
-  max-width: 100%;
-  margin: 0;
+  /* Reserve clickable text positions without overflowing a full-width image. */
+  max-width: calc(100% - 8px);
+  margin: 0 4px;
   white-space: normal;
 }
 .inline-image-node > span,
@@ -2902,17 +2903,4 @@ button.primary:hover {
   50% {
     opacity: 0;
   }
-}
-
-/* Only active while SafariCaret can paint a focused, collapsed text selection. */
-.article-editor.safari-caret-active,
-.article-editor.safari-caret-active * {
-  caret-color: transparent;
-}
-.safari-text-caret {
-  position: fixed;
-  width: 1px;
-  pointer-events: none;
-  z-index: 20;
-  animation: editor-cursor-blink 1.1s steps(2, start) infinite;
 }
