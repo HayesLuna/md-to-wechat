@@ -36,22 +36,6 @@ export const ArticleTableKit = TableKit.extend({
     return (this.parent?.() || []).map((extension) =>
       extension.name === 'table'
         ? (extension as typeof Table).extend({
-            // Table cells construct paragraphs directly, bypassing CleanParagraph.
-            parseMarkdown(token, h) {
-              return (
-                this.parent?.(token, {
-                  ...h,
-                  parseInline: (tokens) =>
-                    h
-                      .parseInline(tokens)
-                      .map((node) =>
-                        node.type === 'image'
-                          ? { ...node, type: 'inlineImage' }
-                          : node,
-                      ),
-                }) || []
-              );
-            },
             markdownTokenizer: {
               ...tableTokenizer,
               start: tableStart,

@@ -263,9 +263,13 @@ test('source remains raw, refresh persists settings and Markdown structure', asy
   ).toHaveValue(raw + '\n\n[未完成');
   await page.getByRole('button', { name: '所见即所得', exact: true }).click();
   await expect(page.locator('.article-editor table')).toHaveCount(1);
-  expect(await page.locator('.image-box').getAttribute('style')).toContain(
-    '43%',
-  );
+  expect(
+    await page
+      .locator('.image-box')
+      .evaluate(
+        (el) => el.getBoundingClientRect().width / el.closest('p')!.clientWidth,
+      ),
+  ).toBeCloseTo(0.43, 2);
 });
 
 test('clipboard has actual HTML and plain formats, and refusal never falls back', async ({
@@ -656,9 +660,13 @@ test('import cancel, UTF-8 export, reimport dimensions and draft settings persis
   });
   await page.getByRole('button', { name: '确认替换', exact: true }).click();
   expect(await markdown(page)).toBe(before);
-  expect(await page.locator('.image-box').getAttribute('style')).toContain(
-    '38%',
-  );
+  expect(
+    await page
+      .locator('.image-box')
+      .evaluate(
+        (el) => el.getBoundingClientRect().width / el.closest('p')!.clientWidth,
+      ),
+  ).toBeCloseTo(0.38, 2);
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.getByRole('button', { name: '雅致', exact: true }).click();
   await page.getByRole('slider', { name: '正文字号' }).fill('18');
@@ -715,7 +723,7 @@ test('drag image resize is one undoable action, preserve context selection, norm
   );
   await page.evaluate(() => {
     const e = (window as any).__mojian.editor;
-    e.commands.setNodeSelection(0);
+    e.commands.setNodeSelection(1);
     e.commands.focus();
   });
   await expect(
@@ -1683,8 +1691,12 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
     expect(
       await page
         .locator('.image-box')
-        .evaluate((el) => parseFloat((el as HTMLElement).style.width)),
-    ).toBe(width);
+        .evaluate(
+          (el) =>
+            (100 * el.getBoundingClientRect().width) /
+            el.closest('p')!.clientWidth,
+        ),
+    ).toBeCloseTo(width, 0);
   }
   await dragImageWidth(page, 1);
   await page

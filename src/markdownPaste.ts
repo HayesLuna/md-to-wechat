@@ -121,16 +121,3 @@ export function normalizePastedTableHTML(html: string) {
 }
 // Foreign rich text can contain text and an image in the same paragraph.
 // Mark only mixed paragraphs; standalone image HTML keeps its block shape.
-export function normalizeInlineImageHTML(html: string) {
-  if (!/<img\b/i.test(html)) return html;
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  for (const image of doc.querySelectorAll('img')) {
-    const line = image.closest('p,h1,h2,h3,h4,h5,h6,td,th');
-    if (
-      line &&
-      (line.textContent?.length || line.querySelectorAll('img').length > 1)
-    )
-      image.setAttribute('data-inline-image', 'true');
-  }
-  return doc.body.innerHTML;
-}

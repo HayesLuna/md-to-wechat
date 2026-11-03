@@ -119,7 +119,7 @@ test('range boundaries, select-all and single image selection have distinct feed
   const pos = await page.evaluate(() => {
     let found = 0;
     window.__mojian!.editor!.state.doc.descendants((node, pos) => {
-      if (node.type.name === 'inlineImage') found = pos;
+      if (!found && node.type.name === 'inlineImage') found = pos;
     });
     return found;
   });
@@ -144,9 +144,11 @@ test('range boundaries, select-all and single image selection have distinct feed
     pos,
   );
   await expect(selected(page)).toHaveCount(0);
-  await expect(page.locator('.inline-image-node')).toHaveClass(/selected/);
+  await expect(page.locator('.inline-image-node.selected')).toHaveClass(
+    /selected/,
+  );
   await expect(
-    page.locator('.inline-image-node .image-preview-trigger'),
+    page.locator('.inline-image-node.selected .image-preview-trigger'),
   ).toHaveCSS('cursor', 'zoom-in');
   await page.evaluate(() =>
     window.__mojian!.editor!.chain().setTextSelection(1).focus().run(),

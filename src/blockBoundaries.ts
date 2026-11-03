@@ -21,7 +21,7 @@ import { placeCodeCaret } from './codeFolding';
 import { closeHistory } from '@tiptap/pm/history';
 import { imageIndent, isImageName } from './outputUtils';
 
-const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
+const blockTypes = new Set(['codeBlock', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
   !!node && blockTypes.has(node.type.name);
 const isCursorBlock = isBlock;
@@ -103,77 +103,12 @@ if (!import.meta.hot?.data.BlockCursor)
   Selection.jsonID('blockCursor', BlockCursor);
 if (import.meta.hot) import.meta.hot.data.BlockCursor = BlockCursor;
 
-// Image side cursors retain a real NodeSelection, so the original NodeView
-// selection frame, controls and resize handles remain the source of truth.
-class ImageSideBookmark {
-  constructor(
-    readonly anchor: number,
-    readonly edge: 'left' | 'right',
-    readonly valid = true,
-  ) {}
-  map(mapping: Mappable) {
-    const mapped = mapping.mapResult(this.anchor);
-    return new ImageSideBookmark(
-      mapped.pos,
-      this.edge,
-      this.valid && !mapped.deleted,
-    );
-  }
-  resolve(doc: Node): Selection {
-    const $pos = doc.resolve(Math.min(this.anchor, doc.content.size));
-    return this.valid && $pos.nodeAfter?.type.name === 'image'
-      ? new ImageSide($pos, this.edge)
-      : Selection.near($pos);
-  }
-}
-class ImageSideSelection extends NodeSelection {
-  constructor(
-    $pos: ResolvedPos,
-    readonly edge: 'left' | 'right',
-  ) {
-    super($pos);
-  }
-  eq(other: Selection) {
-    return (
-      other instanceof ImageSide &&
-      other.from === this.from &&
-      other.edge === this.edge
-    );
-  }
-  map(doc: Node, mapping: Mappable): Selection {
-    return this.getBookmark().map(mapping).resolve(doc);
-  }
-  getBookmark() {
-    return new ImageSideBookmark(this.from, this.edge);
-  }
-  toJSON() {
-    return { type: 'imageSide', anchor: this.from, edge: this.edge };
-  }
-  static fromJSON(doc: Node, json: { anchor: number; edge: 'left' | 'right' }) {
-    return new ImageSide(doc.resolve(json.anchor), json.edge);
-  }
-}
-const ImageSide = (import.meta.hot?.data.ImageSide ||
-  ImageSideSelection) as typeof ImageSideSelection;
-if (!import.meta.hot?.data.ImageSide) Selection.jsonID('imageSide', ImageSide);
-if (import.meta.hot) import.meta.hot.data.ImageSide = ImageSide;
-
 function inputBoundary(selection: Selection) {
-  if (selection instanceof GapCursor) return selection.from;
-  if (selection instanceof ImageSide)
-    return selection.edge === 'left' ? selection.from : selection.to;
-  return null;
+  return selection instanceof GapCursor ? selection.from : null;
 }
 
 function sideSelection(doc: Node, pos: number, edge: 'left' | 'right') {
-  const $pos = doc.resolve(pos);
-  const node = edge === 'left' ? $pos.nodeAfter : $pos.nodeBefore;
-  return node?.type.name === 'image'
-    ? new ImageSide(
-        doc.resolve(edge === 'left' ? pos : pos - node.nodeSize),
-        edge,
-      )
-    : new BlockCursor($pos, edge);
+  return new BlockCursor(doc.resolve(pos), edge);
 }
 
 type BoundaryState = { paragraph: number | null; images: DecorationSet };
@@ -308,50 +243,6 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   return null;
 }
 
-function materializeImageText(view: EditorView, text = '') {
-  const { selection, schema } = view.state;
-  const boundary = inputBoundary(selection);
-  if (boundary === null) return false;
-  const before =
-    selection instanceof ImageSide
-      ? selection.edge === 'left'
-      : selection.$from.nodeAfter?.type.name === 'image';
-  const pos =
-    selection instanceof ImageSide
-      ? selection.from
-      : before
-        ? boundary
-        : boundary - (selection.$from.nodeBefore?.nodeSize || 0);
-  const image = view.state.doc.nodeAt(pos);
-  if (image?.type.name !== 'image') return false;
-  const inline = schema.nodes.inlineImage.create(
-    image.attrs,
-    null,
-    image.marks,
-  );
-  const content = text
-    ? before
-      ? [schema.text(text), inline]
-      : [inline, schema.text(text)]
-    : [inline];
-  const tr = view.state.tr.replaceWith(
-    pos,
-    pos + image.nodeSize,
-    schema.nodes.paragraph.create(null, content),
-  );
-  view.dispatch(
-    tr
-      .setSelection(
-        TextSelection.create(
-          tr.doc,
-          pos + 1 + (before ? text.length : inline.nodeSize + text.length),
-        ),
-      )
-      .scrollIntoView(),
-  );
-  return true;
-}
-
 function deleteBlock(view: EditorView, from: number, to: number) {
   const tr = view.state.tr.delete(from, to);
   const $pos = tr.doc.resolve(Math.min(from, tr.doc.content.size));
@@ -380,7 +271,6 @@ function updateBlockIndent(view: EditorView, pos: number, indent: number) {
 }
 
 function insertBoundaryText(view: EditorView, text: string) {
-  if (text && materializeImageText(view, text)) return true;
   const { selection, schema } = view.state;
   const pos = inputBoundary(selection);
   if (pos === null || !text) return false;
@@ -465,30 +355,7 @@ export const BlockBoundaries = Extension.create({
           };
           const update = () => {
             const selection = view.state.selection;
-            const inline =
-              view.editable && !view.composing
-                ? inlineImageBoundary(selection)
-                : null;
-            if (
-              view.dom.classList.contains('image-boundary-caret-active') !==
-              !!inline
-            ) {
-              view.dom.classList.toggle(
-                'image-boundary-caret-active',
-                !!inline,
-              );
-              if (!inline) {
-                const caret = view.dom.querySelector<HTMLElement>(
-                  '.inline-image-side-cursor',
-                );
-                if (caret) caret.style.visibility = 'hidden';
-              }
-            }
-            if (
-              !(selection instanceof GapCursor) &&
-              !(selection instanceof ImageSide) &&
-              !inline
-            ) {
+            if (!(selection instanceof GapCursor)) {
               observe(null);
               return;
             }
@@ -497,36 +364,20 @@ export const BlockBoundaries = Extension.create({
             );
             if (!caret) return;
             const lateral =
-              !!inline ||
-              selection instanceof ImageSide ||
-              (selection instanceof BlockCursor && !!selection.edge);
+              selection instanceof BlockCursor && !!selection.edge;
             caret.classList.toggle('block-side-cursor', lateral);
-            if (
-              !lateral ||
-              (!inline &&
-                !(selection instanceof BlockCursor) &&
-                !(selection instanceof ImageSide))
-            ) {
+            if (!(selection instanceof BlockCursor) || !selection.edge) {
               observe(null);
               caret.style.removeProperty('left');
               caret.style.removeProperty('top');
               caret.style.removeProperty('visibility');
               return;
             }
-            let pos: number;
-            let edge: 'left' | 'right';
-            if (inline) ({ pos, edge } = inline);
-            else if (selection instanceof ImageSide) {
-              pos = selection.from;
-              edge = selection.edge;
-            } else if (selection instanceof BlockCursor && selection.edge) {
-              edge = selection.edge;
-              pos =
-                edge === 'left'
-                  ? selection.from
-                  : selection.from -
-                    (selection.$from.nodeBefore?.nodeSize || 0);
-            } else return;
+            const edge = selection.edge;
+            const pos =
+              edge === 'left'
+                ? selection.from
+                : selection.from - (selection.$from.nodeBefore?.nodeSize || 0);
             const block = paintedBlock(view, pos);
             observe(block);
             const rect = block && paintedBlockRect(block);
@@ -566,6 +417,11 @@ export const BlockBoundaries = Extension.create({
               event.target.closest('button, input, select, textarea, a')
             )
               return;
+            if (event.target.closest('.image-caret-anchor')) {
+              event.preventDefault();
+              view.focus();
+              return true;
+            }
             const selection = blockSelectionAtCoords(view, event);
             if (!selection) return;
             event.preventDefault();
@@ -634,8 +490,6 @@ export const BlockBoundaries = Extension.create({
           doc.addEventListener('mousedown', mouseDown, true);
           doc.addEventListener('scroll', schedule, true);
           window.addEventListener('resize', schedule);
-          view.dom.addEventListener('compositionstart', schedule);
-          view.dom.addEventListener('compositionend', schedule);
           return {
             update() {
               update();
@@ -647,9 +501,6 @@ export const BlockBoundaries = Extension.create({
             destroy() {
               cancelAnimationFrame(frame);
               resizeObserver.disconnect();
-              view.dom.classList.remove('image-boundary-caret-active');
-              view.dom.removeEventListener('compositionstart', schedule);
-              view.dom.removeEventListener('compositionend', schedule);
               doc.removeEventListener('pointerdown', pointerDown, true);
               doc.removeEventListener('click', click, true);
               doc.removeEventListener('mousedown', mouseDown, true);
@@ -664,25 +515,24 @@ export const BlockBoundaries = Extension.create({
             const points = key.getState(state)?.images || DecorationSet.empty;
             const selection = state.selection;
             const inline = inlineImageBoundary(selection);
-            if (!(selection instanceof ImageSide) && !inline) return points;
-            const pos = inline ? selection.from : inputBoundary(selection)!;
-            const edge = inline?.edge || (selection as ImageSideSelection).edge;
+            if (!inline) return points;
+            // Give the browser an ordinary text baseline beside a non-editable
+            // inline image. This is view-only; no character enters the document.
             return points.add(state.doc, [
               Decoration.widget(
-                pos,
+                selection.from,
                 () => {
-                  const caret = document.createElement(inline ? 'span' : 'div');
-                  caret.className = `ProseMirror-gapcursor block-side-cursor${inline ? ' inline-image-side-cursor' : ''}`;
-                  if (inline) caret.style.visibility = 'hidden';
-                  caret.setAttribute('aria-hidden', 'true');
-                  return caret;
+                  const anchor = document.createElement('span');
+                  anchor.className = 'image-caret-anchor';
+                  anchor.setAttribute('aria-hidden', 'true');
+                  // Non-breaking, so a full-width image cannot strand/trim the
+                  // browser's text baseline when the last adjacent letter goes.
+                  anchor.textContent = '\ufeff';
+                  return anchor;
                 },
                 {
-                  key: inline
-                    ? `inline-image-${edge}-caret`
-                    : 'image-side-caret',
-                  side: edge === 'left' ? -1 : 1,
-                  ignoreSelection: true,
+                  key: `image-anchor-${inline.edge}`,
+                  side: inline.edge === 'left' ? 1 : -1,
                 },
               ),
             ]);
@@ -690,18 +540,7 @@ export const BlockBoundaries = Extension.create({
           handleTextInput: (view, _from, _to, text) =>
             insertBoundaryText(view, text),
           handleDOMEvents: {
-            compositionstart(view) {
-              materializeImageText(view);
-              return false;
-            },
-            paste(view) {
-              // Prepare an insertion position before EditorPane's paste handler.
-              materializeImageText(view);
-              return false;
-            },
             beforeinput(view, event) {
-              if (event.inputType === 'insertCompositionText')
-                materializeImageText(view);
               if (
                 event.inputType === 'insertText' &&
                 event.data &&
@@ -730,19 +569,18 @@ export const BlockBoundaries = Extension.create({
               return false;
             const { state } = view;
             const { selection } = state;
-            const imagePos =
+            if (
+              event.key === 'Tab' &&
               selection instanceof NodeSelection &&
-              isImageName(selection.node.type.name) &&
-              !(selection instanceof ImageSide && selection.edge === 'right')
-                ? selection.from
-                : selection instanceof GapCursor &&
-                    selection.$from.nodeAfter?.type.name === 'image'
-                  ? selection.from
-                  : selection.empty &&
-                      selection instanceof TextSelection &&
-                      isImageName(selection.$from.nodeAfter?.type.name)
-                    ? selection.from
-                    : null;
+              selection.node.isInline
+            ) {
+              view.dispatch(
+                state.tr.setSelection(
+                  TextSelection.create(state.doc, selection.from),
+                ),
+              );
+              return false;
+            }
             const codePos =
               selection instanceof NodeSelection &&
               selection.node.type.name === 'codeBlock'
@@ -751,7 +589,7 @@ export const BlockBoundaries = Extension.create({
                     selection.$from.nodeAfter?.type.name === 'codeBlock'
                   ? selection.from
                   : null;
-            const blockPos = codePos ?? imagePos;
+            const blockPos = codePos;
             if (event.key === 'Tab' && blockPos !== null) {
               event.preventDefault();
               const block = state.doc.nodeAt(blockPos)!;
@@ -781,15 +619,7 @@ export const BlockBoundaries = Extension.create({
                 (selection instanceof NodeSelection && isBlock(selection.node)))
             )
               return true;
-            const indentPos =
-              selection instanceof GapCursor && codePos !== null
-                ? codePos
-                : imagePos !== null &&
-                    (selection instanceof ImageSide ||
-                      selection instanceof GapCursor ||
-                      (selection instanceof TextSelection && selection.empty))
-                  ? imagePos
-                  : null;
+            const indentPos = selection instanceof GapCursor ? codePos : null;
             if (
               deleting &&
               indentPos !== null &&
@@ -802,69 +632,6 @@ export const BlockBoundaries = Extension.create({
                 imageIndent(state.doc.nodeAt(indentPos)!.attrs.indent) - 1,
               );
               return true;
-            }
-            if (deleting && selection instanceof GapCursor) {
-              const adjacent = backwards
-                ? selection.$from.nodeBefore
-                : selection.$from.nodeAfter;
-              if (adjacent?.type.name === 'image') {
-                event.preventDefault();
-                const pos = backwards
-                  ? selection.from - adjacent.nodeSize
-                  : selection.from;
-                deleteBlock(view, pos, pos + adjacent.nodeSize);
-                return true;
-              }
-            }
-            if (selection instanceof ImageSide) {
-              const pos = inputBoundary(selection)!;
-              if (event.key === 'Enter') {
-                const tr = state.tr.insert(
-                  pos,
-                  state.schema.nodes.paragraph.create(),
-                );
-                view.dispatch(
-                  tr
-                    .setSelection(TextSelection.create(tr.doc, pos + 1))
-                    .scrollIntoView(),
-                );
-                return true;
-              }
-              if (deleting) {
-                if (
-                  backwards
-                    ? selection.edge === 'right'
-                    : selection.edge === 'left'
-                )
-                  deleteBlock(view, selection.from, selection.to);
-                else {
-                  const next = Selection.findFrom(
-                    state.doc.resolve(pos),
-                    backwards ? -1 : 1,
-                    true,
-                  );
-                  if (next)
-                    view.dispatch(state.tr.setSelection(next).scrollIntoView());
-                }
-                return true;
-              }
-              if (
-                ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(
-                  event.key,
-                )
-              ) {
-                const dir = ['ArrowLeft', 'ArrowUp'].includes(event.key)
-                  ? -1
-                  : 1;
-                const next = Selection.findFrom(
-                  state.doc.resolve(pos),
-                  dir,
-                  true,
-                );
-                if (next)
-                  view.dispatch(state.tr.setSelection(next).scrollIntoView());
-                return true;
-              }
             }
             if (selection instanceof BlockCursor) {
               const pos = selection.from;
@@ -885,16 +652,6 @@ export const BlockBoundaries = Extension.create({
                 const node = backwards ? $pos.nodeBefore : $pos.nodeAfter;
                 if (node) {
                   const at = backwards ? pos - node.nodeSize : pos;
-                  if (
-                    selection.edge &&
-                    node.type.name === 'image' &&
-                    (backwards
-                      ? selection.edge === 'right'
-                      : selection.edge === 'left')
-                  ) {
-                    deleteBlock(view, at, at + node.nodeSize);
-                    return true;
-                  }
                   const next = isBlock(node)
                     ? NodeSelection.create(state.doc, at)
                     : Selection.near(

@@ -31,8 +31,7 @@ export function imageIndentFromTitle(title: string) {
   return imageIndent(/^width=\d{1,3}% indent=(\d+)$/.exec(title)?.[1]);
 }
 
-export const isImageName = (name: string | undefined) =>
-  name === 'image' || name === 'inlineImage';
+export const isImageName = (name: string | undefined) => name === 'inlineImage';
 
 export function codeInfo(info: string) {
   const match = /(?:^|\s)indent=(\d+)$/.exec(info.trim());

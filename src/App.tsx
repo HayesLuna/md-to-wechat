@@ -86,6 +86,17 @@ const ShareImport = lazy(() =>
     .then((module) => ({ default: module.ShareImport }))
     .catch(() => ({ default: ShareUnavailable })),
 );
+function imageInsertion(
+  editor: Editor,
+  attrs: JSONContent['attrs'],
+): JSONContent {
+  const image = { type: 'inlineImage', attrs };
+  const parent = editor.state.selection.$from.parent;
+  return parent.inlineContent && !parent.type.spec.code
+    ? image
+    : { type: 'paragraph', content: [image] };
+}
+
 function ShareUnavailable({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="分享暂不可用" onClose={onClose}>
@@ -260,7 +271,7 @@ export default function App() {
     const signature = selected
       ? JSON.stringify([
           selected.isActive('table'),
-          selected.isActive('image') || selected.isActive('inlineImage'),
+          selected.isActive('inlineImage'),
           selected.isActive('link'),
           selected.getAttributes('tableCell').align,
           selected.getAttributes('tableHeader').align,
@@ -808,15 +819,13 @@ export default function App() {
       editor
         .chain()
         .focus()
-        .insertContent({
-          type:
-            editor.state.selection.$from.parent.isTextblock &&
-            !editor.state.selection.$from.parent.type.spec.code &&
-            !!editor.state.selection.$from.parent.content.size
-              ? 'inlineImage'
-              : 'image',
-          attrs: { src: address, alt: label.trim() || '图片', percent: 100 },
-        })
+        .insertContent(
+          imageInsertion(editor, {
+            src: address,
+            alt: label.trim() || '图片',
+            percent: 100,
+          }),
+        )
         .run();
       setModal(null);
     } catch (e) {
@@ -855,20 +864,14 @@ export default function App() {
       editor
         .chain()
         .focus()
-        .insertContent({
-          type:
-            editor.state.selection.$from.parent.isTextblock &&
-            !editor.state.selection.$from.parent.type.spec.code &&
-            !!editor.state.selection.$from.parent.content.size
-              ? 'inlineImage'
-              : 'image',
-          attrs: {
+        .insertContent(
+          imageInsertion(editor, {
             ...image?.attrs,
             src,
             alt: image?.attrs?.alt ?? file?.name ?? '剪贴板图片',
             percent: image?.attrs?.percent ?? 100,
-          },
-        })
+          }),
+        )
         .run();
       setModal(null);
       notify('本地图片已插入，迁移到公众号时需要重新上传。');
@@ -1082,8 +1085,7 @@ export default function App() {
     }
   };
   const inTable = editor?.isActive('table');
-  const imageSelected =
-    editor?.isActive('image') || editor?.isActive('inlineImage');
+  const imageSelected = editor?.isActive('inlineImage');
   const linkActive = editor?.isActive('link');
   void selectionState;
   useLayoutEffect(() => {

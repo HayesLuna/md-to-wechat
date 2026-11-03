@@ -64,15 +64,13 @@ function signal(message: string) {
   window.dispatchEvent(new CustomEvent('mojian-notice', { detail: message }));
 }
 export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
-  const inline = node.isInline;
-  const Frame = inline ? 'span' : 'div';
   const editable = useEditorState({
     editor,
     selector: ({ editor }) => editor.isEditable,
   });
   const [url, setURL] = useState('');
   const [missing, setMissing] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLSpanElement>(null);
   const previewOnClick = useRef(false);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const percent = dragWidth ?? node.attrs.percent;
@@ -116,13 +114,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
     editor.view.dispatch(closeHistory(editor.state.tr));
     const start = event.clientX;
     const base = box.current!.getBoundingClientRect().width;
-    const frame = box.current!.parentElement!;
-    const style = getComputedStyle(frame);
-    const parent = inline
-      ? box.current!.closest('p,h1,h2,h3,h4,h5,h6')!.clientWidth
-      : frame.clientWidth -
-        parseFloat(style.paddingLeft) -
-        parseFloat(style.paddingRight);
+    const parent = box.current!.closest('p,h1,h2,h3,h4,h5,h6')!.clientWidth;
     let width = node.attrs.percent;
     event.currentTarget.setPointerCapture(event.pointerId);
     const button = event.currentTarget;
@@ -153,10 +145,10 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   };
   return (
     <NodeViewWrapper
-      as={inline ? 'span' : 'div'}
+      as="span"
       contentEditable={false}
-      className={`image-node ${inline ? 'inline-image-node' : ''} ${selected ? 'selected' : ''}`}
-      style={inline ? { width: layout.width } : undefined}
+      className={`image-node inline-image-node ${selected ? 'selected' : ''}`}
+      style={{ width: layout.width }}
       onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
         if (window.matchMedia('(pointer: coarse)').matches) return;
         e.preventDefault();
@@ -167,64 +159,60 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
         );
       }}
     >
-      <Frame>
-        <Frame className="image-scroll">
-          <Frame
-            ref={box}
-            className="image-box"
-            style={{
-              width: inline ? layout.imageWidth : `${percent}%`,
-              marginLeft: inline
-                ? layout.offset
-                : imageIndentPadding(node.attrs.indent),
-            }}
-            contentEditable={false}
-            onMouseDown={selectImage}
-          >
-            {url ? (
-              <button
-                type="button"
-                className="image-preview-trigger"
-                aria-label={`预览图片：${node.attrs.alt || '图片'}`}
-                title={selected ? '点击放大预览' : '单击选择，双击预览'}
-                disabled={missing}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!previewOnClick.current && e.detail !== 0) return;
-                  requestMediaPreview({
-                    kind: 'image',
-                    url,
-                    title: node.attrs.alt || '图片',
-                  });
-                }}
-              >
-                <img
-                  src={url}
-                  alt={node.attrs.alt || '图片'}
-                  draggable={false}
-                  onError={() => setMissing(true)}
-                />
-              </button>
-            ) : (
-              <Frame className="missing-image">
-                <ImageOff size={24} />
-                {missing ? '本地图片缺失，请重新选择图片' : '图片加载中…'}
-                <small>{node.attrs.alt}</small>
-              </Frame>
-            )}
-            {missing && url && (
-              <span className="image-failed">图片无法加载，请检查地址</span>
-            )}
-            {selected && editable && (
-              <button
-                className="resize-handle"
-                aria-label="拖拽调整图片宽度"
-                onPointerDown={resize}
+      <span className="image-scroll">
+        <span
+          ref={box}
+          className="image-box"
+          style={{
+            width: layout.imageWidth,
+            marginLeft: layout.offset,
+          }}
+          contentEditable={false}
+          onMouseDown={selectImage}
+        >
+          {url ? (
+            <button
+              type="button"
+              className="image-preview-trigger"
+              aria-label={`预览图片：${node.attrs.alt || '图片'}`}
+              title={selected ? '点击放大预览' : '单击选择，双击预览'}
+              disabled={missing}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!previewOnClick.current && e.detail !== 0) return;
+                requestMediaPreview({
+                  kind: 'image',
+                  url,
+                  title: node.attrs.alt || '图片',
+                });
+              }}
+            >
+              <img
+                src={url}
+                alt={node.attrs.alt || '图片'}
+                draggable={false}
+                onError={() => setMissing(true)}
               />
-            )}
-          </Frame>
-        </Frame>
-      </Frame>
+            </button>
+          ) : (
+            <span className="missing-image">
+              <ImageOff size={24} />
+              {missing ? '本地图片缺失，请重新选择图片' : '图片加载中…'}
+              <small>{node.attrs.alt}</small>
+            </span>
+          )}
+          {missing && url && (
+            <span className="image-failed">图片无法加载，请检查地址</span>
+          )}
+          {selected && editable && (
+            <button
+              className="resize-handle"
+              aria-label="拖拽调整图片宽度"
+              onPointerDown={resize}
+            />
+          )}
+        </span>
+      </span>
     </NodeViewWrapper>
   );
 }

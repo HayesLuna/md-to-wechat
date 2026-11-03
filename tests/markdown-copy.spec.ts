@@ -74,7 +74,7 @@ async function selectLocalImage(page: Page) {
         ?.naturalWidth > 0,
   );
   await page.evaluate(() =>
-    (window as any).__mojian.editor.chain().setNodeSelection(0).focus().run(),
+    (window as any).__mojian.editor.chain().setNodeSelection(1).focus().run(),
   );
   await expect(page.locator('.article-editor')).toBeFocused();
   return src;
@@ -114,7 +114,8 @@ test('image clipboard imports pixels into independent storage and preserves imag
       )
       .toBe(32);
     const attrs = await target.evaluate(
-      () => (window as any).__mojian.editor.state.doc.firstChild.attrs,
+      () =>
+        (window as any).__mojian.editor.state.doc.firstChild.firstChild.attrs,
     );
     expect(attrs.src).not.toBe(src);
     expect(attrs.percent).toBe(40);
@@ -177,7 +178,7 @@ test('CORS-enabled remote image copies PNG pixels', async ({
         ?.naturalWidth > 0,
   );
   await page.evaluate(() =>
-    (window as any).__mojian.editor.chain().setNodeSelection(0).focus().run(),
+    (window as any).__mojian.editor.chain().setNodeSelection(1).focus().run(),
   );
   await expect(page.locator('.article-editor')).toBeFocused();
   await page.evaluate(() => navigator.clipboard.writeText('seed'));
@@ -242,7 +243,7 @@ test('a slow image copy cannot overwrite a later text copy', async ({
         (window as any).__imageCopyDone = true;
       }
     };
-    (window as any).__mojian.editor.chain().setNodeSelection(0).focus().run();
+    (window as any).__mojian.editor.chain().setNodeSelection(1).focus().run();
   });
   await expect(page.locator('.article-editor')).toBeFocused();
   await page.keyboard.press('ControlOrMeta+c');
@@ -283,8 +284,7 @@ test('CORS-denied image keeps native rich copy without rewriting the clipboard',
       (document.querySelector('.image-box img') as HTMLImageElement)
         ?.naturalWidth > 0,
   );
-  const box = await page.locator('.image-node').boundingBox();
-  await page.mouse.click(box!.x - 20, box!.y + box!.height / 2);
+  await page.locator('.image-box img').click();
   await expect(page.locator('.image-node')).toHaveClass(/selected/);
   await page.evaluate(async () => {
     await navigator.clipboard.writeText('old clipboard');
@@ -403,7 +403,7 @@ for (const mode of ['editor', 'preview', 'read-only'])
       await page.evaluate(() =>
         (window as any).__mojian.editor
           .chain()
-          .setNodeSelection(0)
+          .setNodeSelection(1)
           .focus()
           .run(),
       );

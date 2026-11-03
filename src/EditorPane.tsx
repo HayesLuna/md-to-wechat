@@ -25,7 +25,6 @@ import { copyImage } from './clipboard';
 import { closeHistory } from '@tiptap/pm/history';
 import { Slice } from '@tiptap/pm/model';
 import {
-  SizedImage,
   InlineImage,
   SmartCode,
   CleanParagraph,
@@ -43,7 +42,6 @@ import {
   normalizeTaskClipboardHTML,
   centerUnalignedPastedTables,
   normalizePastedTableHTML,
-  normalizeInlineImageHTML,
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
@@ -156,7 +154,6 @@ export function EditorPane({
       }),
       CleanParagraph,
       CleanHeading,
-      SizedImage,
       InlineImage,
       SmartCode.configure({
         lowlight,
@@ -202,9 +199,7 @@ export function EditorPane({
       },
       transformPastedHTML: (html) =>
         DOMPurify.sanitize(
-          normalizeInlineImageHTML(
-            normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
-          ),
+          normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
           {
             FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
             FORBID_ATTR: ['style'],
@@ -294,12 +289,16 @@ export function EditorPane({
             .querySelector('img[data-mojian-image="true"]')
         ) {
           const parsed = safeDocument(editor, text);
+          const paragraph = parsed.content?.[0];
+          const image = paragraph?.content?.[0];
           if (
             parsed.content?.length === 1 &&
-            parsed.content[0].type === 'image'
+            paragraph?.type === 'paragraph' &&
+            paragraph.content?.length === 1 &&
+            image?.type === 'inlineImage'
           ) {
             event.preventDefault();
-            props.current.onPasteImage(file ?? null, parsed.content[0]);
+            props.current.onPasteImage(file ?? null, image);
             return true;
           }
         }

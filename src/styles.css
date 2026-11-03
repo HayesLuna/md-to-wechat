@@ -657,6 +657,16 @@ button.primary:hover {
   margin: 22px 0;
   position: relative;
 }
+.image-caret-anchor {
+  position: relative;
+  cursor: text;
+}
+.image-caret-anchor::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+  z-index: 1;
+}
 .image-node.inline-image-node {
   display: inline-block;
   vertical-align: bottom;
@@ -693,7 +703,6 @@ button.primary:hover {
   opacity: 0.65;
   pointer-events: none;
 }
-.node-image.ProseMirror-selectednode,
 .node-inlineImage.ProseMirror-selectednode {
   outline: none;
 }
@@ -2290,9 +2299,6 @@ button.primary:hover {
 }
 .article-editor .block-side-cursor::after {
   top: 0;
-}
-.article-editor.image-boundary-caret-active {
-  caret-color: transparent;
 }
 
 @keyframes editor-cursor-blink {

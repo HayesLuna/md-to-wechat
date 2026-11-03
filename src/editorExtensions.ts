@@ -1,6 +1,7 @@
 import {
   Extension,
   wrappingInputRule,
+  nodeInputRule,
   type Editor,
   type Attributes,
   type EditorEvents,
@@ -20,7 +21,7 @@ import { Slice, type Node } from '@tiptap/pm/model';
 import { ReplaceAroundStep } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { joinBackward } from '@tiptap/pm/commands';
-import Image from '@tiptap/extension-image';
+import Image, { inputRegex as imageInputRegex } from '@tiptap/extension-image';
 import Paragraph from '@tiptap/extension-paragraph';
 import Heading from '@tiptap/extension-heading';
 import { preserveBoundaryTabs, preserveProseTabs } from './markdownTabs';
@@ -97,19 +98,10 @@ export const StructuredListItem = ListItem.extend({
 export const CleanParagraph = Paragraph.extend({
   parseMarkdown(token, h) {
     const parsed = this.parent?.(token, h);
-    const normalize = (node: JSONContent): JSONContent => {
-      if (
-        node.type !== 'paragraph' ||
-        !node.content?.some((child) => child.type === 'image')
-      )
-        return node;
-      return {
-        ...node,
-        content: node.content.map((child) =>
-          child.type === 'image' ? { ...child, type: 'inlineImage' } : child,
-        ),
-      };
-    };
+    const normalize = (node: JSONContent): JSONContent =>
+      node.type === 'inlineImage'
+        ? { type: 'paragraph', content: [node] }
+        : node;
     return Array.isArray(parsed)
       ? parsed.map(normalize)
       : parsed
@@ -129,11 +121,7 @@ export const CleanHeading = Heading.extend({
     return h.createNode(
       'heading',
       { level: token.depth || 1 },
-      h
-        .parseInline(token.tokens || [])
-        .map((node) =>
-          node.type === 'image' ? { ...node, type: 'inlineImage' } : node,
-        ),
+      h.parseInline(token.tokens || []),
     );
   },
   renderMarkdown(node, h, ctx) {
@@ -152,7 +140,35 @@ export const CleanHeading = Heading.extend({
   },
 });
 
-export const SizedImage = Image.extend({
+export const InlineImage = Image.extend({
+  name: 'inlineImage',
+  markdownTokenName: 'image',
+  renderHTML({ HTMLAttributes }) {
+    return ['img', { ...HTMLAttributes, 'data-inline-image': 'true' }];
+  },
+  addCommands() {
+    return {
+      setImage:
+        (attrs) =>
+        ({ commands }) =>
+          commands.insertContent({ type: 'inlineImage', attrs }),
+    };
+  },
+  addInputRules() {
+    return [
+      nodeInputRule({
+        find: imageInputRegex,
+        type: this.editor.schema.nodes.inlineImage,
+        getAttributes: (match) => ({
+          alt: match[2],
+          src: match[3],
+          title: null,
+          percent: widthFromTitle(match[4] || ''),
+          indent: imageIndentFromTitle(match[4] || ''),
+        }),
+      }),
+    ];
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -180,7 +196,7 @@ export const SizedImage = Image.extend({
     };
   },
   parseMarkdown(token, h) {
-    return h.createNode('image', {
+    return h.createNode('inlineImage', {
       src: token.href,
       alt: token.text,
       title: null,
@@ -198,26 +214,6 @@ export const SizedImage = Image.extend({
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);
-  },
-});
-// Standalone images retain their existing block representation. Mixed image
-// paragraphs use a native inline atom, so text selection, IME and wrapping are
-// handled by ProseMirror and the browser rather than a second text editor.
-export const InlineImage = SizedImage.extend({
-  name: 'inlineImage',
-  priority: 110,
-  markdownTokenName: 'inlineImage',
-  addCommands() {
-    return {};
-  },
-  addInputRules() {
-    return [];
-  },
-  parseHTML() {
-    return [{ tag: 'img[data-inline-image][src]:not([src^="data:"])' }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ['img', { ...HTMLAttributes, 'data-inline-image': 'true' }];
   },
 }).configure({ inline: true });
 export const SmartCode = CodeBlockLowlight.extend({
