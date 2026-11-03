@@ -45,6 +45,7 @@ import {
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
+import { SafariCaret } from './safariCaret';
 import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
 const HighlightMarkdown = Markdown.extend({
@@ -155,6 +156,7 @@ export function EditorPane({
       CleanParagraph,
       CleanHeading,
       InlineImage,
+      SafariCaret,
       SmartCode.configure({
         lowlight,
         defaultLanguage: null,

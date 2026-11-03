@@ -2903,3 +2903,16 @@ button.primary:hover {
     opacity: 0;
   }
 }
+
+/* Only active while SafariCaret can paint a focused, collapsed text selection. */
+.article-editor.safari-caret-active,
+.article-editor.safari-caret-active * {
+  caret-color: transparent;
+}
+.safari-text-caret {
+  position: fixed;
+  width: 1px;
+  pointer-events: none;
+  z-index: 20;
+  animation: editor-cursor-blink 1.1s steps(2, start) infinite;
+}
