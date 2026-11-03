@@ -7,6 +7,7 @@ import {
   PluginKey,
   Selection,
   TextSelection,
+  type EditorState,
 } from '@tiptap/pm/state';
 import type { Mappable } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
@@ -175,8 +176,56 @@ function sideSelection(doc: Node, pos: number, edge: 'left' | 'right') {
     : new BlockCursor($pos, edge);
 }
 
-type BoundaryState = { paragraph: number | null };
+type BoundaryState = { paragraph: number | null; images: DecorationSet };
 const key = new PluginKey<BoundaryState>('blockBoundaries');
+
+function selectedImages(state: EditorState) {
+  const { selection, doc } = state;
+  if (
+    selection.empty ||
+    (selection instanceof NodeSelection &&
+      isImageName(selection.node.type.name))
+  )
+    return DecorationSet.empty;
+  const images: Decoration[] = [];
+  const seen = new Set<number>();
+  for (const { $from, $to } of selection.ranges) {
+    doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+      if (
+        isImageName(node.type.name) &&
+        pos >= $from.pos &&
+        pos + node.nodeSize <= $to.pos &&
+        !seen.has(pos)
+      ) {
+        seen.add(pos);
+        images.push(
+          Decoration.node(pos, pos + node.nodeSize, {
+            class: 'image-range-selected',
+          }),
+        );
+      }
+    });
+  }
+  return DecorationSet.create(doc, images);
+}
+
+function inlineImageBoundary(selection: Selection) {
+  if (!(selection instanceof TextSelection) || !selection.empty) return null;
+  if (
+    selection.$from.nodeAfter?.type.name === 'inlineImage' &&
+    !selection.$from.nodeBefore?.isText
+  )
+    return { pos: selection.from, edge: 'left' as const };
+  if (
+    selection.$from.nodeBefore?.type.name === 'inlineImage' &&
+    !selection.$from.nodeAfter?.isText
+  )
+    return {
+      pos: selection.from - selection.$from.nodeBefore.nodeSize,
+      edge: 'right' as const,
+    };
+  return null;
+}
 
 function paintedBlock(view: EditorView, pos: number) {
   const dom = view.nodeDOM(pos);
@@ -185,7 +234,7 @@ function paintedBlock(view: EditorView, pos: number) {
   const selector =
     type === 'codeBlock'
       ? '.code-node'
-      : type === 'image'
+      : isImageName(type)
         ? '.image-box'
         : null;
   return (selector && dom.querySelector<HTMLElement>(selector)) || dom;
@@ -230,7 +279,7 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
       Number(isBlock(view.state.doc.nodeAt(a))),
   )) {
     const node = view.state.doc.nodeAt(pos);
-    if (!isBlock(node)) continue;
+    if (!isBlock(node) && node?.type.name !== 'inlineImage') continue;
     const block = paintedBlock(view, pos);
     const rect = block && paintedBlockRect(block);
     if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
@@ -246,6 +295,11 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
           ? 'right'
           : null;
     if (!edge) continue;
+    if (node!.type.name === 'inlineImage')
+      return TextSelection.create(
+        view.state.doc,
+        pos + (edge === 'right' ? node!.nodeSize : 0),
+      );
     const $pos = view.state.doc.resolve(
       edge === 'left' ? pos : pos + node!.nodeSize,
     );
@@ -363,8 +417,11 @@ export const BlockBoundaries = Extension.create({
       new Plugin<BoundaryState>({
         key,
         state: {
-          init: () => ({ paragraph: null }),
-          apply(tr, value, oldState) {
+          init: (_config, state) => ({
+            paragraph: null,
+            images: selectedImages(state),
+          }),
+          apply(tr, value, oldState, newState) {
             const mapped =
               value.paragraph === null
                 ? null
@@ -384,7 +441,13 @@ export const BlockBoundaries = Extension.create({
               tr.doc.nodeAt(paragraph)?.type.name !== 'paragraph'
             )
               paragraph = null;
-            return { paragraph };
+            return {
+              paragraph,
+              images:
+                tr.docChanged || tr.selectionSet
+                  ? selectedImages(newState)
+                  : value.images,
+            };
           },
         },
         view(view) {
@@ -401,9 +464,30 @@ export const BlockBoundaries = Extension.create({
             }
           };
           const update = () => {
+            const selection = view.state.selection;
+            const inline =
+              view.editable && !view.composing
+                ? inlineImageBoundary(selection)
+                : null;
             if (
-              !(view.state.selection instanceof GapCursor) &&
-              !(view.state.selection instanceof ImageSide)
+              view.dom.classList.contains('image-boundary-caret-active') !==
+              !!inline
+            ) {
+              view.dom.classList.toggle(
+                'image-boundary-caret-active',
+                !!inline,
+              );
+              if (!inline) {
+                const caret = view.dom.querySelector<HTMLElement>(
+                  '.inline-image-side-cursor',
+                );
+                if (caret) caret.style.visibility = 'hidden';
+              }
+            }
+            if (
+              !(selection instanceof GapCursor) &&
+              !(selection instanceof ImageSide) &&
+              !inline
             ) {
               observe(null);
               return;
@@ -412,14 +496,15 @@ export const BlockBoundaries = Extension.create({
               '.ProseMirror-gapcursor',
             );
             if (!caret) return;
-            const selection = view.state.selection;
             const lateral =
+              !!inline ||
               selection instanceof ImageSide ||
               (selection instanceof BlockCursor && !!selection.edge);
             caret.classList.toggle('block-side-cursor', lateral);
             if (
               !lateral ||
-              (!(selection instanceof BlockCursor) &&
+              (!inline &&
+                !(selection instanceof BlockCursor) &&
                 !(selection instanceof ImageSide))
             ) {
               observe(null);
@@ -428,13 +513,20 @@ export const BlockBoundaries = Extension.create({
               caret.style.removeProperty('visibility');
               return;
             }
-            const pos =
-              selection instanceof ImageSide
-                ? selection.from
-                : selection.edge === 'left'
+            let pos: number;
+            let edge: 'left' | 'right';
+            if (inline) ({ pos, edge } = inline);
+            else if (selection instanceof ImageSide) {
+              pos = selection.from;
+              edge = selection.edge;
+            } else if (selection instanceof BlockCursor && selection.edge) {
+              edge = selection.edge;
+              pos =
+                edge === 'left'
                   ? selection.from
                   : selection.from -
                     (selection.$from.nodeBefore?.nodeSize || 0);
+            } else return;
             const block = paintedBlock(view, pos);
             observe(block);
             const rect = block && paintedBlockRect(block);
@@ -447,8 +539,7 @@ export const BlockBoundaries = Extension.create({
             const y = rect.bottom - 9;
             caret.style.visibility =
               scroll && (y < scroll.top || y > scroll.bottom) ? 'hidden' : '';
-            const x =
-              selection.edge === 'left' ? rect.left - 8 : rect.right + 7;
+            const x = edge === 'left' ? rect.left - 8 : rect.right + 7;
             caret.style.left = `${scroll ? Math.max(scroll.left + 2, Math.min(scroll.right - 4, x)) : x}px`;
             caret.style.top = `${y - 9}px`;
           };
@@ -543,6 +634,8 @@ export const BlockBoundaries = Extension.create({
           doc.addEventListener('mousedown', mouseDown, true);
           doc.addEventListener('scroll', schedule, true);
           window.addEventListener('resize', schedule);
+          view.dom.addEventListener('compositionstart', schedule);
+          view.dom.addEventListener('compositionend', schedule);
           return {
             update() {
               update();
@@ -554,6 +647,9 @@ export const BlockBoundaries = Extension.create({
             destroy() {
               cancelAnimationFrame(frame);
               resizeObserver.disconnect();
+              view.dom.classList.remove('image-boundary-caret-active');
+              view.dom.removeEventListener('compositionstart', schedule);
+              view.dom.removeEventListener('compositionend', schedule);
               doc.removeEventListener('pointerdown', pointerDown, true);
               doc.removeEventListener('click', click, true);
               doc.removeEventListener('mousedown', mouseDown, true);
@@ -565,22 +661,27 @@ export const BlockBoundaries = Extension.create({
         },
         props: {
           decorations(state) {
-            const points = DecorationSet.empty;
+            const points = key.getState(state)?.images || DecorationSet.empty;
             const selection = state.selection;
-            if (!(selection instanceof ImageSide)) return points;
-            const pos = inputBoundary(selection)!;
+            const inline = inlineImageBoundary(selection);
+            if (!(selection instanceof ImageSide) && !inline) return points;
+            const pos = inline ? selection.from : inputBoundary(selection)!;
+            const edge = inline?.edge || (selection as ImageSideSelection).edge;
             return points.add(state.doc, [
               Decoration.widget(
                 pos,
                 () => {
-                  const caret = document.createElement('div');
-                  caret.className = 'ProseMirror-gapcursor block-side-cursor';
+                  const caret = document.createElement(inline ? 'span' : 'div');
+                  caret.className = `ProseMirror-gapcursor block-side-cursor${inline ? ' inline-image-side-cursor' : ''}`;
+                  if (inline) caret.style.visibility = 'hidden';
                   caret.setAttribute('aria-hidden', 'true');
                   return caret;
                 },
                 {
-                  key: 'image-side-caret',
-                  side: selection.edge === 'left' ? -1 : 1,
+                  key: inline
+                    ? `inline-image-${edge}-caret`
+                    : 'image-side-caret',
+                  side: edge === 'left' ? -1 : 1,
                   ignoreSelection: true,
                 },
               ),

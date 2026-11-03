@@ -78,8 +78,20 @@ test('bare image preview preserves content, Ctrl-wheel zooms, normal wheel scrol
     const { storeImage } = await import('/src/storage.ts');
     return storeImage(blob);
   });
-  await setDoc(page, `![本地图](${src} "width=40%")`);
+  await setDoc(page, `正文\n\n![本地图](${src} "width=40%")`);
+  await page.locator('.article-editor > p').first().click();
   const before = await markdown(page);
+  await expect(page.locator('.image-preview-trigger')).toHaveCSS(
+    'cursor',
+    'pointer',
+  );
+  await page.locator('.image-box img').click();
+  await expect(page.locator('.media-preview-screen')).toHaveCount(0);
+  await expect(page.locator('.image-node')).toHaveClass(/selected/);
+  await expect(page.locator('.image-preview-trigger')).toHaveCSS(
+    'cursor',
+    'zoom-in',
+  );
   await page.locator('.image-box img').click();
   const screen = page.getByRole('region', { name: '图片预览', exact: true });
   const image = screen.locator('img');
@@ -133,8 +145,57 @@ test('bare image preview preserves content, Ctrl-wheel zooms, normal wheel scrol
   await expect(
     page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
   ).toBeVisible();
+  await page.locator('.article-editor > p').first().click();
+  await page.locator('.image-box img').dblclick();
+  await expect(screen).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.locator('.image-preview-trigger').focus();
+  await page.keyboard.press('Enter');
+  await expect(screen).toBeVisible();
+  await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
+
+for (const [inline, readOnly, width] of [
+  [true, false, 390],
+  [false, true, 1440],
+] as const)
+  test(`${inline ? 'inline' : 'standalone read-only'} image selects on first click and previews on the next`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/selection.svg', (route) =>
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120"><rect width="240" height="120" fill="#96b5cd"/></svg>',
+      }),
+    );
+    await ready(page);
+    await setDoc(
+      page,
+      `正文${inline ? ' ' : '\n\n'}![图片](https://example.test/selection.svg "width=35%")`,
+    );
+    await page
+      .locator('.article-editor > p')
+      .first()
+      .click({ position: { x: 2, y: 2 } });
+    if (readOnly) await page.getByRole('switch', { name: '只读模式' }).click();
+    const original = await markdown(page);
+    const image = page.locator('.image-box img');
+    await image.click();
+    await expect(page.locator('.media-preview-screen')).toHaveCount(0);
+    await expect(page.locator('.image-node')).toHaveClass(/selected/);
+    await expect(page.locator('.image-preview-trigger')).toHaveCSS(
+      'cursor',
+      'zoom-in',
+    );
+    await image.click();
+    await expect(
+      page.getByRole('region', { name: '图片预览', exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    expect(await markdown(page)).toBe(original);
+  });
 
 test('Mermaid and article media use the same uncluttered preview on desktop and mobile', async ({
   page,

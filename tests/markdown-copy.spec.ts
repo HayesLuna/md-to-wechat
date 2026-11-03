@@ -398,7 +398,7 @@ for (const mode of ['editor', 'preview', 'read-only'])
     const preview = mode !== 'editor';
     if (mode === 'read-only')
       await page.getByRole('switch', { name: '只读模式' }).click();
-    if (preview) await image.click();
+    if (preview) await image.dblclick();
     else
       await page.evaluate(() =>
         (window as any).__mojian.editor

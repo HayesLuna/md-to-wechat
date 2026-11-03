@@ -10,6 +10,7 @@
   --muted: #83868d;
   --paper: #fff;
   --soft: #f5f6f7;
+  --selection-background: #c8e1ff;
   font-size: 14px;
 }
 * {
@@ -681,6 +682,16 @@ button.primary:hover {
 .image-node.selected .image-box {
   outline: 2px solid #a6493d88;
   outline-offset: 0;
+}
+.image-range-selected .image-box::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: var(--selection-background);
+  box-shadow: inset 0 0 0 1px #79aaf0;
+  opacity: 0.65;
+  pointer-events: none;
 }
 .node-image.ProseMirror-selectednode,
 .node-inlineImage.ProseMirror-selectednode {
@@ -1717,6 +1728,9 @@ button.primary:hover {
   border: 0;
   border-radius: 2px;
   background: transparent;
+  cursor: pointer;
+}
+.image-node.selected .image-preview-trigger {
   cursor: zoom-in;
 }
 .image-preview-trigger:hover {
@@ -2277,6 +2291,9 @@ button.primary:hover {
 .article-editor .block-side-cursor::after {
   top: 0;
 }
+.article-editor.image-boundary-caret-active {
+  caret-color: transparent;
+}
 
 @keyframes editor-cursor-blink {
   to {
@@ -2361,7 +2378,7 @@ button.primary:hover {
 }
 .code-theme-github pre::selection,
 .code-theme-github pre ::selection {
-  background: #c8e1ff;
+  background: var(--selection-background);
 }
 .code-theme-github .fold-summary {
   color: #6a737d;

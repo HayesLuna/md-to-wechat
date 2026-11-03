@@ -73,6 +73,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   const [url, setURL] = useState('');
   const [missing, setMissing] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const previewOnClick = useRef(false);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const percent = dragWidth ?? node.attrs.percent;
   const layout = inlineImageLayout(percent, node.attrs.indent);
@@ -145,6 +146,7 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
     button.addEventListener('pointercancel', up);
   };
   const selectImage = (event: React.MouseEvent) => {
+    previewOnClick.current = selected;
     event.preventDefault();
     const pos = getPos();
     if (pos !== undefined) editor.chain().focus().setNodeSelection(pos).run();
@@ -184,10 +186,11 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
                 type="button"
                 className="image-preview-trigger"
                 aria-label={`预览图片：${node.attrs.alt || '图片'}`}
-                title="点击放大预览"
+                title={selected ? '点击放大预览' : '单击选择，双击预览'}
                 disabled={missing}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (!previewOnClick.current && e.detail !== 0) return;
                   requestMediaPreview({
                     kind: 'image',
                     url,

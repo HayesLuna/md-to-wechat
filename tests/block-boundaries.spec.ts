@@ -1877,6 +1877,90 @@ test('wrapped text: side clicks follow the clicked line instead of the paragraph
   expect(anchors[1]).toBeLessThan((await paragraph.innerText()).length);
 });
 
+for (const [width, percent] of [
+  [1440, 35],
+  [390, 100],
+  [390, 150],
+] as const)
+  test(`deleting trailing image text keeps a thin caret on both sides and after Tab at ${width}px/${percent}%`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await ready(
+      page,
+      `前文\n\n![图片](https://example.test/boundary.svg "width=${percent}%")\n\n后文`,
+    );
+    await clickSide(page, 1);
+    await page.keyboard.insertText('文字内容');
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Backspace');
+    await expect(page.locator('.inline-image-side-cursor')).toHaveCount(0);
+    await expect(page.locator('.article-editor')).toHaveCSS(
+      'caret-color',
+      'rgb(37, 37, 40)',
+    );
+    await page.keyboard.press('Backspace');
+    const content = await doc(page);
+    expect(content.content[1].content).toHaveLength(1);
+    expect(content.content[1].content[0].type).toBe('inlineImage');
+    const caret = page.locator('.inline-image-side-cursor');
+    const checkCaret = async () => {
+      await expect(page.locator('.article-editor')).toHaveClass(
+        /image-boundary-caret-active/,
+      );
+      await expect(caret).toBeVisible();
+      await expect
+        .poll(async () => {
+          const cursor = (await caret.boundingBox())!;
+          const image = (await page.locator('.image-box').boundingBox())!;
+          const surface = (await page
+            .locator('.writing-scroll')
+            .boundingBox())!;
+          return (
+            cursor.width === 2 &&
+            cursor.height === 18 &&
+            Math.abs(cursor.y + cursor.height - image.y - image.height) < 1 &&
+            cursor.x >= surface.x &&
+            cursor.x + cursor.width <= surface.x + surface.width
+          );
+        })
+        .toBe(true);
+      expect(
+        await caret.evaluate((el) => getComputedStyle(el, '::after').height),
+      ).toBe('18px');
+    };
+    await checkCaret();
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(caret).toHaveCount(0);
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await checkCaret();
+    const before = (await page.locator('.image-box').boundingBox())!;
+    await page.mouse.click(before.x - 12, before.y + before.height / 2);
+    await expect.poll(() => selection(page)).toMatchObject({ type: 'text' });
+    await checkCaret();
+    await page.keyboard.press('Tab');
+    await checkCaret();
+    await page.keyboard.press('Backspace');
+    await checkCaret();
+    expect(await doc(page)).toEqual(content);
+    await page
+      .locator('.article-editor')
+      .dispatchEvent('compositionstart', { data: '' });
+    await expect(page.locator('.article-editor')).not.toHaveClass(
+      /image-boundary-caret-active/,
+    );
+    await page
+      .locator('.article-editor')
+      .dispatchEvent('compositionend', { data: '' });
+    await checkCaret();
+    await page.keyboard.insertText('新文字');
+    await expect(caret).toHaveCount(0);
+    await expect(page.locator('.article-editor')).toHaveCSS(
+      'caret-color',
+      'rgb(37, 37, 40)',
+    );
+    expectInlineImageText(await doc(page), 'left', '新文字');
+  });
+
 test('native text caret stays visible during input and composition, while side carets stay 2px', async ({
   page,
 }) => {
