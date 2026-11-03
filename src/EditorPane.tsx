@@ -26,6 +26,7 @@ import { closeHistory } from '@tiptap/pm/history';
 import { Slice } from '@tiptap/pm/model';
 import {
   SizedImage,
+  InlineImage,
   SmartCode,
   CleanParagraph,
   CleanHeading,
@@ -35,13 +36,14 @@ import {
   MarkdownStarterKit,
 } from './editorExtensions';
 import { TyporaHighlight, HighlightLiteral } from './sourceHighlight';
-import { safeURL } from './outputUtils';
+import { safeURL, isImageName } from './outputUtils';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
   shouldParseMarkdownPaste,
   normalizeTaskClipboardHTML,
   centerUnalignedPastedTables,
   normalizePastedTableHTML,
+  normalizeInlineImageHTML,
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
@@ -76,7 +78,7 @@ export function safeDocument(editor: Editor, markdown: string) {
         (m) => m.type !== 'link' || safeURL(m.attrs?.href || ''),
       );
     if (
-      n.type === 'image' &&
+      isImageName(n.type) &&
       !/^https?:\/\/|^local-image:[a-zA-Z0-9-]+$/.test(n.attrs?.src || '')
     ) {
       n.attrs = { ...n.attrs, src: '', alt: '不安全的图片地址已阻止' };
@@ -155,6 +157,7 @@ export function EditorPane({
       CleanParagraph,
       CleanHeading,
       SizedImage,
+      InlineImage,
       SmartCode.configure({
         lowlight,
         defaultLanguage: null,
@@ -199,7 +202,9 @@ export function EditorPane({
       },
       transformPastedHTML: (html) =>
         DOMPurify.sanitize(
-          normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
+          normalizeInlineImageHTML(
+            normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
+          ),
           {
             FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
             FORBID_ATTR: ['style'],
@@ -212,7 +217,7 @@ export function EditorPane({
           if (
             !editor ||
             !(selection instanceof NodeSelection) ||
-            selection.node.type.name !== 'image' ||
+            !isImageName(selection.node.type.name) ||
             !event.clipboardData
           )
             return copyTaskMarkdown(editor, event);
@@ -373,7 +378,14 @@ export function EditorPane({
           }
         }
         const parsed = centerUnalignedPastedTables(safeDocument(editor, text));
-        if (!editor.commands.insertContent(parsed.content || [])) return false;
+        const first = parsed.content?.[0];
+        const content =
+          parsed.content?.length === 1 &&
+          first?.type === 'paragraph' &&
+          $from.parent.inlineContent
+            ? first.content
+            : parsed.content;
+        if (!editor.commands.insertContent(content || [])) return false;
         event.preventDefault();
         return true;
       },

@@ -161,12 +161,14 @@ for (const width of [1440, 390])
       );
     });
     await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-    const lines = await page
-      .locator('.preview-paper [data-code-index="0"] [data-code-line]')
-      .allTextContents();
-    expect(lines.map((line) => line.replace(/\u00a0/g, ' ')).join('\n')).toBe(
-      formatted,
-    );
+    await expect
+      .poll(async () => {
+        const lines = await page
+          .locator('.preview-paper [data-code-index="0"] [data-code-line]')
+          .allTextContents();
+        return lines.map((line) => line.replace(/\u00a0/g, ' ')).join('\n');
+      })
+      .toBe(formatted);
 
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),

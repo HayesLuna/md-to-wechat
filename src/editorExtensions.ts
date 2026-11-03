@@ -4,6 +4,7 @@ import {
   type Editor,
   type Attributes,
   type EditorEvents,
+  type JSONContent,
 } from '@tiptap/core';
 import {
   Plugin,
@@ -33,6 +34,7 @@ import {
   widthFromTitle,
   imageIndent,
   imageIndentFromTitle,
+  codeInfo,
 } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
@@ -93,6 +95,27 @@ export const StructuredListItem = ListItem.extend({
 // Let block separators represent empty paragraphs, without HTML placeholders.
 // Keep inline text and code untouched, including intentionally written entities.
 export const CleanParagraph = Paragraph.extend({
+  parseMarkdown(token, h) {
+    const parsed = this.parent?.(token, h);
+    const normalize = (node: JSONContent): JSONContent => {
+      if (
+        node.type !== 'paragraph' ||
+        !node.content?.some((child) => child.type === 'image')
+      )
+        return node;
+      return {
+        ...node,
+        content: node.content.map((child) =>
+          child.type === 'image' ? { ...child, type: 'inlineImage' } : child,
+        ),
+      };
+    };
+    return Array.isArray(parsed)
+      ? parsed.map(normalize)
+      : parsed
+        ? normalize(parsed)
+        : [];
+  },
   renderMarkdown(node, h, ctx) {
     const text = preserveBoundaryTabs(h.renderChildren(node.content || []));
     return ctx.parentType && ctx.parentType !== 'doc'
@@ -102,6 +125,17 @@ export const CleanParagraph = Paragraph.extend({
 });
 
 export const CleanHeading = Heading.extend({
+  parseMarkdown(token, h) {
+    return h.createNode(
+      'heading',
+      { level: token.depth || 1 },
+      h
+        .parseInline(token.tokens || [])
+        .map((node) =>
+          node.type === 'image' ? { ...node, type: 'inlineImage' } : node,
+        ),
+    );
+  },
   renderMarkdown(node, h, ctx) {
     if (!node.content) return '';
     const level = node.attrs?.level
@@ -124,7 +158,12 @@ export const SizedImage = Image.extend({
       ...this.parent?.(),
       percent: {
         default: 100,
-        parseHTML: (el) => widthFromTitle(el.getAttribute('title') || ''),
+        parseHTML: (el) =>
+          widthFromTitle(
+            el.getAttribute('title') ||
+              `width=${el.getAttribute('data-image-percent') || 100}%`,
+          ),
+        renderHTML: (attrs) => ({ 'data-image-percent': attrs.percent }),
       },
       indent: {
         default: 0,
@@ -161,6 +200,26 @@ export const SizedImage = Image.extend({
     return ReactNodeViewRenderer(ImageView);
   },
 });
+// Standalone images retain their existing block representation. Mixed image
+// paragraphs use a native inline atom, so text selection, IME and wrapping are
+// handled by ProseMirror and the browser rather than a second text editor.
+export const InlineImage = SizedImage.extend({
+  name: 'inlineImage',
+  priority: 110,
+  markdownTokenName: 'inlineImage',
+  addCommands() {
+    return {};
+  },
+  addInputRules() {
+    return [];
+  },
+  parseHTML() {
+    return [{ tag: 'img[data-inline-image][src]:not([src^="data:"])' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['img', { ...HTMLAttributes, 'data-inline-image': 'true' }];
+  },
+}).configure({ inline: true });
 export const SmartCode = CodeBlockLowlight.extend({
   addProseMirrorPlugins() {
     // Keep CodeBlock's editing commands; replace the inherited whole-document
@@ -172,6 +231,14 @@ export const SmartCode = CodeBlockLowlight.extend({
     const language = attributes.language;
     return {
       ...attributes,
+      indent: {
+        default: 0,
+        parseHTML: (el) => imageIndent(el.getAttribute('data-block-indent')),
+        renderHTML: (attrs) =>
+          imageIndent(attrs.indent)
+            ? { 'data-block-indent': imageIndent(attrs.indent) }
+            : {},
+      },
       language: {
         ...language,
         parseHTML: (element: HTMLElement) =>
@@ -187,7 +254,10 @@ export const SmartCode = CodeBlockLowlight.extend({
     // leading indentation in raw; checking raw.startsWith('```') drops them.
     return h.createNode(
       'codeBlock',
-      { language: token.lang || null },
+      {
+        language: codeInfo(token.lang || '').language || null,
+        indent: codeInfo(token.lang || '').indent,
+      },
       token.text ? [h.createTextNode(token.text)] : [],
     );
   },
@@ -198,7 +268,16 @@ export const SmartCode = CodeBlockLowlight.extend({
     for (const run of source.matchAll(/`+/g))
       longest = Math.max(longest, run[0].length);
     const fence = '`'.repeat(longest + 1);
-    return fence + (node.attrs?.language || '') + '\n' + source + '\n' + fence;
+    const indent = imageIndent(node.attrs?.indent);
+    return (
+      fence +
+      (node.attrs?.language || '') +
+      (indent ? ` indent=${indent}` : '') +
+      '\n' +
+      source +
+      '\n' +
+      fence
+    );
   },
   addNodeView() {
     return ReactNodeViewRenderer(CodeView, {

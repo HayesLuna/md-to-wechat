@@ -656,6 +656,18 @@ button.primary:hover {
   margin: 22px 0;
   position: relative;
 }
+.image-node.inline-image-node {
+  display: inline-block;
+  vertical-align: bottom;
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
+}
+.inline-image-node > span,
+.inline-image-node .image-scroll,
+.inline-image-node .image-box {
+  display: block;
+}
 .image-box {
   position: relative;
   margin: 0 auto;
@@ -702,31 +714,6 @@ button.primary:hover {
 .missing-image small {
   flex-basis: 100%;
   text-align: center;
-}
-.image-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 14px 0 0;
-  color: #727680;
-  flex-wrap: wrap;
-}
-.image-controls input {
-  width: 55px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 4px;
-  background: white;
-}
-.image-controls button {
-  padding: 5px;
-}
-.image-controls small {
-  font-size: 10px;
-  color: var(--muted);
 }
 .image-failed {
   font-size: 12px;
@@ -1439,10 +1426,6 @@ button.primary:hover {
     bottom: 40px;
     font-size: 11px;
     padding: 10px 12px;
-  }
-  .image-controls small {
-    flex-basis: 100%;
-    text-align: center;
   }
 }
 @media (max-width: 380px) {

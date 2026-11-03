@@ -18,7 +18,7 @@ import {
 } from './textHitTesting';
 import { placeCodeCaret } from './codeFolding';
 import { closeHistory } from '@tiptap/pm/history';
-import { imageIndent } from './outputUtils';
+import { imageIndent, isImageName } from './outputUtils';
 
 const blockTypes = new Set(['codeBlock', 'image', 'horizontalRule', 'table']);
 const isBlock = (node: Node | null | undefined) =>
@@ -158,7 +158,7 @@ if (!import.meta.hot?.data.ImageSide) Selection.jsonID('imageSide', ImageSide);
 if (import.meta.hot) import.meta.hot.data.ImageSide = ImageSide;
 
 function inputBoundary(selection: Selection) {
-  if (selection instanceof BlockCursor) return selection.from;
+  if (selection instanceof GapCursor) return selection.from;
   if (selection instanceof ImageSide)
     return selection.edge === 'left' ? selection.from : selection.to;
   return null;
@@ -181,7 +181,9 @@ const key = new PluginKey<BoundaryState>('blockBoundaries');
 function paintedBlock(view: EditorView, pos: number) {
   const dom = view.nodeDOM(pos);
   if (!(dom instanceof HTMLElement)) return null;
-  return dom;
+  return view.state.doc.nodeAt(pos)?.type.name === 'codeBlock'
+    ? dom.querySelector<HTMLElement>('.code-node') || dom
+    : dom;
 }
 
 function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
@@ -227,14 +229,47 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   return null;
 }
 
-function materializeImageText(view: EditorView) {
-  if (!(view.state.selection instanceof ImageSide)) return false;
-  const pos = inputBoundary(view.state.selection)!;
-  const tr = view.state.tr.insert(
-    pos,
-    view.state.schema.nodes.paragraph.create(),
+function materializeImageText(view: EditorView, text = '') {
+  const { selection, schema } = view.state;
+  const boundary = inputBoundary(selection);
+  if (boundary === null) return false;
+  const before =
+    selection instanceof ImageSide
+      ? selection.edge === 'left'
+      : selection.$from.nodeAfter?.type.name === 'image';
+  const pos =
+    selection instanceof ImageSide
+      ? selection.from
+      : before
+        ? boundary
+        : boundary - (selection.$from.nodeBefore?.nodeSize || 0);
+  const image = view.state.doc.nodeAt(pos);
+  if (image?.type.name !== 'image') return false;
+  const inline = schema.nodes.inlineImage.create(
+    image.attrs,
+    null,
+    image.marks,
   );
-  view.dispatch(tr.setSelection(TextSelection.create(tr.doc, pos + 1)));
+  const content = text
+    ? before
+      ? [schema.text(text), inline]
+      : [inline, schema.text(text)]
+    : [inline];
+  const tr = view.state.tr.replaceWith(
+    pos,
+    pos + image.nodeSize,
+    schema.nodes.paragraph.create(null, content),
+  );
+  view.dispatch(
+    tr
+      .setSelection(
+        TextSelection.create(
+          tr.doc,
+          pos + 1 + (before ? text.length : inline.nodeSize + text.length),
+        ),
+      )
+      .scrollIntoView(),
+  );
   return true;
 }
 
@@ -253,6 +288,7 @@ function deleteBlock(view: EditorView, from: number, to: number) {
 }
 
 function insertBoundaryText(view: EditorView, text: string) {
+  if (text && materializeImageText(view, text)) return true;
   const { selection, schema } = view.state;
   const pos = inputBoundary(selection);
   if (pos === null || !text) return false;
@@ -549,7 +585,7 @@ export const BlockBoundaries = Extension.create({
             const { selection } = state;
             const imagePos =
               selection instanceof NodeSelection &&
-              selection.node.type.name === 'image'
+              isImageName(selection.node.type.name)
                 ? selection.from
                 : selection instanceof GapCursor &&
                     selection.$from.nodeAfter?.type.name === 'image'
@@ -557,22 +593,41 @@ export const BlockBoundaries = Extension.create({
                   : selection instanceof GapCursor &&
                       selection.$from.nodeBefore?.type.name === 'image'
                     ? selection.from - selection.$from.nodeBefore.nodeSize
-                    : null;
-            if (event.key === 'Tab' && imagePos !== null) {
+                    : selection.empty &&
+                        selection instanceof TextSelection &&
+                        isImageName(selection.$from.nodeAfter?.type.name)
+                      ? selection.from
+                      : selection.empty &&
+                          selection instanceof TextSelection &&
+                          isImageName(selection.$from.nodeBefore?.type.name)
+                        ? selection.from - selection.$from.nodeBefore!.nodeSize
+                        : null;
+            const codePos =
+              selection instanceof NodeSelection &&
+              selection.node.type.name === 'codeBlock'
+                ? selection.from
+                : selection instanceof GapCursor &&
+                    selection.$from.nodeAfter?.type.name === 'codeBlock'
+                  ? selection.from
+                  : null;
+            const blockPos = codePos ?? imagePos;
+            if (event.key === 'Tab' && blockPos !== null) {
               event.preventDefault();
-              const image = state.doc.nodeAt(imagePos)!;
+              const block = state.doc.nodeAt(blockPos)!;
               const indent = imageIndent(
-                imageIndent(image.attrs.indent) + (event.shiftKey ? -1 : 1),
+                imageIndent(block.attrs.indent) + (event.shiftKey ? -1 : 1),
               );
-              if (indent !== imageIndent(image.attrs.indent)) {
+              if (indent !== imageIndent(block.attrs.indent)) {
                 const tr = closeHistory(state.tr).setNodeMarkup(
-                  imagePos,
+                  blockPos,
                   undefined,
-                  { ...image.attrs, indent },
+                  { ...block.attrs, indent },
                 );
                 // Attribute updates must retain the image side cursor/selection.
                 tr.setSelection(Selection.fromJSON(tr.doc, selection.toJSON()));
                 view.dispatch(tr.scrollIntoView());
+                // Typing beside the block is a separate undo action.
+                view.dispatch(closeHistory(view.state.tr));
               }
               return true;
             }
@@ -590,10 +645,23 @@ export const BlockBoundaries = Extension.create({
             if (
               deleting &&
               event.repeat &&
-              (selection instanceof BlockCursor ||
+              (selection instanceof GapCursor ||
                 (selection instanceof NodeSelection && isBlock(selection.node)))
             )
               return true;
+            if (deleting && selection instanceof GapCursor) {
+              const adjacent = backwards
+                ? selection.$from.nodeBefore
+                : selection.$from.nodeAfter;
+              if (adjacent?.type.name === 'image') {
+                event.preventDefault();
+                const pos = backwards
+                  ? selection.from - adjacent.nodeSize
+                  : selection.from;
+                deleteBlock(view, pos, pos + adjacent.nodeSize);
+                return true;
+              }
+            }
             if (selection instanceof ImageSide) {
               const pos = inputBoundary(selection)!;
               if (event.key === 'Enter') {

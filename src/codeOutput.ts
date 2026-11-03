@@ -6,7 +6,7 @@ import {
 import type { workBudget } from './workBudget';
 import { githubHighlightStyle } from './githubCodeTheme';
 
-export type CodeSource = { text: string; language: string };
+export type CodeSource = { text: string; language: string; indent?: number };
 const cards = new Map<string, { card: HTMLDivElement; size: number }>();
 let cachedCharacters = 0;
 const MAX_CACHED_CHARACTERS = 200_000;

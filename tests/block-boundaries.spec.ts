@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
+import { dragImageWidth } from './imageEditing';
 
 const blocks = [
   ['codeBlock', '```js\nconst value = 1;\n```'],
@@ -51,6 +52,23 @@ async function clickSide(page: Page, index: number) {
   await expect.poll(() => selection(page)).toMatchObject({ type, edge });
   await expect(page.locator('.ProseMirror-gapcursor')).toBeVisible();
 }
+function expectInlineImageText(
+  document: any,
+  side: 'left' | 'right',
+  text: string,
+) {
+  const line = document.content.find(
+    (node: any) =>
+      node.type === 'paragraph' &&
+      node.content?.some((child: any) => child.type === 'inlineImage'),
+  );
+  expect(line).toBeDefined();
+  expect(line.content).toMatchObject(
+    side === 'left'
+      ? [{ type: 'text', text }, { type: 'inlineImage' }]
+      : [{ type: 'inlineImage' }, { type: 'text', text }],
+  );
+}
 type Rect = { x: number; y: number; width: number; height: number };
 async function bottomCaret(page: Page, block: Rect) {
   let caret: Rect | null = null;
@@ -71,10 +89,12 @@ async function bottomCaret(page: Page, block: Rect) {
 for (const [type, markdown] of cursorBlocks.filter(
   ([type]) => type !== 'image',
 ))
-  for (const [side, index] of [
-    ['before', 0],
-    ['after', 1],
-  ] as const)
+  for (const [side, index] of (
+    [
+      ['before', 0],
+      ['after', 1],
+    ] as const
+  ).filter(([side]) => type !== 'codeBlock' || side !== 'before'))
     test(`${type}: Tab ${side} inserts editable indentation without replacing the block`, async ({
       page,
     }) => {
@@ -240,6 +260,206 @@ for (const side of ['before', 'after', 'selected'] as const)
     ).toBe('min(24px, 40%)');
   });
 
+test('code block: Tab at the left side indents the whole block, while text still goes above it', async ({
+  page,
+}) => {
+  await ready(page, blocks[0][1]);
+  const original = await doc(page);
+  await clickSide(page, 0);
+  const cursor = await selection(page);
+  const left = (await page.locator('.code-node').boundingBox())!.x;
+  await page.keyboard.press('Tab');
+  expect((await doc(page)).content[0].attrs.indent).toBe(1);
+  expect((await doc(page)).content[0].content).toEqual(
+    original.content[0].content,
+  );
+  expect(await selection(page)).toEqual(cursor);
+  expect((await page.locator('.code-node').boundingBox())!.x).toBeGreaterThan(
+    left,
+  );
+  await page.keyboard.press('Shift+Tab');
+  expect(await doc(page)).toEqual(original);
+  await page.keyboard.press('Tab');
+  await page.keyboard.insertText('代码说明');
+  expect((await doc(page)).content[0]).toMatchObject({
+    type: 'paragraph',
+    content: [{ text: '代码说明' }],
+  });
+  expect((await doc(page)).content[1].attrs.indent).toBe(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await doc(page)).content[0].type).toBe('codeBlock');
+  await page
+    .getByRole('button', { name: 'Markdown 源码', exact: true })
+    .click();
+  await expect(page.locator('.source-editor')).toHaveValue(/```js indent=1/);
+  await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  await page.reload();
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  expect((await doc(page)).content[0].attrs.indent).toBe(1);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper [data-code-block]')).toBeVisible();
+  expect(
+    await page
+      .locator('.preview-paper [data-code-block]')
+      .evaluate((el) => getComputedStyle(el.parentElement!).paddingLeft),
+  ).toBe('24px');
+  expect(
+    await page.evaluate(() => window.__mojian!.getOutput()!.html),
+  ).toContain('padding-left: min(24px, 40%)');
+  await page.evaluate(
+    (markdown) => window.__mojian!.setMarkdown(markdown),
+    blocks[1][1] + '\n\n' + blocks[0][1],
+  );
+  const adjacent = (await page.locator('.code-node').boundingBox())!;
+  await page.mouse.click(adjacent.x - 20, adjacent.y + adjacent.height / 2);
+  await page.keyboard.press('Tab');
+  expect((await doc(page)).content[0].attrs.indent).toBe(0);
+  expect((await doc(page)).content[1].attrs.indent).toBe(1);
+});
+
+test('mixed image paragraphs keep text on the same line, wrap naturally, and preserve indentation and copy', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await ready(
+    page,
+    '图片说明 ![图片](https://example.test/boundary.svg "width=40%") 后文',
+  );
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const line = page.locator('.article-editor > p');
+  await expect(line).toHaveCount(1);
+  await expect(line.locator('.inline-image-node')).toHaveCount(1);
+  const geometry = () =>
+    line.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el.firstChild!);
+      const text = range.getClientRects()[0];
+      const image = el.querySelector('img')!.getBoundingClientRect();
+      return {
+        textBottom: text.bottom,
+        imageTop: image.top,
+        imageBottom: image.bottom,
+      };
+    });
+  const initial = await geometry();
+  expect(initial.textBottom).toBeGreaterThan(initial.imageTop);
+  await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'inlineImage')
+        editor.commands.setTextSelection(pos);
+    });
+    editor.commands.focus();
+  });
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.inline-image-node > span')).toHaveCSS(
+    'padding-left',
+    '24px',
+  );
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.locator('.inline-image-node > span')).toHaveCSS(
+    'padding-left',
+    '0px',
+  );
+  await page.keyboard.insertText('长说明'.repeat(100));
+  expect((await geometry()).imageTop).toBeGreaterThan(initial.imageTop);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page
+    .getByRole('button', { name: 'Markdown 源码', exact: true })
+    .click();
+  await expect(page.locator('.source-editor')).toHaveValue(
+    /^图片说明 !\[图片\].* 后文$/,
+  );
+  await page.getByRole('button', { name: '所见即所得', exact: true }).click();
+  await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'inlineImage')
+        editor.chain().setNodeSelection(pos).focus().run();
+    });
+  });
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+c');
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain('![图片]');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-indicator')).toContainText('已保存');
+  await page.reload();
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  await expect(page.locator('.inline-image-node')).toBeVisible();
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper img')).toBeVisible();
+  await expect(page.locator('.preview-paper img')).toHaveCSS(
+    'display',
+    'inline-block',
+  );
+  const output = await page.evaluate(() => window.__mojian!.getOutput()!.html);
+  expect(output).toContain('display: inline-block');
+  await page.evaluate(() =>
+    window.__mojian!.editor!.chain().selectAll().focus().run(),
+  );
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+c');
+  await page.evaluate(() => window.__mojian!.setMarkdown(''));
+  await page.locator('.article-editor').click();
+  await page.keyboard.press('ControlOrMeta+v');
+  await expect(page.locator('.inline-image-node')).toBeVisible();
+  const pasted = await doc(page);
+  expect(pasted.content[0].content).toMatchObject([
+    { type: 'text', text: '图片说明 ' },
+    { type: 'inlineImage', attrs: { percent: 40 } },
+    { type: 'text', text: ' 后文' },
+  ]);
+  await expect(page.locator('.image-controls')).toHaveCount(0);
+  await dragImageWidth(page, 50);
+  await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'inlineImage')
+        editor.commands.setTextSelection(pos + node.nodeSize);
+    });
+    editor.commands.focus();
+  });
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.image-node')).toHaveCount(0);
+  await expect(page.locator('.article-editor > p')).toHaveText(
+    '图片说明  后文',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('.inline-image-node')).toBeVisible();
+  expect((await doc(page)).content[0].content[1].attrs.percent).toBe(50);
+  await page.evaluate(async () => {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob(
+          [
+            '<p>外部文字<img src="https://example.test/boundary.svg" alt="外部图片" title="width=30%">后文</p>',
+          ],
+          { type: 'text/html' },
+        ),
+        'text/plain': new Blob(['外部文字后文'], { type: 'text/plain' }),
+      }),
+    ]);
+    window.__mojian!.editor!.chain().selectAll().focus().run();
+  });
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+v');
+  expect((await doc(page)).content[0].content).toMatchObject([
+    { type: 'text', text: '外部文字' },
+    { type: 'inlineImage', attrs: { percent: 30 } },
+    { type: 'text', text: '后文' },
+  ]);
+  expect(errors).toEqual([]);
+});
+
 for (const [arrow, pos] of [
   ['ArrowLeft', 0],
   ['ArrowRight', 1],
@@ -265,6 +485,11 @@ for (const [arrow, pos] of [
     await page.keyboard.press('ControlOrMeta+z');
     expect((await doc(page)).content[0].attrs.indent).toBe(1);
     await expect(page.locator('.article-editor')).toBeFocused();
+    const indented = await doc(page);
+    await page.keyboard.press(arrow === 'ArrowLeft' ? 'Delete' : 'Backspace');
+    await expect(page.locator('.image-node')).toHaveCount(0);
+    await page.keyboard.press('ControlOrMeta+z');
+    expect(await doc(page)).toEqual(indented);
   });
 
 for (const container of ['table', 'nested quote'])
@@ -372,6 +597,19 @@ for (const container of ['table', 'nested quote'])
       return width;
     });
     expect(copiedWidth).toBeGreaterThan(0);
+    const inline =
+      '说明 ![图片](https://example.test/boundary.svg "width=40%") 后文';
+    await page.evaluate(
+      (markdown) => {
+        window.__mojian!.setMarkdown(markdown);
+        window.__mojian!.editor!.state.doc.check();
+      },
+      container === 'table'
+        ? `| 标题 |\n| --- |\n| ${inline} |`
+        : `> > ${inline}`,
+    );
+    await page.getByRole('button', { name: '关闭预览', exact: true }).click();
+    await expect(page.locator('.inline-image-node')).toBeVisible();
   });
 
 test('image indentation is bounded, remains visible on mobile and is protected by read-only mode', async ({
@@ -466,10 +704,17 @@ for (const [type, markdown] of cursorBlocks) {
       await page.keyboard.type('New prose');
       const result = await doc(page);
       const i = result.content.findIndex((node: any) => node.type === type);
-      expect(result.content[i + (side === 'before' ? -1 : 1)]).toMatchObject({
-        type: 'paragraph',
-        content: [{ type: 'text', text: 'New prose' }],
-      });
+      if (type === 'image')
+        expectInlineImageText(
+          result,
+          side === 'before' ? 'left' : 'right',
+          'New prose',
+        );
+      else
+        expect(result.content[i + (side === 'before' ? -1 : 1)]).toMatchObject({
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'New prose' }],
+        });
       await expect(page.locator('.article-editor')).toBeFocused();
       await expect(page.locator('.block-side-cursor')).toBeHidden();
       await page.keyboard.press('ControlOrMeta+z');
@@ -508,7 +753,7 @@ for (const [type, markdown] of cursorBlocks) {
       });
     }
 }
-test('side insertion between adjacent blocks creates prose outside both', async ({
+test('side insertion after code joins a following image without changing the code', async ({
   page,
 }) => {
   await ready(page, blocks.map(([, text]) => text).join('\n\n'));
@@ -516,8 +761,9 @@ test('side insertion between adjacent blocks creates prose outside both', async 
   await clickSide(page, 1);
   await page.keyboard.type('Between');
   expect((await doc(page)).content.slice(0, 3).map((n: any) => n.type)).toEqual(
-    ['codeBlock', 'paragraph', 'image'],
+    ['codeBlock', 'paragraph', 'horizontalRule'],
   );
+  expectInlineImageText(await doc(page), 'left', 'Between');
 });
 test('clearing inserted prose keeps a caret, blur removes the empty paragraph', async ({
   page,
@@ -781,7 +1027,9 @@ for (const [type, markdown] of cursorBlocks.filter(
       expect(await doc(page)).toEqual(original);
       await expect(page.locator('.block-side-cursor')).toBeVisible();
       if (type === 'image')
-        await expect(page.locator('.image-controls')).toBeVisible();
+        await expect(
+          page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
+        ).toBeVisible();
       const currentBox = await page.locator(blockSelectors[type]).boundingBox();
       const caret = await bottomCaret(page, currentBox!);
       if (edge === 'left') expect(caret!.x).toBeLessThan(box!.x);
@@ -986,7 +1234,9 @@ for (const edge of ['left', 'right'] as const)
       });
       e.commands.setNodeSelection(pos);
     });
-    await expect(page.locator('.image-controls')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
+    ).toBeVisible();
     const selected = await page.locator('.image-node').boundingBox();
     const frameStyle = await page.locator('.node-image').evaluate((el) => {
       (window as any).__selectedImageElement = el;
@@ -1004,7 +1254,9 @@ for (const edge of ['left', 'right'] as const)
     await expect
       .poll(() => selection(page))
       .toMatchObject({ type: 'imageSide', edge });
-    await expect(page.locator('.image-controls')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('.image-node')).toHaveCSS(
       'outline-style',
       'none',
@@ -1045,11 +1297,7 @@ for (const edge of ['left', 'right'] as const)
 
     await page.keyboard.insertText('新增正文');
     const result = await doc(page);
-    const image = result.content.findIndex((n: any) => n.type === 'image');
-    expect(result.content[image + (edge === 'left' ? -1 : 1)]).toMatchObject({
-      type: 'paragraph',
-      content: [{ text: '新增正文' }],
-    });
+    expectInlineImageText(result, edge, '新增正文');
     expect(result.content[0].content[0].text).toBe('前文');
     expect(result.content.at(-1).content[0].text).toBe('后文');
   });
@@ -1123,12 +1371,7 @@ for (const edge of ['left', 'right'] as const)
       .locator('.article-editor')
       .dispatchEvent('compositionend', { data: '中文正文' });
     const result = await doc(page);
-    const at = result.content.findIndex((n: any) => n.type === 'image');
-    expect(at).toBeGreaterThan(0);
-    expect(result.content[at + (edge === 'left' ? -1 : 1)]).toMatchObject({
-      type: 'paragraph',
-      content: [{ text: '中文正文' }],
-    });
+    expectInlineImageText(result, edge, '中文正文');
   });
 for (const edge of ['left', 'right'] as const)
   test(`real image selection: Enter at the ${edge} side inserts a paragraph without replacing the image`, async ({
@@ -1218,12 +1461,7 @@ for (const edge of ['left', 'right'] as const)
     await page.evaluate(() => navigator.clipboard.writeText('粘贴正文'));
     await page.keyboard.press('ControlOrMeta+v');
     const result = await doc(page);
-    const at = result.content.findIndex((n: any) => n.type === 'image');
-    expect(at).toBeGreaterThan(0);
-    expect(result.content[at + (edge === 'left' ? -1 : 1)]).toMatchObject({
-      type: 'paragraph',
-      content: [{ text: '粘贴正文' }],
-    });
+    expectInlineImageText(result, edge, '粘贴正文');
     expect(result.content[0].content[0].text).toBe('前文');
     expect(result.content.at(-1).content[0].text).toBe('后文');
   });
@@ -1243,7 +1481,9 @@ test('Markdown paste at the image right side preserves the image before the past
   );
   await page.keyboard.press('ControlOrMeta+v');
   const result = await doc(page);
-  const at = result.content.findIndex((n: any) => n.type === 'image');
+  const at = result.content.findIndex((n: any) =>
+    n.content?.some((child: any) => child.type === 'inlineImage'),
+  );
   expect(at).toBeGreaterThan(0);
   expect(result.content[at + 1]).toMatchObject({
     type: 'heading',

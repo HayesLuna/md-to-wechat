@@ -342,9 +342,14 @@ test('CORS-denied image keeps native rich copy without rewriting the clipboard',
   await expect(page.locator('.image-node')).toHaveCount(2);
   expect(
     await page.evaluate(() =>
-      (window as any).__mojian.editor.state.doc.content.content
-        .filter((node: any) => node.type.name === 'image')
-        .map((node: any) => node.attrs.percent),
+      (() => {
+        const widths: number[] = [];
+        (window as any).__mojian.editor.state.doc.descendants((node: any) => {
+          if (['image', 'inlineImage'].includes(node.type.name))
+            widths.push(node.attrs.percent);
+        });
+        return widths;
+      })(),
     ),
   ).toEqual([50, 50]);
 });
@@ -451,9 +456,16 @@ for (const mode of ['editor', 'preview', 'read-only'])
     if (!preview)
       expect(
         await page.evaluate(() =>
-          (window as any).__mojian.editor.state.doc.content.content
-            .filter((node: any) => node.type.name === 'image')
-            .map((node: any) => node.attrs.percent),
+          (() => {
+            const widths: number[] = [];
+            (window as any).__mojian.editor.state.doc.descendants(
+              (node: any) => {
+                if (['image', 'inlineImage'].includes(node.type.name))
+                  widths.push(node.attrs.percent);
+              },
+            );
+            return widths;
+          })(),
         ),
       ).toEqual([40, 40]);
     expect(errors).toEqual([]);

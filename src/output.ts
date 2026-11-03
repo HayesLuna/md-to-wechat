@@ -93,13 +93,26 @@ async function inlineStyles(
       el.style.width = imageWidth + '%';
       el.removeAttribute('data-width');
     }
+    if (el.hasAttribute('data-inline-image')) {
+      el.style.display = 'inline-block';
+      el.style.verticalAlign = 'bottom';
+      el.style.margin = '0';
+    }
     if (el.hasAttribute('data-image-indent')) {
-      el.style.display = 'block';
-      el.style.width = '100%';
+      el.style.display = el.hasAttribute('data-inline-image')
+        ? 'inline-block'
+        : 'block';
+      el.style.width = (el.getAttribute('data-inline-width') || '100') + '%';
       el.style.boxSizing = 'border-box';
       el.style.paddingLeft = imageIndentPadding(
         el.getAttribute('data-image-indent'),
       );
+    }
+    if (el.hasAttribute('data-block-indent')) {
+      el.style.marginLeft = imageIndentPadding(
+        el.getAttribute('data-block-indent'),
+      );
+      el.removeAttribute('data-block-indent');
     }
     if (el.matches('pre code'))
       el.setAttribute(
@@ -164,10 +177,13 @@ async function inlineStyles(
     if (
       el.matches('strong,em,s,a,code,span') &&
       !el.matches('pre code') &&
-      !el.hasAttribute('data-image-indent')
+      !el.hasAttribute('data-image-indent') &&
+      !el.hasAttribute('data-inline-image')
     )
       el.style.setProperty('display', 'inline', 'important');
     el.removeAttribute('data-image-indent');
+    el.removeAttribute('data-inline-image');
+    el.removeAttribute('data-inline-width');
   }
   // Empty structural parents represent indentation of a first list item.
   for (const li of root.querySelectorAll<HTMLElement>('li')) {
@@ -369,7 +385,11 @@ export async function renderArticle(
       const pause = checkpoint();
       if (pause) await pause;
       const fragment = DOMPurify.sanitize(block, {
-        ADD_ATTR: ['data-image-index', 'data-diagram-index'],
+        ADD_ATTR: [
+          'data-image-index',
+          'data-diagram-index',
+          'data-block-indent',
+        ],
         RETURN_DOM_FRAGMENT: true,
       });
       clipboard.append(fragment.cloneNode(true));
@@ -382,12 +402,18 @@ export async function renderArticle(
           `[data-image-index="${i}"]`,
         )!;
         const place = (target: Element, content: HTMLElement) => {
+          if (img.inline) content.setAttribute('data-inline-image', 'true');
           if (!img.indent) {
             target.replaceWith(content);
             return;
           }
           const frame = document.createElement('span');
           frame.setAttribute('data-image-indent', String(img.indent));
+          if (img.inline) {
+            frame.setAttribute('data-inline-image', 'true');
+            frame.setAttribute('data-inline-width', String(img.width));
+            content.setAttribute('data-width', '100');
+          }
           frame.append(content);
           target.replaceWith(frame);
         };
@@ -465,6 +491,8 @@ export async function renderArticle(
         target.removeAttribute('data-diagram-index');
         const p = document.createElement('p');
         p.textContent = `[请在此处插入 Mermaid 图形 ${i + 1}，先下载 PNG 并上传到公众号]`;
+        const indent = copy.getAttribute('data-block-indent');
+        if (indent) p.setAttribute('data-block-indent', indent);
         copy.replaceWith(p);
       }),
     );
@@ -515,14 +543,21 @@ export async function renderArticle(
         const pause = checkpoint();
         if (pause) await pause;
         const index = Number(pre.dataset.codeIndex);
-        pre.replaceWith(
-          await renderCard(
-            codeSources[index],
-            index,
-            s.codeTheme === 'dark',
-            checkpoint,
-          ),
+        const card = await renderCard(
+          codeSources[index],
+          index,
+          s.codeTheme === 'dark',
+          checkpoint,
         );
+        if (codeSources[index].indent) {
+          const frame = document.createElement('div');
+          frame.style.paddingLeft = imageIndentPadding(
+            codeSources[index].indent,
+          );
+          frame.style.boxSizing = 'border-box';
+          frame.append(card);
+          pre.replaceWith(frame);
+        } else pre.replaceWith(card);
       }
     }
     signal?.throwIfAborted();

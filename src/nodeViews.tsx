@@ -64,15 +64,12 @@ function signal(message: string) {
   window.dispatchEvent(new CustomEvent('mojian-notice', { detail: message }));
 }
 export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
+  const inline = node.isInline;
+  const Frame = inline ? 'span' : 'div';
   const editable = useEditorState({
     editor,
     selector: ({ editor }) => editor.isEditable,
   });
-  const [widthInput, setWidthInput] = useState(String(node.attrs.percent));
-  useEffect(
-    () => setWidthInput(String(node.attrs.percent)),
-    [node.attrs.percent],
-  );
   const [url, setURL] = useState('');
   const [missing, setMissing] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -118,10 +115,11 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
     const base = box.current!.getBoundingClientRect().width;
     const frame = box.current!.parentElement!;
     const style = getComputedStyle(frame);
-    const parent =
-      frame.clientWidth -
-      parseFloat(style.paddingLeft) -
-      parseFloat(style.paddingRight);
+    const parent = inline
+      ? box.current!.closest('p,h1,h2,h3,h4,h5,h6')!.clientWidth
+      : frame.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight);
     let width = node.attrs.percent;
     event.currentTarget.setPointerCapture(event.pointerId);
     const button = event.currentTarget;
@@ -151,8 +149,14 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
   };
   return (
     <NodeViewWrapper
+      as={inline ? 'span' : 'div'}
       contentEditable={false}
-      className={`image-node ${selected ? 'selected' : ''}`}
+      className={`image-node ${inline ? 'inline-image-node' : ''} ${selected ? 'selected' : ''}`}
+      style={
+        inline
+          ? { width: `${Math.min(100, dragWidth ?? node.attrs.percent)}%` }
+          : undefined
+      }
       onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
         if (window.matchMedia('(pointer: coarse)').matches) return;
         e.preventDefault();
@@ -163,16 +167,18 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
         );
       }}
     >
-      <div
+      <Frame
         style={{
           paddingLeft: imageIndentPadding(node.attrs.indent),
         }}
       >
-        <div className="image-scroll">
-          <div
+        <Frame className="image-scroll">
+          <Frame
             ref={box}
             className="image-box"
-            style={{ width: `${dragWidth ?? node.attrs.percent}%` }}
+            style={{
+              width: `${inline ? Math.max(100, dragWidth ?? node.attrs.percent) : (dragWidth ?? node.attrs.percent)}%`,
+            }}
             contentEditable={false}
             onMouseDown={selectImage}
           >
@@ -200,11 +206,11 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
                 />
               </button>
             ) : (
-              <div className="missing-image">
+              <Frame className="missing-image">
                 <ImageOff size={24} />
                 {missing ? '本地图片缺失，请重新选择图片' : '图片加载中…'}
                 <small>{node.attrs.alt}</small>
-              </div>
+              </Frame>
             )}
             {missing && url && (
               <span className="image-failed">图片无法加载，请检查地址</span>
@@ -216,66 +222,9 @@ export function ImageView({ node, selected, editor, getPos }: NodeViewProps) {
                 onPointerDown={resize}
               />
             )}
-          </div>
-        </div>
-      </div>
-      {selected && editable && (
-        <div
-          className="image-controls"
-          contentEditable={false}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <span>图片宽度</span>
-          <input
-            aria-label="图片宽度百分比"
-            type="number"
-            min="1"
-            max="200"
-            value={widthInput}
-            onChange={(e) => {
-              setWidthInput(e.target.value);
-              const n = Number(e.target.value);
-              if (
-                e.target.value !== '' &&
-                Number.isInteger(n) &&
-                n >= 1 &&
-                n <= 200
-              )
-                setWidth(n);
-            }}
-            onBlur={() => {
-              const n = Number(widthInput);
-              if (
-                widthInput === '' ||
-                !Number.isInteger(n) ||
-                n < 1 ||
-                n > 200
-              ) {
-                setWidthInput(String(node.attrs.percent));
-                signal('图片宽度请输入 1%–200% 的整数。');
-              }
-            }}
-          />
-          %
-          <button
-            title="删除图片"
-            onClick={() => {
-              const pos = getPos();
-              if (pos !== undefined)
-                editor
-                  .chain()
-                  .focus()
-                  .deleteRange({ from: pos, to: pos + node.nodeSize })
-                  .run();
-            }}
-          >
-            <Trash2 size={14} />
-          </button>
-          {node.attrs.src.startsWith('local-image:') && (
-            <small>本地资源 · 公众号需重新上传</small>
-          )}
-        </div>
-      )}
+          </Frame>
+        </Frame>
+      </Frame>
     </NodeViewWrapper>
   );
 }
@@ -515,6 +464,7 @@ export function CodeView({
     <NodeViewWrapper
       ref={wrapper}
       className={`code-node ${showCode ? 'code-theme-github' : ''} ${folded ? 'folded' : ''}`}
+      style={{ marginLeft: imageIndentPadding(node.attrs.indent) }}
       data-language={language || undefined}
     >
       <div className="code-header" contentEditable={false}>

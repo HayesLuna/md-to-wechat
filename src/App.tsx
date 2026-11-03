@@ -55,7 +55,7 @@ import {
 } from './storage';
 import type { Asset } from './output';
 import { useArticleOutput } from './useArticleOutput';
-import { outputKey, safeURL } from './outputUtils';
+import { outputKey, safeURL, isImageName } from './outputUtils';
 import { headings } from './headings';
 import { copyRich, copyText } from './clipboard';
 import { localImageAssets } from './localAssets';
@@ -260,7 +260,7 @@ export default function App() {
     const signature = selected
       ? JSON.stringify([
           selected.isActive('table'),
-          selected.isActive('image'),
+          selected.isActive('image') || selected.isActive('inlineImage'),
           selected.isActive('link'),
           selected.getAttributes('tableCell').align,
           selected.getAttributes('tableHeader').align,
@@ -809,7 +809,12 @@ export default function App() {
         .chain()
         .focus()
         .insertContent({
-          type: 'image',
+          type:
+            editor.state.selection.$from.parent.isTextblock &&
+            !editor.state.selection.$from.parent.type.spec.code &&
+            !!editor.state.selection.$from.parent.content.size
+              ? 'inlineImage'
+              : 'image',
           attrs: { src: address, alt: label.trim() || '图片', percent: 100 },
         })
         .run();
@@ -851,7 +856,12 @@ export default function App() {
         .chain()
         .focus()
         .insertContent({
-          type: 'image',
+          type:
+            editor.state.selection.$from.parent.isTextblock &&
+            !editor.state.selection.$from.parent.type.spec.code &&
+            !!editor.state.selection.$from.parent.content.size
+              ? 'inlineImage'
+              : 'image',
           attrs: {
             ...image?.attrs,
             src,
@@ -883,7 +893,7 @@ export default function App() {
         if (image) {
           const pos = e.view.posAtDOM(image, 0);
           const n = e.state.doc.nodeAt(pos);
-          if (n?.type.name === 'image')
+          if (isImageName(n?.type.name))
             e.view.dispatch(
               e.state.tr.setSelection(NodeSelection.create(e.state.doc, pos)),
             );
@@ -1072,7 +1082,8 @@ export default function App() {
     }
   };
   const inTable = editor?.isActive('table');
-  const imageSelected = editor?.isActive('image');
+  const imageSelected =
+    editor?.isActive('image') || editor?.isActive('inlineImage');
   const linkActive = editor?.isActive('link');
   void selectionState;
   useLayoutEffect(() => {
@@ -1666,7 +1677,7 @@ export default function App() {
                 onClick={() => {
                   setContext(null);
                   editor?.commands.focus();
-                  notify('点击图片后可拖拽右下角手柄，或输入 1%–200% 宽度。');
+                  notify('选中图片后，拖拽右下角手柄调整大小。');
                 }}
               >
                 调整图片尺寸
@@ -1979,7 +1990,8 @@ export default function App() {
                 </dd>
                 <dt>图片尺寸</dt>
                 <dd>
-                  以 Markdown 图片标题 <code>"width=80%"</code>{' '}
+                  选中图片后拖拽右下角手柄调整大小；光标放在图片后按 Backspace
+                  删除。 以 Markdown 图片标题 <code>"width=80%"</code>{' '}
                   保存。普通标题不代表尺寸，默认 100%。本地资源标识为{' '}
                   <code>local-image:UUID</code>。
                 </dd>

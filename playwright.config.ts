@@ -25,12 +25,45 @@ const launchOptions = executablePath
       }
     : {};
 
+// Balance files using successful CI timings (2026-11-03), rather than test
+// counts: the old equal-count shards took 2.3, 2.2 and 5.2 minutes. New files
+// automatically join group 3; the groups remain disjoint and cover all tests.
+const group1 = [
+  'sharing',
+  'draft-reorder',
+  'editor-code-behavior',
+  'read-only',
+  'markdown-copy',
+  'mermaid-rendering',
+  'review-regressions',
+  'startup-version',
+  'heading-labels',
+  'draft-order',
+].map((name) => `**/${name}.spec.ts`);
+const group2 = [
+  'workflows',
+  'highlight',
+  'markdown-paste',
+  'list-indent',
+  'drafts',
+  'json-format',
+  'task-clipboard',
+  'source-readability',
+  'media-preview',
+  'smoke',
+  'optimization',
+  'json-layout',
+].map((name) => `**/${name}.spec.ts`);
+
 export default defineConfig({
   testDir: './tests',
-  // CI shards individual tests evenly across runners. Each runner still uses
-  // one worker so CPU-throttled measurements never compete with another test.
-  fullyParallel: !!process.env.CI,
+  // Keep one worker per runner so performance tests never compete for CPU.
   workers: 1,
+  projects: [
+    { name: '1', testMatch: group1 },
+    { name: '2', testMatch: group2 },
+    { name: '3', testIgnore: [...group1, ...group2] },
+  ],
   timeout: 30000,
   retries: 0,
   reporter: 'list',

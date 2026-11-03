@@ -131,7 +131,7 @@ test('bare image preview preserves content, Ctrl-wheel zooms, normal wheel scrol
     ),
   ).toEqual(selection);
   await expect(
-    page.getByRole('spinbutton', { name: '图片宽度百分比' }),
+    page.getByRole('button', { name: '拖拽调整图片宽度', exact: true }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });

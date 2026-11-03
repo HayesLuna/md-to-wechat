@@ -31,6 +31,17 @@ export function imageIndentFromTitle(title: string) {
   return imageIndent(/^width=\d{1,3}% indent=(\d+)$/.exec(title)?.[1]);
 }
 
+export const isImageName = (name: string | undefined) =>
+  name === 'image' || name === 'inlineImage';
+
+export function codeInfo(info: string) {
+  const match = /(?:^|\s)indent=(\d+)$/.exec(info.trim());
+  return {
+    language: (match ? info.trim().slice(0, match.index) : info).trim(),
+    indent: imageIndent(match?.[1]),
+  };
+}
+
 // Keep logical indentation on resize, while leaving at least 60% of a narrow
 // cell/list/quote's content width for the image itself.
 export function imageIndentPadding(value: unknown) {

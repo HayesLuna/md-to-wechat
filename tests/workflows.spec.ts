@@ -590,16 +590,21 @@ test('local image async bookmark maps with edits, percent survives roundtrip/rel
   expect(text).not.toContain('blob:');
   await page.locator('.image-box img').click();
   await page.keyboard.press('Escape');
-  await page.getByRole('spinbutton', { name: '图片宽度百分比' }).fill('45');
+  await dragImageWidth(page, 45);
   await expect.poll(() => markdown(page)).toContain('width=45%');
   await page
     .getByRole('button', { name: 'Markdown 源码', exact: true })
     .click();
   expect(await markdown(page)).toContain('width=45%');
   await page.getByRole('button', { name: '所见即所得', exact: true }).click();
-  expect(await page.locator('.image-box').getAttribute('style')).toContain(
-    '45%',
-  );
+  const ratio = await page
+    .locator('.image-box')
+    .evaluate(
+      (box) =>
+        box.getBoundingClientRect().width /
+        box.closest('p')!.getBoundingClientRect().width,
+    );
+  expect(ratio).toBeCloseTo(0.45, 2);
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-indicator')).toContainText('已保存');
   await page.reload();
@@ -1669,11 +1674,11 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
   );
   await page.locator('.image-box img').click();
   await page.keyboard.press('Escape');
-  const input = page.getByRole('spinbutton', { name: '图片宽度百分比' });
-  await expect(input).toHaveAttribute('min', '1');
-  await expect(input).toHaveAttribute('max', '200');
+  await expect(
+    page.getByRole('spinbutton', { name: '图片宽度百分比' }),
+  ).toHaveCount(0);
   for (const width of [1, 100, 150, 200]) {
-    await input.fill(String(width));
+    await dragImageWidth(page, width);
     await expect.poll(() => markdown(page)).toContain(`width=${width}%`);
     expect(
       await page
@@ -1681,7 +1686,7 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
         .evaluate((el) => parseFloat((el as HTMLElement).style.width)),
     ).toBe(width);
   }
-  await input.fill('1');
+  await dragImageWidth(page, 1);
   await page
     .getByRole('button', { name: 'Markdown 源码', exact: true })
     .click();
@@ -1690,7 +1695,7 @@ test('image widths 1 to 200 survive source, refresh, and rich output with local 
   await page.getByRole('button', { name: '所见即所得', exact: true }).click();
   await page.locator('.image-box img').click();
   await page.keyboard.press('Escape');
-  await input.fill('200');
+  await dragImageWidth(page, 200);
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-indicator')).toContainText('已保存');
   await page.reload();
@@ -2227,3 +2232,4 @@ test('quoted lists and tables expand to the quote while code selects source then
     await all();
   }
 });
+import { dragImageWidth } from './imageEditing';
