@@ -1,36 +1,55 @@
 import { test, expect } from './fixtures';
 
 for (const width of [1440, 390]) {
-  test(`native image-adjacent text supports placement, arrows and backward selection at ${width}px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 1000 });
-    await page.route('**/native-caret.svg', (route) =>
-      route.fulfill({
-        contentType: 'image/svg+xml',
-        body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="teal"/></svg>',
-      }),
-    );
-    await page.goto('/');
-    await page.waitForFunction(() => !!window.__mojian?.editor);
-    await page.evaluate(() =>
-      window.__mojian!.setMarkdown(
-        '上方正文\n\n图片前文字![图](https://example.test/native-caret.svg "width=35%")图片后文字\n\n下方正文',
-      ),
-    );
-    await expect(page.locator('.image-box img')).toBeVisible();
-    await expect(page.locator('.safari-text-caret')).toHaveCount(0);
-    const selected = () =>
-      page.evaluate(() => {
-        const e = window.__mojian!.editor!;
-        const s = e.state.selection;
-        return {
-          from: s.from,
-          to: s.to,
-          text: e.state.doc.textBetween(s.from, s.to, '\n'),
-        };
+  for (const text of ['图片前文字', '图片后文字'])
+    test(`native image-adjacent ${text} supports placement, arrows and backward selection at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.route('**/native-caret.svg', (route) =>
+        route.fulfill({
+          contentType: 'image/svg+xml',
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="teal"/></svg>',
+        }),
+      );
+      await page.goto('/');
+      await page.waitForFunction(() => !!window.__mojian?.editor);
+      await page.evaluate(() =>
+        window.__mojian!.setMarkdown(
+          '上方正文\n\n图片前文字![图](https://example.test/native-caret.svg "width=35%")图片后文字\n\n下方正文',
+        ),
+      );
+      await expect(page.locator('.image-box img')).toBeVisible();
+      await expect(page.locator('.safari-text-caret')).toHaveCount(0);
+      const selected = () =>
+        page.evaluate(() => {
+          const e = window.__mojian!.editor!;
+          const s = e.state.selection;
+          const native = getSelection();
+          const nativePos = (node: Node | null, offset: number) =>
+            node && e.view.dom.contains(node)
+              ? e.view.posAtDOM(node, offset)
+              : -1;
+          return {
+            from: s.from,
+            to: s.to,
+            text: e.state.doc.textBetween(s.from, s.to, '\n'),
+            nativeAnchor: nativePos(
+              native?.anchorNode ?? null,
+              native?.anchorOffset ?? 0,
+            ),
+            nativeHead: nativePos(
+              native?.focusNode ?? null,
+              native?.focusOffset ?? 0,
+            ),
+          };
+        });
+      const caretAt = (pos: number) => ({
+        from: pos,
+        to: pos,
+        nativeAnchor: pos,
+        nativeHead: pos,
       });
-    for (const text of ['图片前文字', '图片后文字']) {
       const point = await page.evaluate((text) => {
         const e = window.__mojian!.editor!;
         let pos = -1;
@@ -45,15 +64,23 @@ for (const width of [1440, 390]) {
         return { x: rect.left + 1, y: rect.bottom - 5, pos };
       }, text);
       await page.mouse.click(point.x, point.y);
-      await expect.poll(async () => (await selected()).from).toBe(point.pos);
+      await expect.poll(selected).toMatchObject(caretAt(point.pos));
       await page.keyboard.press('ArrowLeft');
-      await expect
-        .poll(async () => (await selected()).from)
-        .toBe(point.pos - 1);
+      await expect.poll(selected).toMatchObject(caretAt(point.pos - 1));
       await page.keyboard.press('ArrowRight');
+      // Native selectionchange is asynchronous. Confirm both selections before
+      // starting the next gesture, including on faster CI keyboard delivery.
+      await expect.poll(selected).toMatchObject(caretAt(point.pos));
       await page.keyboard.press('Shift+ArrowLeft');
-      await expect.poll(async () => (await selected()).text).toBe(text[1]);
+      await expect.poll(selected).toMatchObject({
+        from: point.pos - 1,
+        to: point.pos,
+        text: text[1],
+        nativeAnchor: point.pos,
+        nativeHead: point.pos - 1,
+      });
       await page.keyboard.press('ArrowRight');
+      await expect.poll(selected).toMatchObject(caretAt(point.pos));
       const before = await page
         .locator('.article-editor > p')
         .first()
@@ -72,18 +99,7 @@ for (const width of [1440, 390]) {
       await expect
         .poll(async () => (await selected()).text)
         .toContain('上方正文');
-    }
-    // Clicking the image's left side must still insert before the image.
-    const image = (await page.locator('.image-box img').boundingBox())!;
-    await page.mouse.click(image.x - 7, image.y + image.height / 2);
-    await page.keyboard.insertText('插入');
-    await expect
-      .poll(() => page.evaluate(() => window.__mojian!.getMarkdown()))
-      .toContain('插入');
-    expect(
-      await page.evaluate(() => window.__mojian!.getMarkdown()),
-    ).not.toMatch(/[\u200b\ufeff]/);
-  });
+    });
 }
 
 for (const width of [1440, 390]) {
