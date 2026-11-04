@@ -30,7 +30,9 @@ test('Esc closes a diagram preview without scrolling to a distant editor caret',
     name: '预览 Mermaid 图表',
     exact: true,
   });
-  await expect(trigger.locator('svg')).toBeVisible();
+  // Mermaid renders on demand when its node enters the viewport.
+  await trigger.scrollIntoViewIfNeeded();
+  await expect(trigger.locator('svg')).toBeVisible({ timeout: 20000 });
   await page.evaluate(() =>
     (window as any).__mojian.editor.commands.focus('end'),
   );
@@ -211,7 +213,9 @@ test('Mermaid and article media use the same uncluttered preview on desktop and 
     name: '预览 Mermaid 图表',
     exact: true,
   });
-  await expect(trigger.locator('svg')).toBeVisible();
+  // Mermaid renders on demand when its node enters the viewport.
+  await trigger.scrollIntoViewIfNeeded();
+  await expect(trigger.locator('svg')).toBeVisible({ timeout: 20000 });
   await trigger.focus();
   await page.keyboard.press('Enter');
   const screen = page.getByRole('region', { name: '图表预览', exact: true });
