@@ -53,7 +53,7 @@ async function clickSide(page: Page, index: number) {
     .poll(() => selection(page))
     .toMatchObject(type === 'text' ? { type } : { type, edge });
   if (type === 'text')
-    await expect(page.locator('.image-caret-anchor')).toHaveCount(1);
+    await expect(page.locator('.image-caret-anchor')).toHaveCount(0);
   else await expect(page.locator('.ProseMirror-gapcursor')).toBeVisible();
 }
 function expectInlineImageText(
@@ -1148,42 +1148,25 @@ for (const key of ['Shift+Tab', 'Backspace', 'Delete'])
     );
   });
 
-test('clicking left of an image immediately paints a visible caret', async ({
+test('clicking left of an image uses one native caret and accepts text', async ({
   page,
 }) => {
   await ready(page, blocks[1][1]);
   await clickSide(page, 0);
-  const anchor = page.locator('.image-caret-left');
-  expect(
-    await anchor.evaluate((el) => {
-      const style = getComputedStyle(el, '::after');
-      return {
-        width: style.width,
-        height: style.height,
-        content: style.content,
-        animation: style.animationName,
-      };
-    }),
-  ).toEqual({
-    width: '1px',
-    height: '18px',
-    content: '""',
-    animation: 'image-caret-blink',
-  });
-  await page.screenshot({
-    path: '/tmp/mojian-image-caret.png',
-    caret: 'initial',
-  });
+  await expect(
+    page.locator(
+      '.image-caret-anchor,.image-left-caret-line,.safari-text-caret',
+    ),
+  ).toHaveCount(0);
+  await expect(page.locator('.article-editor')).toBeFocused();
+  await expect(page.locator('.article-editor')).toHaveCSS(
+    'caret-color',
+    'rgb(37, 37, 40)',
+  );
   await page.keyboard.press('Tab');
-  await expect(anchor).toHaveCount(1);
-  await page.screenshot({
-    path: '/tmp/mojian-image-caret-tab.png',
-    caret: 'initial',
-  });
   await page.keyboard.press('Backspace');
   await page.keyboard.insertText('前文');
   expectInlineImageText(await doc(page), 'left', '前文');
-  await expect(anchor).toHaveCount(1);
 });
 
 for (const key of ['Shift+Tab', 'Backspace'])
@@ -1197,12 +1180,12 @@ for (const key of ['Shift+Tab', 'Backspace'])
     expectInlineImageText(await doc(page), 'left', '\t');
     await page.keyboard.press(key);
     expect(await doc(page)).toEqual(original);
-    await expect(page.locator('.image-caret-left')).toHaveCount(1);
+    await expect(page.locator('.image-caret-anchor')).toHaveCount(0);
   });
 
 for (const width of [1440, 390])
   for (const percent of [35, 100])
-    test(`image caret blinks and follows repeated indentation at ${width}px/${percent}%`, async ({
+    test(`native image caret follows repeated indentation without extra DOM cursors at ${width}px/${percent}%`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 1000 });
@@ -1213,22 +1196,16 @@ for (const width of [1440, 390])
         `![图片](https://example.test/boundary.svg "width=${percent}%")`,
       );
       await clickSide(page, 0);
-      const anchor = page.locator('.image-caret-left');
-      const opacity = () =>
-        anchor.evaluate((el) => getComputedStyle(el, '::after').opacity);
-      await expect.poll(opacity).toBe('0');
-      await expect.poll(opacity).toBe('1');
       for (const key of ['Tab', 'Tab', 'Shift+Tab', 'Backspace']) {
         await page.keyboard.press(key);
-        await expect(anchor).toHaveCount(1);
+        await expect(
+          page.locator('.image-caret-anchor,.image-left-caret-line'),
+        ).toHaveCount(0);
         await expect(page.locator('.article-editor')).toBeFocused();
-        await expect(page.locator('.image-left-caret-line')).toHaveCSS(
+        await expect(page.locator('.article-editor')).toHaveCSS(
           'caret-color',
-          'rgba(0, 0, 0, 0)',
+          'rgb(37, 37, 40)',
         );
-        expect(
-          await anchor.evaluate((el) => getComputedStyle(el, '::after').width),
-        ).toBe('1px');
       }
       expect((await doc(page)).content[0].content).toHaveLength(1);
       await page.keyboard.insertText('输入');

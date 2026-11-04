@@ -144,51 +144,13 @@ function selectedImages(state: EditorState) {
   return DecorationSet.create(doc, images);
 }
 
-function inlineImageBoundary(selection: Selection) {
-  if (!(selection instanceof TextSelection) || !selection.empty) return null;
-  if (selection.$from.nodeAfter?.type.name === 'inlineImage')
-    return { pos: selection.from, edge: 'left' as const };
-  if (
-    selection.$from.nodeBefore?.type.name === 'inlineImage' &&
-    !selection.$from.nodeAfter?.isText
-  )
-    return {
-      pos: selection.from - selection.$from.nodeBefore.nodeSize,
-      edge: 'right' as const,
-    };
-  return null;
-}
-
 function paintedBlock(view: EditorView, pos: number) {
   const dom = view.nodeDOM(pos);
   if (!(dom instanceof HTMLElement)) return null;
   const type = view.state.doc.nodeAt(pos)?.type.name;
-  const selector =
-    type === 'codeBlock'
-      ? '.code-node'
-      : isImageName(type)
-        ? '.image-box'
-        : null;
-  return (selector && dom.querySelector<HTMLElement>(selector)) || dom;
-}
-
-function paintedBlockRect(block: HTMLElement) {
-  const rect = block.getBoundingClientRect();
-  const scroller = block.classList.contains('image-box')
-    ? block.closest<HTMLElement>('.image-scroll')
-    : null;
-  if (!scroller) return rect;
-  const viewport = scroller.getBoundingClientRect();
-  const style = getComputedStyle(scroller);
-  const left = Math.max(
-    rect.left,
-    viewport.left + parseFloat(style.paddingLeft),
-  );
-  const right = Math.min(
-    rect.right,
-    viewport.right - parseFloat(style.paddingRight),
-  );
-  return new DOMRect(left, rect.top, Math.max(0, right - left), rect.height);
+  return type === 'codeBlock'
+    ? dom.querySelector<HTMLElement>('.code-node') || dom
+    : dom;
 }
 
 function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
@@ -201,14 +163,6 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   const $hit = view.state.doc.resolve(hit.pos);
   const candidates = new Set<number>();
   if (hit.inside >= 0) candidates.add(hit.inside);
-  // WebKit can map the tall area beside an inline image into adjacent text.
-  // Inspect only this textblock so its image boundary remains reachable.
-  if ($hit.parent.inlineContent) {
-    $hit.parent.forEach((node, offset) => {
-      if (node.type.name === 'inlineImage')
-        candidates.add($hit.start() + offset);
-    });
-  }
   if ($hit.nodeAfter) candidates.add($hit.pos);
   if ($hit.nodeBefore) candidates.add($hit.pos - $hit.nodeBefore.nodeSize);
   for (let depth = $hit.depth; depth > 0; depth--)
@@ -219,9 +173,9 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
       Number(isBlock(view.state.doc.nodeAt(a))),
   )) {
     const node = view.state.doc.nodeAt(pos);
-    if (!isBlock(node) && node?.type.name !== 'inlineImage') continue;
+    if (!isBlock(node)) continue;
     const block = paintedBlock(view, pos);
-    const rect = block && paintedBlockRect(block);
+    const rect = block?.getBoundingClientRect();
     if (!rect || event.clientY < rect.top || event.clientY > rect.bottom)
       continue;
     if (node!.type.name === 'horizontalRule') {
@@ -235,32 +189,6 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
           ? 'right'
           : null;
     if (!edge) continue;
-    if (node!.type.name === 'inlineImage') {
-      // Real text beside the image belongs to the browser's native selection.
-      // Safari inflates its text rectangles, so use the font-sized baseline.
-      const dom = view.domAtPos(hit.pos);
-      if (dom.node.nodeType === 3 && dom.node.textContent?.length) {
-        const range = view.dom.ownerDocument.createRange();
-        const offset = Math.min(dom.offset, dom.node.textContent.length - 1);
-        range.setStart(dom.node, offset);
-        range.setEnd(dom.node, offset + 1);
-        const glyph = range.getBoundingClientRect();
-        const font = parseFloat(
-          getComputedStyle(dom.node.parentElement!).fontSize,
-        );
-        if (
-          event.clientX >= glyph.left - 1 &&
-          event.clientX <= glyph.right + 1 &&
-          event.clientY >= glyph.bottom - font * 1.4 &&
-          event.clientY <= glyph.bottom
-        )
-          return null;
-      }
-      return TextSelection.create(
-        view.state.doc,
-        pos + (edge === 'right' ? node!.nodeSize : 0),
-      );
-    }
     const $pos = view.state.doc.resolve(
       edge === 'left' ? pos : pos + node!.nodeSize,
     );
@@ -307,20 +235,6 @@ function insertBoundaryText(view: EditorView, text: string) {
   tr.setSelection(TextSelection.create(tr.doc, pos + 1 + text.length));
   view.dispatch(tr.scrollIntoView());
   return true;
-}
-
-// Image rows are not ordinary text rows: an image breaks the assumptions of
-// the prose line search. Keep the gesture anchor and use the browser/PM hit
-// directly for its moving end so left-to-right drags cannot reverse direction.
-function imageTextAtCoords(
-  view: EditorView,
-  point: { left: number; top: number },
-) {
-  const hit = view.posAtCoords(point);
-  if (!hit || !view.state.doc.resolve(hit.pos).parent.inlineContent)
-    return null;
-  const selection = TextSelection.create(view.state.doc, hit.pos);
-  return { selection, line: view.coordsAtPos(hit.pos) };
 }
 
 export function clearEmptyBlockParagraph(editor: Editor) {
@@ -420,7 +334,7 @@ export const BlockBoundaries = Extension.create({
                 : selection.from - (selection.$from.nodeBefore?.nodeSize || 0);
             const block = paintedBlock(view, pos);
             observe(block);
-            const rect = block && paintedBlockRect(block);
+            const rect = block?.getBoundingClientRect();
             const scroll = view.dom
               .closest('.writing-scroll')
               ?.getBoundingClientRect();
@@ -457,39 +371,8 @@ export const BlockBoundaries = Extension.create({
               event.target.closest('button, input, select, textarea, a')
             )
               return;
-            if (event.target.closest('.image-caret-anchor')) {
-              if (event.type === 'pointerdown') return;
-              const selection = view.state.selection;
-              if (
-                event.type === 'mousedown' &&
-                selection instanceof TextSelection
-              ) {
-                beginTextSelection(
-                  view,
-                  event,
-                  { selection, line: view.coordsAtPos(selection.head) },
-                  (point) => imageTextAtCoords(view, point),
-                );
-              } else {
-                event.preventDefault();
-                view.focus();
-              }
-              return true;
-            }
             const selection = blockSelectionAtCoords(view, event);
             if (!selection) return;
-            if (selection instanceof TextSelection) {
-              if (event.type === 'pointerdown') return;
-              if (event.type === 'mousedown') {
-                beginTextSelection(
-                  view,
-                  event,
-                  { selection, line: view.coordsAtPos(selection.head) },
-                  (point) => imageTextAtCoords(view, point),
-                );
-                return true;
-              }
-            }
             event.preventDefault();
             const scrollTop = surface.scrollTop;
             const scrollLeft = surface.scrollLeft;
@@ -533,10 +416,16 @@ export const BlockBoundaries = Extension.create({
             }
             if (activate(event)) return;
             const point = { left: event.clientX, top: event.clientY };
-            if (textPointMatches(view, point)) return;
+            // Non-editable inline wrappers can cover otherwise blank space.
+            // Native dragging there drags the atom rather than selecting text.
+            const inEditableContent =
+              view.dom.contains(event.target) &&
+              !event.target.closest('[contenteditable="false"]');
+            if (inEditableContent && textPointMatches(view, point)) return;
             const target = ordinaryTextAtCoords(view, point);
             if (!target) return;
             if (
+              inEditableContent &&
               point.top >= target.line.top &&
               point.top <= target.line.bottom &&
               point.left >= target.line.left &&
@@ -578,39 +467,7 @@ export const BlockBoundaries = Extension.create({
         },
         props: {
           decorations(state) {
-            const points = key.getState(state)?.images || DecorationSet.empty;
-            const selection = state.selection;
-            const inline = inlineImageBoundary(selection);
-            if (!inline) return points;
-            // Give the browser an ordinary text baseline beside a non-editable
-            // inline image. This is view-only; no character enters the document.
-            return points.add(state.doc, [
-              ...(inline.edge === 'left'
-                ? [
-                    Decoration.node(
-                      selection.$from.before(),
-                      selection.$from.after(),
-                      { class: 'image-left-caret-line' },
-                    ),
-                  ]
-                : []),
-              Decoration.widget(
-                selection.from,
-                () => {
-                  const anchor = document.createElement('span');
-                  anchor.className = `image-caret-anchor image-caret-${inline.edge}`;
-                  anchor.setAttribute('aria-hidden', 'true');
-                  // Non-breaking, so a full-width image cannot strand/trim the
-                  // browser's text baseline when the last adjacent letter goes.
-                  anchor.textContent = '\ufeff';
-                  return anchor;
-                },
-                {
-                  key: `image-anchor-${inline.edge}`,
-                  side: inline.edge === 'left' ? 1 : -1,
-                },
-              ),
-            ]);
+            return key.getState(state)?.images || DecorationSet.empty;
           },
           handleTextInput: (view, _from, _to, text) =>
             insertBoundaryText(view, text),

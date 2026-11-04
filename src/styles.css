@@ -657,16 +657,6 @@ button.primary:hover {
   margin: 22px 0;
   position: relative;
 }
-.image-caret-anchor {
-  position: relative;
-  cursor: text;
-}
-.image-caret-anchor::before {
-  content: '';
-  position: absolute;
-  inset: 0 -4px;
-  z-index: 1;
-}
 .image-node.inline-image-node {
   display: inline-block;
   vertical-align: bottom;
@@ -679,6 +669,14 @@ button.primary:hover {
 .inline-image-node .image-scroll,
 .inline-image-node .image-box {
   display: block;
+}
+/* The scroll frame must not overlap the adjacent text hit area. */
+.inline-image-node .image-scroll {
+  padding: 6px 4px;
+  margin: -6px -4px;
+}
+.inline-image-node .resize-handle {
+  right: -4px;
 }
 .image-box {
   position: relative;
@@ -2875,32 +2873,5 @@ button.primary:hover {
   .header-actions > button:not(.mobile-save) {
     height: 40px;
     border-radius: 6px;
-  }
-}
-
-/* Chromium otherwise draws an atomic-image-height caret at this boundary.
-   Use the same thin baseline and blink as prose, including after literal Tabs. */
-.article-editor.ProseMirror-focused .image-left-caret-line {
-  caret-color: transparent;
-}
-.article-editor.ProseMirror-focused .image-caret-left::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: -2px;
-  width: 1px;
-  height: 18px;
-  background: #252528;
-  z-index: 5;
-  pointer-events: none;
-  animation: image-caret-blink 1s step-end infinite;
-}
-@keyframes image-caret-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
   }
 }

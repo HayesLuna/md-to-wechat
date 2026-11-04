@@ -18,14 +18,29 @@ async function ready(page: Page, percent = 35) {
   await expect(page.locator('.image-box img')).toBeVisible();
 }
 async function side(page: Page, edge: 'left' | 'right') {
+  // An oversized image must expose its right edge before clicking outside it.
+  await page.locator('.image-scroll').evaluate((el, edge) => {
+    el.scrollLeft = edge === 'right' ? el.scrollWidth : 0;
+  }, edge);
   const box = (await page.locator('.image-box').boundingBox())!,
     surface = (await page.locator('.writing-scroll').boundingBox())!;
-  await page.mouse.click(
+  const x =
     edge === 'left'
       ? box.x - 8
-      : Math.min(box.x + box.width + 8, surface.x + surface.width - 2),
-    box.y + box.height / 2,
-  );
+      : Math.min(box.x + box.width + 8, surface.x + surface.width - 2);
+  await page.mouse.click(x, box.y + box.height / 2);
+  // When the image fills the viewport there is no right-hand blank space.
+  // Clicking its visible pixels selects the image; native ArrowRight exits it.
+  if (edge === 'right' && x < box.x + box.width) {
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__mojian!.editor!.state.selection.toJSON().type,
+        ),
+      )
+      .toBe('node');
+    await page.keyboard.press('ArrowRight');
+  }
   await expect
     .poll(() =>
       page.evaluate(
@@ -44,24 +59,23 @@ async function nativeCaret(page: Page) {
     page.locator('.inline-image-side-cursor,.block-side-cursor'),
   ).toHaveCount(0);
 
-  const normal = await page
-    .locator('.article-editor >p')
-    .first()
-    .evaluate((el) => {
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      return r.getBoundingClientRect().height;
-    });
+  await expect(
+    page.locator(
+      '.image-caret-anchor,.image-left-caret-line,.safari-text-caret',
+    ),
+  ).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const anchor = document.querySelector('.image-caret-anchor');
-        return anchor
-          ? anchor.getBoundingClientRect().height
-          : getSelection()!.getRangeAt(0).getBoundingClientRect().height;
+        const selection = getSelection();
+        return (
+          !!selection?.isCollapsed &&
+          !!selection.rangeCount &&
+          window.__mojian!.editor!.state.selection.empty
+        );
       }),
     )
-    .toBeCloseTo(normal, 1);
+    .toBe(true);
 }
 for (const [width, percent] of [
   [1440, 35],
@@ -74,6 +88,22 @@ for (const [width, percent] of [
   }) => {
     await page.setViewportSize({ width, height: 1000 });
     await ready(page, percent);
+    await expect(page.locator('.image-scroll')).toHaveCSS('display', 'block');
+    if (percent > 100) {
+      const scroll = await page.locator('.image-scroll').evaluate((el) => {
+        el.scrollLeft = el.scrollWidth;
+        const result = {
+          viewport: el.clientWidth,
+          content: el.scrollWidth,
+          moved: el.scrollLeft,
+        };
+        el.scrollLeft = 0;
+        return result;
+      });
+      expect(scroll.viewport).toBeGreaterThan(0);
+      expect(scroll.content).toBeGreaterThan(scroll.viewport);
+      expect(scroll.moved).toBeGreaterThan(0);
+    }
     const original = await page.evaluate(() =>
       window.__mojian!.editor!.getJSON(),
     );
@@ -102,8 +132,7 @@ for (const [width, percent] of [
       await page.evaluate(() => window.__mojian!.editor!.getJSON()),
     ).toEqual(original);
     const before = (await page.locator('.image-box').boundingBox())!;
-    const anchor = (await page.locator('.image-caret-anchor').boundingBox())!;
-    await page.mouse.click(anchor.x, anchor.y + anchor.height / 2);
+    await side(page, 'left');
     await expect(page.locator('.article-editor')).toBeFocused();
     await page.keyboard.press('Tab');
     await nativeCaret(page);

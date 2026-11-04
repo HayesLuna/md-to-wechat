@@ -79,7 +79,7 @@ for (const width of [1440, 390]) {
     await page.keyboard.insertText('插入');
     await expect
       .poll(() => page.evaluate(() => window.__mojian!.getMarkdown()))
-      .toContain('插入![图]');
+      .toContain('插入');
     expect(
       await page.evaluate(() => window.__mojian!.getMarkdown()),
     ).not.toMatch(/[\u200b\ufeff]/);
@@ -88,7 +88,7 @@ for (const width of [1440, 390]) {
 
 for (const width of [1440, 390]) {
   for (const mixed of [false, true]) {
-    test(`dragging starts at either image side and at its caret anchor at ${width}px/${mixed ? 'mixed' : 'standalone'}`, async ({
+    test(`dragging starts at either image side and at its text baseline at ${width}px/${mixed ? 'mixed' : 'standalone'}`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 1000 });
@@ -112,10 +112,15 @@ for (const width of [1440, 390]) {
         mixed,
       );
       await expect(page.locator('.image-box img')).toBeVisible();
-      for (const edge of ['left', 'right', 'anchor'] as const) {
+      for (const edge of ['left', 'right', 'baseline'] as const) {
         const image = (await page.locator('.image-box img').boundingBox())!;
-        let x = edge === 'right' ? image.x + image.width + 2 : image.x - 2;
+        const x = edge === 'right' ? image.x + image.width + 2 : image.x - 2;
         let y = image.y + image.height / 2;
+        const nearest = await page.evaluate(
+          ({ x, y }) =>
+            window.__mojian!.editor!.view.posAtCoords({ left: x, top: y })!.pos,
+          { x, y },
+        );
         await page.mouse.click(x, y);
         await expect
           .poll(() =>
@@ -129,15 +134,14 @@ for (const width of [1440, 390]) {
           )
           .toEqual({
             type: 'text',
-            position: (edge === 'right' ? 8 : 7) + (mixed ? 3 : 0),
+            position: nearest,
           });
-        if (edge === 'anchor') {
-          const anchor = (await page
-            .locator('.image-caret-left')
-            .boundingBox())!;
-          x = anchor.x - 1;
-          y = anchor.y + anchor.height / 2;
-        }
+        await expect(
+          page.locator(
+            '.image-caret-anchor,.image-left-caret-line,.safari-text-caret',
+          ),
+        ).toHaveCount(0);
+        if (edge === 'baseline') y = image.y + image.height - 9;
         const end = await page
           .locator('.article-editor > p')
           .first()
@@ -213,7 +217,11 @@ for (const width of [1440, 390]) {
       const end = forward ? after : before;
       await page.mouse.move(x, y);
       await page.mouse.down();
-      const anchor = forward ? 6 : 7;
+      const anchor = await page.evaluate(
+        ({ x, y }) =>
+          window.__mojian!.editor!.view.posAtCoords({ left: x, top: y })!.pos,
+        { x, y },
+      );
       await expect
         .poll(() =>
           page.evaluate(() => window.__mojian!.editor!.state.selection.anchor),
@@ -245,3 +253,122 @@ for (const width of [1440, 390]) {
     }
   });
 }
+
+for (const width of [1440, 390]) {
+  test(`text on both image sides keeps the actual mouse-down selection origin at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/text-origin.svg', (r) =>
+      r.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="teal"/></svg>',
+      }),
+    );
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__mojian?.editor);
+    await page.evaluate(() =>
+      window.__mojian!.setMarkdown(
+        '图片前的文字![图](https://example.test/text-origin.svg "width=35%")图片后的文字',
+      ),
+    );
+    await expect(page.locator('.image-box img')).toBeVisible();
+    for (const text of ['图片前的文字', '图片后的文字']) {
+      for (const [start, end] of [
+        [0, 4],
+        [4, 0],
+        [1, 3],
+        [3, 1],
+      ]) {
+        const points = await page.evaluate(
+          ({ text, start, end }) => {
+            const e = window.__mojian!.editor!;
+            let base = 0;
+            e.state.doc.descendants((n, pos) => {
+              if (n.isText && n.text === text) base = pos;
+            });
+            return [start, end].map((offset) => {
+              const d = e.view.domAtPos(base + offset),
+                r = document.createRange();
+              r.setStart(d.node, d.offset);
+              r.setEnd(d.node, d.offset + 1);
+              const rect = r.getBoundingClientRect();
+              return {
+                pos: base + offset,
+                x: rect.left + 1,
+                y: rect.bottom - 5,
+              };
+            });
+          },
+          { text, start, end },
+        );
+        await page.mouse.move(points[0].x, points[0].y);
+        await page.mouse.down();
+        await page.mouse.move(points[1].x, points[1].y, { steps: 8 });
+        const expected = { anchor: points[0].pos, head: points[1].pos };
+        const selection = () =>
+          page.evaluate(() => {
+            const e = window.__mojian!.editor!,
+              s = getSelection()!;
+            return {
+              model: {
+                anchor: e.state.selection.anchor,
+                head: e.state.selection.head,
+              },
+              dom: {
+                anchor: e.view.posAtDOM(s.anchorNode!, s.anchorOffset),
+                head: e.view.posAtDOM(s.focusNode!, s.focusOffset),
+              },
+            };
+          });
+        await expect
+          .poll(selection)
+          .toEqual({ model: expected, dom: expected });
+        await page.mouse.up();
+        await expect
+          .poll(selection)
+          .toEqual({ model: expected, dom: expected });
+      }
+    }
+  });
+}
+
+test('article side whitespace chooses the nearest text instead of an image edge', async ({
+  page,
+}) => {
+  await page.route('**/nearest.svg', (r) =>
+    r.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="teal"/></svg>',
+    }),
+  );
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  await page.evaluate(() =>
+    window.__mojian!.setMarkdown(
+      '前面的文字![图](https://example.test/nearest.svg "width=35%")后面的文字',
+    ),
+  );
+  await expect(page.locator('.image-box img')).toBeVisible();
+  const image = (await page.locator('.image-box img').boundingBox())!;
+  const editor = (await page.locator('.article-editor').boundingBox())!;
+  for (const [x, expected] of [
+    [editor.x + 1, 1],
+    [editor.x + editor.width - 1, 12],
+  ]) {
+    await page.mouse.click(x, image.y + image.height / 2);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const s = window.__mojian!.editor!.state.selection;
+          return { anchor: s.anchor, head: s.head };
+        }),
+      )
+      .toEqual({ anchor: expected, head: expected });
+    await expect(
+      page.locator(
+        '.image-caret-anchor,.image-left-caret-line,.safari-text-caret',
+      ),
+    ).toHaveCount(0);
+  }
+});

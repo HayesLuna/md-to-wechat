@@ -70,6 +70,22 @@ export function ordinaryTextAtCoords(
   point: { left: number; top: number },
 ) {
   const bounds = view.dom.getBoundingClientRect();
+  const initialHit = view.posAtCoords({
+    left: Math.max(bounds.left + 1, Math.min(bounds.right - 1, point.left)),
+    top: Math.max(bounds.top + 1, Math.min(bounds.bottom - 1, point.top)),
+  });
+  // Inline atoms break the monotonic text-row geometry used below. Let the
+  // browser choose the nearest content instead of snapping to an atom edge.
+  if (initialHit) {
+    const parent = view.state.doc.resolve(initialHit.pos).parent;
+    if (
+      parent.isTextblock &&
+      parent.content.content.some((node) => node.isInline && !node.isText)
+    ) {
+      const selection = TextSelection.create(view.state.doc, initialHit.pos);
+      return { selection, line: view.coordsAtPos(initialHit.pos) };
+    }
+  }
   const candidates = new Set<number>();
   const barriers = new Set<number>();
   const skip = new Set(['codeBlock', 'image', 'table', 'horizontalRule']);
