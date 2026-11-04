@@ -665,6 +665,14 @@ button.primary:hover {
   margin: 0 4px;
   white-space: normal;
 }
+.article-editor .node-inlineImage::after {
+  /* Give the inline node a final baseline so Chromium can paint its native
+     trailing caret. An empty box adds no width or characters to the document. */
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
 .inline-image-node > span,
 .inline-image-node .image-scroll,
 .inline-image-node .image-box {
