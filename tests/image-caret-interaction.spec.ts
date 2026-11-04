@@ -302,10 +302,6 @@ for (const width of [1440, 390]) {
           },
           { text, start, end },
         );
-        await page.mouse.move(points[0].x, points[0].y);
-        await page.mouse.down();
-        await page.mouse.move(points[1].x, points[1].y, { steps: 8 });
-        const expected = { anchor: points[0].pos, head: points[1].pos };
         const selection = () =>
           page.evaluate(() => {
             const e = window.__mojian!.editor!,
@@ -321,6 +317,14 @@ for (const width of [1440, 390]) {
               },
             };
           });
+        // Each drag starts independently. Linux can otherwise drag the range
+        // selected by the previous iteration instead of starting a new range.
+        await page.mouse.click(points[0].x, points[0].y);
+        const origin = { anchor: points[0].pos, head: points[0].pos };
+        await expect.poll(selection).toEqual({ model: origin, dom: origin });
+        await page.mouse.down();
+        await page.mouse.move(points[1].x, points[1].y, { steps: 8 });
+        const expected = { anchor: points[0].pos, head: points[1].pos };
         await expect
           .poll(selection)
           .toEqual({ model: expected, dom: expected });
