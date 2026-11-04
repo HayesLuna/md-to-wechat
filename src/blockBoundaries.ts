@@ -309,6 +309,20 @@ function insertBoundaryText(view: EditorView, text: string) {
   return true;
 }
 
+// Image rows are not ordinary text rows: an image breaks the assumptions of
+// the prose line search. Keep the gesture anchor and use the browser/PM hit
+// directly for its moving end so left-to-right drags cannot reverse direction.
+function imageTextAtCoords(
+  view: EditorView,
+  point: { left: number; top: number },
+) {
+  const hit = view.posAtCoords(point);
+  if (!hit || !view.state.doc.resolve(hit.pos).parent.inlineContent)
+    return null;
+  const selection = TextSelection.create(view.state.doc, hit.pos);
+  return { selection, line: view.coordsAtPos(hit.pos) };
+}
+
 export function clearEmptyBlockParagraph(editor: Editor) {
   if (editor.isDestroyed || !editor.isEditable) return;
   const pos = key.getState(editor.state)?.paragraph;
@@ -454,7 +468,7 @@ export const BlockBoundaries = Extension.create({
                   view,
                   event,
                   { selection, line: view.coordsAtPos(selection.head) },
-                  (point) => ordinaryTextAtCoords(view, point),
+                  (point) => imageTextAtCoords(view, point),
                 );
               } else {
                 event.preventDefault();
@@ -471,7 +485,7 @@ export const BlockBoundaries = Extension.create({
                   view,
                   event,
                   { selection, line: view.coordsAtPos(selection.head) },
-                  (point) => ordinaryTextAtCoords(view, point),
+                  (point) => imageTextAtCoords(view, point),
                 );
                 return true;
               }

@@ -167,3 +167,81 @@ for (const width of [1440, 390]) {
     });
   }
 }
+
+for (const width of [1440, 390]) {
+  test(`image side drags preserve their anchor and follow both selection directions at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/direction.svg', (route) =>
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="teal"/></svg>',
+      }),
+    );
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__mojian?.editor);
+    await page.evaluate(() =>
+      window.__mojian!.setMarkdown(
+        '前面的文字![图](https://example.test/direction.svg "width=35%")后面的文字',
+      ),
+    );
+    await expect(page.locator('.image-box img')).toBeVisible();
+    const point = async (text: string, offset: number) =>
+      page.evaluate(
+        ({ text, offset }) => {
+          const e = window.__mojian!.editor!;
+          let pos = 0;
+          e.state.doc.descendants((n, p) => {
+            if (n.isText && n.text === text) pos = p + offset;
+          });
+          const d = e.view.domAtPos(pos),
+            range = document.createRange();
+          range.setStart(d.node, d.offset);
+          range.setEnd(d.node, d.offset + 1);
+          const r = range.getBoundingClientRect();
+          return { pos, x: r.left + 1, y: r.bottom - 5 };
+        },
+        { text, offset },
+      );
+    const image = (await page.locator('.image-box img').boundingBox())!;
+    const before = await point('前面的文字', 2),
+      after = await point('后面的文字', 2);
+    for (const forward of [true, false]) {
+      const x = forward ? image.x - 2 : image.x + image.width + 2;
+      const y = image.y + image.height / 2;
+      const end = forward ? after : before;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      const anchor = forward ? 6 : 7;
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.__mojian!.editor!.state.selection.anchor),
+        )
+        .toBe(anchor);
+      await page.mouse.move(end.x, end.y, { steps: 12 });
+      await page.mouse.up();
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const s = window.__mojian!.editor!.state.selection;
+            return { anchor: s.anchor, head: s.head };
+          }),
+        )
+        .toEqual({ anchor, head: end.pos });
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const e = window.__mojian!.editor!,
+              s = getSelection()!;
+            return {
+              anchor: e.view.posAtDOM(s.anchorNode!, s.anchorOffset),
+              head: e.view.posAtDOM(s.focusNode!, s.focusOffset),
+            };
+          }),
+        )
+        .toEqual({ anchor, head: end.pos });
+      expect(forward ? anchor < end.pos : anchor > end.pos).toBe(true);
+    }
+  });
+}
