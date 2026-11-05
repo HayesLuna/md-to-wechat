@@ -938,3 +938,56 @@ for (const width of [1440, 390])
       }
     }
   });
+
+for (const width of [1440, 390])
+  test(`blank space after a trailing highlight places the caret outside its syntax at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+    for (const expanded of [false, true]) {
+      for (const offset of [8, 120]) {
+        await page.evaluate((expanded) => {
+          const app = (window as any).__mojian;
+          app.editor.view.dom.blur();
+          app.setMarkdown('前面 ==测试==');
+          if (expanded) app.editor.commands.focus(7);
+        }, expanded);
+        await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
+          expanded ? 2 : 0,
+        );
+        const point = await page
+          .locator('.article-editor')
+          .evaluate((root, offset) => {
+            const e = (window as any).__mojian.editor;
+            const end = e.view.coordsAtPos(e.state.doc.content.size - 1);
+            const bounds = root.getBoundingClientRect();
+            return {
+              x: Math.min(bounds.right - 4, end.right + offset),
+              y: (end.top + end.bottom) / 2,
+            };
+          }, offset);
+        await page.mouse.click(point.x, point.y);
+        await expect
+          .poll(() =>
+            page.evaluate(() => {
+              const e = (window as any).__mojian.editor,
+                native = getSelection()!;
+              return {
+                model: e.state.selection.from,
+                native: e.view.posAtDOM(native.focusNode!, native.focusOffset),
+              };
+            }),
+          )
+          .toEqual({ model: 10, native: 10 });
+        await page.keyboard.insertText('后');
+        expect(
+          await page.evaluate(() =>
+            (window as any).__mojian.editor.getMarkdown(),
+          ),
+        ).toBe('前面 ==测试==后');
+        await expect(page.locator('.article-editor mark')).toHaveText('测试');
+      }
+    }
+  });

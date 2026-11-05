@@ -33,6 +33,17 @@ function pairFromDecoration(decoration: Decoration): HighlightPair {
   return { from: decoration.from - 2, to: decoration.to + 2 };
 }
 
+// Blank-space hit testing can land among collapsed closing equals, which have
+// the same visual coordinates as the end of the highlighted text.
+export function afterHighlightClosingSyntax(state: EditorState, pos: number) {
+  const pair = key
+    .getState(state)
+    ?.base.find(Math.max(0, pos - 2), pos + 2, (spec) => !!spec.highlight)
+    .map(pairFromDecoration)
+    .find((pair) => pos >= pair.to - 2 && pos <= pair.to);
+  return pair?.to ?? pos;
+}
+
 function activePairs(
   state: EditorState,
   base = key.getState(state)?.base,

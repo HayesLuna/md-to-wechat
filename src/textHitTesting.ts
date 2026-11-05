@@ -1,5 +1,6 @@
 import type { EditorView } from '@tiptap/pm/view';
 import { TextSelection } from '@tiptap/pm/state';
+import { afterHighlightClosingSyntax } from './sourceHighlight';
 
 export type TextLine = {
   left: number;
@@ -219,7 +220,12 @@ export function ordinaryTextAtCoords(
     end = start + node.content.size;
   const selection = TextSelection.create(
     view.state.doc,
-    Math.max(start, Math.min(end, hit)),
+    point.left > line.right
+      ? afterHighlightClosingSyntax(
+          view.state,
+          Math.max(start, Math.min(end, hit)),
+        )
+      : Math.max(start, Math.min(end, hit)),
   );
   return { selection, line };
 }
