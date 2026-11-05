@@ -858,3 +858,83 @@ for (const width of [1440, 390])
     await expectVisibleText(page, '测试');
     expect(errors).toEqual([]);
   });
+
+for (const width of [1440, 390])
+  test(`clicking collapsed highlight edges exits the closing equals at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+    const editor = page.locator('.article-editor');
+    for (const markdown of ['==测试==', '==测试==后面', '==**测**试==后面']) {
+      for (const edge of [false, true]) {
+        await page.evaluate((text) => {
+          const app = (window as any).__mojian;
+          // The blur command runs in a later animation frame and can steal
+          // focus from the click below. Set up the unfocused state immediately.
+          app.editor.view.dom.blur();
+          app.setMarkdown(text);
+        }, markdown);
+        await expect(
+          editor.locator('.highlight-delimiter.expanded'),
+        ).toHaveCount(0);
+        // Measure the text itself, including runs split by nested formatting.
+        const point = await editor.evaluate((root, edge) => {
+          const marks = root.querySelectorAll('mark');
+          const mark = edge ? marks[marks.length - 1] : marks[0];
+          const walker = document.createTreeWalker(mark, NodeFilter.SHOW_TEXT);
+          const node = walker.nextNode()!;
+          const range = document.createRange();
+          range.setStart(node, edge ? node.textContent!.length : 1);
+          range.collapse(true);
+          const rect = range.getBoundingClientRect();
+          return {
+            x: rect.right + (edge ? 2 : 0),
+            y: rect.top + rect.height / 2,
+          };
+        }, edge);
+        await page.mouse.click(point.x, point.y);
+        const expectedPosition = edge ? 7 : 4;
+        await expect
+          .poll(() =>
+            page.evaluate(() => {
+              const e = (window as any).__mojian.editor;
+              const native = window.getSelection()!;
+              return {
+                position: e.state.selection.from,
+                nativePosition: e.view.posAtDOM(
+                  native.focusNode!,
+                  native.focusOffset,
+                ),
+              };
+            }),
+          )
+          .toEqual({
+            position: expectedPosition,
+            nativePosition: expectedPosition,
+          });
+        await page.keyboard.insertText('新');
+        expect(await editor.locator('mark').allTextContents()).toEqual(
+          edge
+            ? markdown.includes('**')
+              ? ['测', '试']
+              : ['测试']
+            : markdown.includes('**')
+              ? ['测新', '试']
+              : ['测新试'],
+        );
+        expect(
+          await page.evaluate(() =>
+            (window as any).__mojian.editor.getMarkdown(),
+          ),
+        ).toBe(
+          edge
+            ? markdown.replace('试==', '试==新')
+            : markdown.includes('**')
+              ? '==**测新**试==后面'
+              : markdown.replace('测试', '测新试'),
+        );
+      }
+    }
+  });

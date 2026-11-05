@@ -188,6 +188,7 @@ export const TyporaHighlight = Mark.create({
   ],
   renderMarkdown: (node, helpers) => `==${helpers.renderChildren(node)}==`,
   addProseMirrorPlugins() {
+    let collapsedClick: number | undefined;
     // Immutable text blocks retain their parsed pairs through edits elsewhere,
     // cursor moves and undo. Selection changes only reveal nearby delimiters.
     const cache = new WeakMap<PMNode, HighlightPair[]>();
@@ -408,6 +409,19 @@ export const TyporaHighlight = Mark.create({
         props: {
           decorations: (state) => key.getState(state)?.visible,
           handleClick: (view, pos, event) => {
+            // Focus reveals syntax and shifts the text before mouseup. Use the
+            // position measured on mousedown while the syntax was still hidden.
+            const clicked = collapsedClick;
+            collapsedClick = undefined;
+            if (clicked !== undefined && !event.shiftKey) {
+              view.dispatch(
+                view.state.tr
+                  .setSelection(TextSelection.create(view.state.doc, clicked))
+                  .setMeta(key, true),
+              );
+              view.focus();
+              return true;
+            }
             const mark =
               event.target instanceof Element
                 ? event.target.closest('mark')
@@ -470,6 +484,37 @@ export const TyporaHighlight = Mark.create({
             return true;
           },
           handleDOMEvents: {
+            mousedown: (view, event) => {
+              collapsedClick = undefined;
+              if (
+                event.button !== 0 ||
+                event.shiftKey ||
+                event.altKey ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.detail > 1
+              )
+                return false;
+              const pos = view.posAtCoords({
+                left: event.clientX,
+                top: event.clientY,
+              })?.pos;
+              const plugin = key.getState(view.state);
+              if (pos === undefined || !plugin) return false;
+              const pair = plugin.base
+                .find(Math.max(0, pos - 2), pos + 2, (spec) => !!spec.highlight)
+                .map(pairFromDecoration)
+                .find((pair) => pos >= pair.from && pos <= pair.to);
+              if (
+                pair &&
+                plugin.visible
+                  .find(pair.to - 2, pair.to, (spec) => !!spec.delimiter)
+                  .some((decoration) => decoration.to === pair.to)
+              )
+                collapsedClick =
+                  pos >= pair.to - 2 ? pair.to : Math.max(pair.from + 2, pos);
+              return false;
+            },
             focus: (view) => {
               view.dispatch(view.state.tr.setMeta(key, true));
               return false;
