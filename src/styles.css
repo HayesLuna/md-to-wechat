@@ -478,8 +478,7 @@ button.primary:hover {
   background-color: var(--selection-background);
 }
 .article-editor table {
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
   table-layout: fixed;
   width: 100%;
   min-width: 350px;
@@ -488,19 +487,11 @@ button.primary:hover {
 }
 .article-editor td,
 .article-editor th {
-  border: 0;
-  border-right: 1px solid #dde0e5;
-  border-bottom: 1px solid #dde0e5;
+  border: 1px solid #dde0e5;
   padding: 9px 13px;
   min-width: 85px;
   vertical-align: top;
   position: relative;
-}
-.article-editor tr > :first-child {
-  border-left: 1px solid #dde0e5;
-}
-.article-editor tr:first-child > * {
-  border-top: 1px solid #dde0e5;
 }
 .article-editor th {
   font-weight: 600;
@@ -514,23 +505,13 @@ button.primary:hover {
   max-width: 100%;
   margin: 20px 0 26px;
 }
-.article-editor tr > .selectedCell {
-  border-color: transparent;
-}
 .article-editor .selectedCell:after {
   z-index: 2;
   position: absolute;
   content: '';
-  inset: 0 -1px -1px 0;
-  border-radius: 0;
+  inset: 0;
   background: rgb(200 225 255 / 65%);
   pointer-events: none;
-}
-.article-editor tr:first-child > .selectedCell:after {
-  top: -1px;
-}
-.article-editor tr > .selectedCell:first-child:after {
-  left: -1px;
 }
 .article-editor .ProseMirror-selectednode:not(blockquote) {
   outline: none;

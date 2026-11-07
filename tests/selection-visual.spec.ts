@@ -122,7 +122,7 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
           ' ',
         );
       }),
-  ).toBe('0px -1px -1px -1px');
+  ).toBe('0px 0px 0px 0px');
   await expect(page.locator('.article-editor .tableWrapper')).toHaveCSS(
     'border-top-left-radius',
     '0px',
