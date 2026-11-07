@@ -84,7 +84,7 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   expect(await selectedText(page)).not.toContain('另一项');
   const item = page.locator('.article-editor li.ProseMirror-selectednode');
   await expect(item).toHaveCSS('background-color', blue);
-  await expect(item).toHaveCSS('border-radius', '3px');
+  await expect(item).toHaveCSS('border-radius', '9px');
   await expect(item).toHaveCSS('outline-style', 'none');
   await page.keyboard.press('ControlOrMeta+a');
   expect(await nodeName(page)).toBe('bulletList');
@@ -125,7 +125,7 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   ).toBe('0px -1px -1px -1px');
   await expect(page.locator('.article-editor .tableWrapper')).toHaveCSS(
     'border-top-left-radius',
-    '3px',
+    '0px',
   );
   await page.keyboard.press('ControlOrMeta+a');
   expect(await selectedText(page)).toContain('行二');
@@ -142,13 +142,13 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   await ready(page, '> 引用内容');
   await expect(page.locator('.article-editor blockquote')).toHaveCSS(
     'border-radius',
-    '6px 10px 10px 6px',
+    '9px',
   );
   await caret(page, '引用内容');
   await page.keyboard.press('ControlOrMeta+a');
   await expect(
     page.locator('.article-editor blockquote.ProseMirror-selectednode'),
-  ).toHaveCSS('border-radius', '6px 10px 10px 6px');
+  ).toHaveCSS('border-radius', '9px');
 
   await ready(page, '前文\n\n```js\nconst value = 1;\n```\n\n后文');
   const keyword = page.locator('.hljs-keyword');

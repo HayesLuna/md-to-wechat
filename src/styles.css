@@ -12,7 +12,7 @@
   --soft: #f5f6f7;
   --selection-background: #c8e1ff;
   --selection-border: #79aaf0;
-  --selection-radius: 3px;
+  --selection-radius: 9px;
   font-size: 14px;
 }
 * {
@@ -406,7 +406,7 @@ button.primary:hover {
 .article-editor blockquote {
   border-left: 3px solid var(--accent);
   background: #f7f7f6;
-  border-radius: 6px 10px 10px 6px;
+  border-radius: var(--selection-radius);
   margin: 22px 0;
   padding: 14px 20px;
   color: #77797f;
@@ -514,9 +514,6 @@ button.primary:hover {
   max-width: 100%;
   margin: 20px 0 26px;
 }
-.article-editor .tableWrapper {
-  border-radius: var(--selection-radius);
-}
 .article-editor tr > .selectedCell {
   border-color: transparent;
 }
@@ -591,7 +588,7 @@ button.primary:hover {
 }
 .code-node {
   border: 1px solid #e2e4e8;
-  border-radius: 4px;
+  border-radius: var(--selection-radius);
   margin: 20px 0 26px;
   overflow: hidden;
   background: #f8f8f9;
@@ -2428,14 +2425,14 @@ button.primary:hover {
 .code-node.code-theme-github {
   background: #fff;
   border-color: #e5e7eb;
-  border-radius: 9px;
+  border-radius: var(--selection-radius);
   overflow: visible;
   position: relative;
 }
 .code-theme-github .code-header {
   background: #f6f8fa;
   border-color: #e5e7eb;
-  border-radius: 9px 9px 0 0;
+  border-radius: var(--selection-radius) var(--selection-radius) 0 0;
 }
 .code-theme-github .code-header input {
   color: #57606a;
@@ -2454,7 +2451,7 @@ button.primary:hover {
 }
 .code-viewport {
   overflow: auto;
-  border-radius: 0 0 9px 9px;
+  border-radius: 0 0 var(--selection-radius) var(--selection-radius);
   scrollbar-width: thin;
   scrollbar-color: #d0d5db transparent;
   max-height: min(720px, 70vh);
