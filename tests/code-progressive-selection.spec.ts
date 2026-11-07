@@ -68,12 +68,22 @@ for (const key of ['Control+a', 'Meta+a'])
       await expect(
         page.locator('.node-codeBlock.ProseMirror-selectednode'),
       ).toHaveCount(1);
-      await expect(
-        page.locator('.node-codeBlock.ProseMirror-selectednode'),
-      ).toHaveCSS('outline-width', '1px');
-      await expect(
-        page.locator('.node-codeBlock.ProseMirror-selectednode'),
-      ).toHaveCSS('outline-color', 'rgb(121, 170, 240)');
+      const card = page.locator(
+        '.node-codeBlock.ProseMirror-selectednode > .code-node',
+      );
+      expect(
+        await card.evaluate((element) => {
+          const overlay = getComputedStyle(element, '::after');
+          const box = getComputedStyle(element);
+          return (
+            overlay.top === '-1px' &&
+            overlay.right === '-1px' &&
+            overlay.bottom === '-1px' &&
+            overlay.left === '-1px' &&
+            overlay.borderTopLeftRadius === box.borderTopLeftRadius
+          );
+        }),
+      ).toBe(true);
       expect(await copy(page)).toBe(fenced);
       await page.keyboard.press(key);
       expect((await selection(page)).type).toBe('all');

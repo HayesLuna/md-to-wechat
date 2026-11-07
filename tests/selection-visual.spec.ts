@@ -84,6 +84,7 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   expect(await selectedText(page)).not.toContain('另一项');
   const item = page.locator('.article-editor li.ProseMirror-selectednode');
   await expect(item).toHaveCSS('background-color', blue);
+  await expect(item).toHaveCSS('border-radius', '3px');
   await expect(item).toHaveCSS('outline-style', 'none');
   await page.keyboard.press('ControlOrMeta+a');
   expect(await nodeName(page)).toBe('bulletList');
@@ -111,6 +112,21 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
     background: 'rgba(200, 225, 255, 0.65)',
     opacity: '1',
   });
+  expect(
+    await page
+      .locator('.selectedCell')
+      .first()
+      .evaluate((element) => {
+        const overlay = getComputedStyle(element, '::after');
+        return [overlay.top, overlay.right, overlay.bottom, overlay.left].join(
+          ' ',
+        );
+      }),
+  ).toBe('0px -1px -1px -1px');
+  await expect(page.locator('.article-editor .tableWrapper')).toHaveCSS(
+    'border-top-left-radius',
+    '3px',
+  );
   await page.keyboard.press('ControlOrMeta+a');
   expect(await selectedText(page)).toContain('行二');
   await expect(page.locator('.selectedCell')).toHaveCount(6);
@@ -122,6 +138,17 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
     'outline-style',
     'none',
   );
+
+  await ready(page, '> 引用内容');
+  await expect(page.locator('.article-editor blockquote')).toHaveCSS(
+    'border-radius',
+    '6px 10px 10px 6px',
+  );
+  await caret(page, '引用内容');
+  await page.keyboard.press('ControlOrMeta+a');
+  await expect(
+    page.locator('.article-editor blockquote.ProseMirror-selectednode'),
+  ).toHaveCSS('border-radius', '6px 10px 10px 6px');
 
   await ready(page, '前文\n\n```js\nconst value = 1;\n```\n\n后文');
   const keyword = page.locator('.hljs-keyword');
@@ -145,10 +172,20 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   ).toBe(blue);
   await page.keyboard.press('ControlOrMeta+a');
   expect(await nodeName(page)).toBe('codeBlock');
-  const code = page.locator('.node-codeBlock.ProseMirror-selectednode');
-  await expect(code).toHaveCSS('outline-width', '1px');
-  await expect(code).toHaveCSS('outline-color', border);
-  await expect(code).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  const code = page.locator(
+    '.node-codeBlock.ProseMirror-selectednode > .code-node',
+  );
+  expect(
+    await code.evaluate((element) => {
+      const overlay = getComputedStyle(element, '::after');
+      const box = getComputedStyle(element);
+      return (
+        overlay.top === '-1px' &&
+        overlay.borderTopLeftRadius === box.borderTopLeftRadius &&
+        box.borderTopLeftRadius === '9px'
+      );
+    }),
+  ).toBe(true);
   expect(
     await code
       .locator('pre')
@@ -187,6 +224,10 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
     'outline-width',
     '1px',
   );
+  await expect(page.locator('.image-node.selected .image-box')).toHaveCSS(
+    'border-radius',
+    '2px',
+  );
   await expect(
     page.getByRole('button', { name: '拖拽调整图片宽度' }),
   ).toBeVisible();
@@ -199,9 +240,18 @@ test('text, lists, tables, code, images, mermaid and source share one blue selec
   expect(await selectedText(page)).toContain('flowchart LR');
   await page.keyboard.press('ControlOrMeta+a');
   expect(await nodeName(page)).toBe('codeBlock');
-  await expect(
-    page.locator('.node-codeBlock.ProseMirror-selectednode'),
-  ).toHaveCSS('outline-color', border);
+  expect(
+    await page
+      .locator('.node-codeBlock.ProseMirror-selectednode > .code-node')
+      .evaluate((element) => {
+        const overlay = getComputedStyle(element, '::after');
+        return (
+          overlay.top === '-1px' &&
+          overlay.borderTopLeftRadius ===
+            getComputedStyle(element).borderTopLeftRadius
+        );
+      }),
+  ).toBe(true);
   expect(
     await page
       .locator('.node-codeBlock.ProseMirror-selectednode pre')

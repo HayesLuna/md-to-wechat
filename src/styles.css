@@ -12,6 +12,7 @@
   --soft: #f5f6f7;
   --selection-background: #c8e1ff;
   --selection-border: #79aaf0;
+  --selection-radius: 3px;
   font-size: 14px;
 }
 * {
@@ -405,7 +406,7 @@ button.primary:hover {
 .article-editor blockquote {
   border-left: 3px solid var(--accent);
   background: #f7f7f6;
-  border-radius: 2px;
+  border-radius: 6px 10px 10px 6px;
   margin: 22px 0;
   padding: 14px 20px;
   color: #77797f;
@@ -477,7 +478,8 @@ button.primary:hover {
   background-color: var(--selection-background);
 }
 .article-editor table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   width: 100%;
   min-width: 350px;
@@ -486,11 +488,19 @@ button.primary:hover {
 }
 .article-editor td,
 .article-editor th {
-  border: 1px solid #dde0e5;
+  border: 0;
+  border-right: 1px solid #dde0e5;
+  border-bottom: 1px solid #dde0e5;
   padding: 9px 13px;
   min-width: 85px;
   vertical-align: top;
   position: relative;
+}
+.article-editor tr > :first-child {
+  border-left: 1px solid #dde0e5;
+}
+.article-editor tr:first-child > * {
+  border-top: 1px solid #dde0e5;
 }
 .article-editor th {
   font-weight: 600;
@@ -504,22 +514,54 @@ button.primary:hover {
   max-width: 100%;
   margin: 20px 0 26px;
 }
+.article-editor .tableWrapper {
+  border-radius: var(--selection-radius);
+}
+.article-editor tr > .selectedCell {
+  border-color: transparent;
+}
 .article-editor .selectedCell:after {
   z-index: 2;
   position: absolute;
   content: '';
-  inset: 0;
+  inset: 0 -1px -1px 0;
+  border-radius: 0;
   background: rgb(200 225 255 / 65%);
   pointer-events: none;
 }
-.article-editor .ProseMirror-selectednode {
+.article-editor tr:first-child > .selectedCell:after {
+  top: -1px;
+}
+.article-editor tr > .selectedCell:first-child:after {
+  left: -1px;
+}
+.article-editor .ProseMirror-selectednode:not(blockquote) {
+  outline: none;
+  border-radius: var(--selection-radius);
+  background-color: var(--selection-background);
+}
+.article-editor blockquote.ProseMirror-selectednode {
   outline: none;
   background-color: var(--selection-background);
 }
 .article-editor .node-codeBlock.ProseMirror-selectednode {
+  border-radius: 0;
   background-color: transparent;
-  outline: 1px solid var(--selection-border);
-  outline-offset: 0;
+  outline: none;
+}
+.article-editor .node-codeBlock.ProseMirror-selectednode > .code-node {
+  position: relative;
+  overflow: visible;
+  border-color: transparent;
+}
+.article-editor .node-codeBlock.ProseMirror-selectednode > .code-node::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border-radius: inherit;
+  background: rgb(200 225 255 / 65%);
+  pointer-events: none;
 }
 .article-editor .ProseMirror-selectednode ::selection,
 .article-editor .ProseMirror-selectednode::selection,
@@ -709,6 +751,7 @@ button.primary:hover {
   border-radius: 2px;
 }
 .image-node.selected .image-box {
+  border-radius: 2px;
   outline: 1px solid var(--selection-border);
   outline-offset: 0;
 }
@@ -2385,6 +2428,7 @@ button.primary:hover {
 .code-node.code-theme-github {
   background: #fff;
   border-color: #e5e7eb;
+  border-radius: 9px;
   overflow: visible;
   position: relative;
 }
