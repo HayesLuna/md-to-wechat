@@ -85,6 +85,7 @@ for (const width of [1440, 390])
           opacity: css.opacity,
           events: css.pointerEvents,
           content: css.content,
+          shadow: css.boxShadow,
         };
       });
     expect(overlay).toEqual({
@@ -92,6 +93,7 @@ for (const width of [1440, 390])
       opacity: '0.65',
       events: 'none',
       content: '""',
+      shadow: 'none',
     });
     const copy = await clipboard(page, 'copy');
     expect(copy.text).toContain('![独立图]');

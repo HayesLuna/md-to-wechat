@@ -948,7 +948,7 @@ test('the divider row is selectable across its width and height without adding t
       expect(await selection(page)).toMatchObject({ type: 'node' });
       expect(await doc(page)).toEqual(original);
       await expect(line).toHaveClass(/ProseMirror-selectednode/);
-      await expect(line).toHaveCSS('background-color', 'rgb(240, 240, 242)');
+      await expect(line).toHaveCSS('background-color', 'rgb(200, 225, 255)');
     }
 
   await page.keyboard.press('Delete');

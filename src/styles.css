@@ -11,6 +11,7 @@
   --paper: #fff;
   --soft: #f5f6f7;
   --selection-background: #c8e1ff;
+  --selection-border: #79aaf0;
   font-size: 14px;
 }
 * {
@@ -473,7 +474,7 @@ button.primary:hover {
 }
 .article-editor hr.ProseMirror-selectednode {
   outline: 0;
-  background-color: #f0f0f2;
+  background-color: var(--selection-background);
 }
 .article-editor table {
   border-collapse: collapse;
@@ -508,12 +509,23 @@ button.primary:hover {
   position: absolute;
   content: '';
   inset: 0;
-  background: #a6493d1c;
+  background: rgb(200 225 255 / 65%);
   pointer-events: none;
 }
-.ProseMirror-selectednode {
-  outline: 2px solid #a6493d44;
-  outline-offset: 3px;
+.article-editor .ProseMirror-selectednode {
+  outline: none;
+  background-color: var(--selection-background);
+}
+.article-editor .node-codeBlock.ProseMirror-selectednode {
+  background-color: transparent;
+  outline: 1px solid var(--selection-border);
+  outline-offset: 0;
+}
+.article-editor .ProseMirror-selectednode ::selection,
+.article-editor .ProseMirror-selectednode::selection,
+.article-editor .selectedCell ::selection,
+.article-editor .selectedCell::selection {
+  background-color: transparent;
 }
 .source-editor {
   display: block;
@@ -697,7 +709,7 @@ button.primary:hover {
   border-radius: 2px;
 }
 .image-node.selected .image-box {
-  outline: 2px solid #a6493d88;
+  outline: 1px solid var(--selection-border);
   outline-offset: 0;
 }
 .image-range-selected .image-box::after {
@@ -706,12 +718,12 @@ button.primary:hover {
   inset: 0;
   border-radius: 2px;
   background: var(--selection-background);
-  box-shadow: inset 0 0 0 1px #79aaf0;
   opacity: 0.65;
   pointer-events: none;
 }
-.node-inlineImage.ProseMirror-selectednode {
+.article-editor .node-inlineImage.ProseMirror-selectednode {
   outline: none;
+  background-color: transparent;
 }
 .resize-handle {
   position: absolute;

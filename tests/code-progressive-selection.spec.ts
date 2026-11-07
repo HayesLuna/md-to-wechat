@@ -70,7 +70,10 @@ for (const key of ['Control+a', 'Meta+a'])
       ).toHaveCount(1);
       await expect(
         page.locator('.node-codeBlock.ProseMirror-selectednode'),
-      ).toHaveCSS('outline-width', '2px');
+      ).toHaveCSS('outline-width', '1px');
+      await expect(
+        page.locator('.node-codeBlock.ProseMirror-selectednode'),
+      ).toHaveCSS('outline-color', 'rgb(121, 170, 240)');
       expect(await copy(page)).toBe(fenced);
       await page.keyboard.press(key);
       expect((await selection(page)).type).toBe('all');
