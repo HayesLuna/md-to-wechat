@@ -130,3 +130,63 @@ test('loading existing automatic draft labels repairs escaped tabs without chang
   await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText('旧标题');
 });
+
+test('hovering an editor heading shows its level without changing the text', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() =>
+    (window as any).__mojian.setMarkdown(
+      '# 一级\n\n## 二级\n\n### 三级\n\n#### 四级\n\n##### 五级\n\n###### 六级',
+    ),
+  );
+  const level = (selector: string) =>
+    page.locator(selector).evaluate((element) => {
+      const style = getComputedStyle(element, '::before');
+      return {
+        content: style.content,
+        opacity: style.opacity,
+        pointerEvents: style.pointerEvents,
+        paddingBottom: style.paddingBottom,
+        transitionDuration: style.transitionDuration,
+      };
+    });
+  expect(await level('.article-editor h1')).toEqual({
+    content: '"H1" / ""',
+    opacity: '0',
+    pointerEvents: 'none',
+    paddingBottom: '8px',
+    transitionDuration: '0.12s',
+  });
+  await expect(page.locator('.article-editor h1')).toHaveAccessibleName('一级');
+  for (const [tag, label, text] of [
+    ['h1', 'H1', '一级'],
+    ['h2', 'H2', '二级'],
+    ['h3', 'H3', '三级'],
+    ['h4', 'H4', '四级'],
+    ['h5', 'H5', '五级'],
+    ['h6', 'H6', '六级'],
+  ] as const) {
+    const selector = `.article-editor ${tag}`;
+    await page.locator(selector).hover();
+    await expect
+      .poll(() => level(selector))
+      .toEqual({
+        content: `"${label}" / ""`,
+        opacity: '1',
+        pointerEvents: 'none',
+        paddingBottom: '8px',
+        transitionDuration: '0.12s',
+      });
+    await expect(page.locator(selector)).toHaveText(text);
+    await expect(page.locator(selector)).toHaveAccessibleName(text);
+  }
+  expect(await level('.article-editor h1')).toMatchObject({ opacity: '0' });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect
+    .poll(() => level('.article-editor h2'))
+    .toMatchObject({
+      transitionDuration: '0s',
+    });
+});

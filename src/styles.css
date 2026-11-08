@@ -404,6 +404,71 @@ button.primary:hover {
   padding-bottom: 8px;
   scroll-margin-top: 24px;
 }
+/* The label stays mounted in the gutter and only fades in, so hovering never
+   changes layout or hit testing. The empty content alt keeps the level out of
+   the accessible name. Touch screens have no hover to dismiss it. */
+@media (hover: hover) and (pointer: fine) {
+  .article-editor :is(h1, h2, h3, h4, h5, h6) {
+    position: relative;
+  }
+  .article-editor :is(h1, h2, h3, h4, h5, h6)::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    margin-right: 4px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    padding-bottom: inherit;
+    font:
+      500 11px/1 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      monospace;
+    letter-spacing: 0;
+    color: #9aa0a8;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 120ms;
+    pointer-events: none;
+    user-select: none;
+  }
+  .article-editor h1::before {
+    content: 'H1' / '';
+  }
+  .article-editor h2::before {
+    content: 'H2' / '';
+  }
+  .article-editor h3::before {
+    content: 'H3' / '';
+  }
+  .article-editor h4::before {
+    content: 'H4' / '';
+  }
+  .article-editor h5::before {
+    content: 'H5' / '';
+  }
+  .article-editor h6::before {
+    content: 'H6' / '';
+  }
+  .article-editor :is(h1, h2, h3, h4, h5, h6):hover::before {
+    opacity: 1;
+  }
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .article-editor :is(h1, h2, h3, h4, h5, h6)::before {
+    transition: none;
+  }
+}
+/* A quoted heading only has the quote padding for a gutter. Shrink the label
+   so it stays inside that padding on the narrow layout. */
+@media (hover: hover) and (pointer: fine) and (max-width: 800px) {
+  .article-editor blockquote :is(h1, h2, h3, h4, h5, h6)::before {
+    margin-right: 2px;
+    font-size: 10px;
+  }
+}
 .article-editor blockquote {
   border-left: 3px solid var(--accent);
   background: #f7f7f6;
