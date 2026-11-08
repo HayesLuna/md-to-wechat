@@ -12,7 +12,8 @@
   --soft: #f5f6f7;
   --selection-background: #c8e1ff;
   --selection-border: #79aaf0;
-  --selection-radius: 9px;
+  --selection-radius: 4px;
+  --code-radius: 9px;
   font-size: 14px;
 }
 * {
@@ -569,7 +570,7 @@ button.primary:hover {
 }
 .code-node {
   border: 1px solid #e2e4e8;
-  border-radius: var(--selection-radius);
+  border-radius: var(--code-radius);
   margin: 20px 0 26px;
   overflow: hidden;
   background: #f8f8f9;
@@ -2406,14 +2407,14 @@ button.primary:hover {
 .code-node.code-theme-github {
   background: #fff;
   border-color: #e5e7eb;
-  border-radius: var(--selection-radius);
+  border-radius: var(--code-radius);
   overflow: visible;
   position: relative;
 }
 .code-theme-github .code-header {
   background: #f6f8fa;
   border-color: #e5e7eb;
-  border-radius: var(--selection-radius) var(--selection-radius) 0 0;
+  border-radius: var(--code-radius) var(--code-radius) 0 0;
 }
 .code-theme-github .code-header input {
   color: #57606a;
@@ -2432,7 +2433,7 @@ button.primary:hover {
 }
 .code-viewport {
   overflow: auto;
-  border-radius: 0 0 var(--selection-radius) var(--selection-radius);
+  border-radius: 0 0 var(--code-radius) var(--code-radius);
   scrollbar-width: thin;
   scrollbar-color: #d0d5db transparent;
   max-height: min(720px, 70vh);
