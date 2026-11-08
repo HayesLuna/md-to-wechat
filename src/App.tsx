@@ -1996,35 +1996,50 @@ export default function App() {
           )}
           {modal.type === 'storage' && diskUsage && (
             <div className="storage-usage">
-              <p>
-                合计{' '}
-                {formatDiskBytes(diskUsage.textBytes + diskUsage.imageBytes)}
-                。正文 {formatDiskBytes(diskUsage.textBytes)}，图片{' '}
-                {formatDiskBytes(diskUsage.imageBytes)}（{diskUsage.imageCount}{' '}
-                张）。
-              </p>
               <ul>
-                {diskUsage.items.map((item) => (
-                  <li key={item.id}>
-                    <span>{item.title}</span>
+                <li>
+                  <span>合计</span>
+                  <span>
+                    {formatDiskBytes(
+                      diskUsage.textBytes + diskUsage.imageBytes,
+                    )}
+                  </span>
+                </li>
+                <li>
+                  <span>正文</span>
+                  <span>{formatDiskBytes(diskUsage.textBytes)}</span>
+                </li>
+                <li>
+                  <span>图片</span>
+                  <span>
+                    {diskUsage.imageCount} 张 ·{' '}
+                    {formatDiskBytes(diskUsage.imageBytes)}
+                  </span>
+                </li>
+                {diskUsage.unusedCount > 0 && (
+                  <li>
+                    <span>未引用</span>
                     <span>
-                      正文 {formatDiskBytes(item.textBytes)}
-                      {item.imageBytes > 0 &&
-                        ` · 图片 ${formatDiskBytes(item.imageBytes)}`}
+                      {diskUsage.unusedCount} 张 ·{' '}
+                      {formatDiskBytes(diskUsage.unusedBytes)}
                     </span>
                   </li>
-                ))}
+                )}
               </ul>
-              <p>
-                未引用图片 {diskUsage.unusedCount} 张，
-                {formatDiskBytes(diskUsage.unusedBytes)}
-                。没有标签页正在编辑时，这些图片会自动清理。
-                {diskUsage.items.reduce(
-                  (sum, item) => sum + item.imageBytes,
-                  0,
-                ) > diskUsage.imageBytes &&
-                  '同一张图片被多篇草稿使用时，会计入每一篇；合计只算一次。'}
-              </p>
+              {diskUsage.items.length > 0 && (
+                <ul>
+                  {diskUsage.items.map((item) => (
+                    <li key={item.id}>
+                      <span>{item.title}</span>
+                      <span>
+                        {formatDiskBytes(item.textBytes)}
+                        {item.imageBytes > 0 &&
+                          ` · 图 ${formatDiskBytes(item.imageBytes)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
           {modal.type === 'help' && (

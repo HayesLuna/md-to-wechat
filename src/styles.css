@@ -1007,13 +1007,14 @@ button.primary:hover {
 }
 .storage-usage {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   margin: 0;
   color: #3c4048;
   font-size: 14px;
 }
-.storage-usage p {
-  margin: 0;
+.storage-usage ul + ul {
+  padding-top: 12px;
+  border-top: 1px solid #eceef0;
 }
 .storage-usage ul {
   display: grid;

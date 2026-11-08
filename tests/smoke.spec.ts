@@ -14,7 +14,7 @@ test('first screen and preview', async ({ page }) => {
   await expect(
     page.getByRole('heading', { name: '本地草稿占用' }),
   ).toBeVisible();
-  await expect(page.locator('.storage-usage')).toContainText('未引用图片');
+  await expect(page.locator('.storage-usage')).toContainText('合计');
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await expect(page.locator('.preview-paper h1')).toHaveText(
