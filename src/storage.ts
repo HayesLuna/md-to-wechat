@@ -558,6 +558,36 @@ export async function importedShareDraft(source: string) {
   return draft;
 }
 
+const PROBE_DELETE_MS = 1000;
+
+function quotaError() {
+  return new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+}
+
+// Returns whether the database is gone. A blocked or failed delete must not
+// keep the caller waiting, and must not replace an earlier quota error.
+function deleteProbe(name: string, database?: IDBDatabase) {
+  return new Promise<boolean>((resolve) => {
+    const request = indexedDB.deleteDatabase(name);
+    let settled = false;
+    const finish = (deleted: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(deleted);
+    };
+    const timer = setTimeout(() => finish(false), PROBE_DELETE_MS);
+    request.onsuccess = () => finish(true);
+    request.onerror = (event) => {
+      event.preventDefault();
+      finish(false);
+    };
+    request.onblocked = () => {
+      database?.close();
+    };
+  });
+}
+
 // Chrome and Safari keep a blob counted after a quota failure rolls back.
 // Prove the images fit in a disposable database first; deleting it releases
 // that reservation without touching saved drafts.
@@ -581,25 +611,15 @@ async function reserveImageQuota(images: { id: string; blob: Blob }[]) {
       const store = tx.objectStore('blobs');
       for (const image of images) store.put(image.blob, image.id);
       tx.oncomplete = () => resolve();
-      tx.onabort = () =>
-        reject(
-          tx.error ??
-            new DOMException(
-              'The quota has been exceeded.',
-              'QuotaExceededError',
-            ),
-        );
+      tx.onabort = () => reject(tx.error ?? quotaError());
     });
   } catch (error) {
     failure = error;
   }
   database?.close();
-  await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(name);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  const deleted = await deleteProbe(name, database);
   if (failure) throw failure;
+  if (!deleted) throw quotaError();
 }
 export async function importSharedDraft(
   draft: Draft,

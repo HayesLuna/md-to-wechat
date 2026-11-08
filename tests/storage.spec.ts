@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 
 test('storage reuses connections, deduplicates image loads and releases connections for upgrades', async ({
@@ -513,25 +514,25 @@ test('the storage dialog clears images left behind in this visit', async ({
   await expect(page.locator('.app-footer')).toContainText('本地');
 });
 
-test('a share import that exceeds browser quota leaves no draft and still allows another save', async ({
-  page,
-}) => {
-  const quota = 160 * 1024;
+async function limitQuota(page: Page, quota = 160 * 1024) {
   await page
     .context()
     .route('**/quota-import', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
     );
   await page.goto('/quota-import');
-  const origin = new URL(page.url()).origin;
-  const limit = async (target: typeof page) => {
-    const client = await target.context().newCDPSession(target);
-    await client.send('Storage.overrideQuotaForOrigin', {
-      origin,
-      quotaSize: quota,
-    });
-  };
-  await limit(page);
+  const client = await page.context().newCDPSession(page);
+  await client.send('Storage.overrideQuotaForOrigin', {
+    origin: new URL(page.url()).origin,
+    quotaSize: quota,
+  });
+}
+
+test('a share import that exceeds browser quota leaves no draft and still allows another save', async ({
+  page,
+}) => {
+  const quota = 160 * 1024;
+  await limitQuota(page, quota);
   const result = await page.evaluate(async () => {
     const storage = await import('/src/storage.ts');
     const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
@@ -589,4 +590,84 @@ test('a share import that exceeds browser quota leaves no draft and still allows
   expect(result.markdown).toBe('# 原来的文章\n\n改过了');
   expect(result.saveError).toBe('');
   expect(result.bytes).toBeLessThan(quota);
+});
+
+test('a quota failure is still reported when the probe database cannot be deleted', async ({
+  page,
+}) => {
+  await limitQuota(page);
+  const result = await page.evaluate(async () => {
+    const original = indexedDB.deleteDatabase.bind(indexedDB);
+    indexedDB.deleteDatabase = ((name?: string) => {
+      if (name?.startsWith('mojian-quota-probe')) {
+        const request = {} as IDBOpenDBRequest;
+        queueMicrotask(() => {
+          Object.defineProperty(request, 'error', {
+            value: new DOMException('delete failed', 'UnknownError'),
+          });
+          request.onerror?.(new Event('error'));
+        });
+        return request;
+      }
+      return original(name!);
+    }) as typeof indexedDB.deleteDatabase;
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const imageId = crypto.randomUUID();
+    const started = performance.now();
+    let errorName = '';
+    try {
+      await storage.importSharedDraft(
+        storage.newDraft(
+          '# 导入\n\n![图](local-image:' + imageId + ')',
+          DEFAULT_SETTINGS,
+        ),
+        [{ id: imageId, blob: new Blob([new Uint8Array(256 * 1024)]) }],
+        'quota-share-delete-error',
+      );
+    } catch (error) {
+      errorName = error instanceof DOMException ? error.name : 'Error';
+    } finally {
+      indexedDB.deleteDatabase = original;
+    }
+    return { errorName, elapsed: performance.now() - started };
+  });
+  expect(result.errorName).toBe('QuotaExceededError');
+  expect(result.elapsed).toBeLessThan(1000);
+});
+
+test('a quota failure does not wait forever when probe deletion is blocked', async ({
+  page,
+}) => {
+  await limitQuota(page);
+  const result = await page.evaluate(async () => {
+    const original = indexedDB.deleteDatabase.bind(indexedDB);
+    indexedDB.deleteDatabase = ((name?: string) => {
+      if (name?.startsWith('mojian-quota-probe')) return {} as IDBOpenDBRequest;
+      return original(name!);
+    }) as typeof indexedDB.deleteDatabase;
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const imageId = crypto.randomUUID();
+    const started = performance.now();
+    let errorName = '';
+    try {
+      await storage.importSharedDraft(
+        storage.newDraft(
+          '# 导入\n\n![图](local-image:' + imageId + ')',
+          DEFAULT_SETTINGS,
+        ),
+        [{ id: imageId, blob: new Blob([new Uint8Array(256 * 1024)]) }],
+        'quota-share-blocked',
+      );
+    } catch (error) {
+      errorName = error instanceof DOMException ? error.name : 'Error';
+    } finally {
+      indexedDB.deleteDatabase = original;
+    }
+    return { errorName, elapsed: performance.now() - started };
+  });
+  expect(result.errorName).toBe('QuotaExceededError');
+  expect(result.elapsed).toBeGreaterThan(900);
+  expect(result.elapsed).toBeLessThan(2500);
 });
