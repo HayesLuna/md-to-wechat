@@ -512,3 +512,81 @@ test('the storage dialog clears images left behind in this visit', async ({
   await expect(page.locator('.storage-usage')).not.toContainText('未引用');
   await expect(page.locator('.app-footer')).toContainText('本地');
 });
+
+test('a share import that exceeds browser quota leaves no draft but blocks later saves in that tab', async ({
+  page,
+}) => {
+  const quota = 160 * 1024;
+  await page
+    .context()
+    .route('**/quota-import', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+    );
+  await page.goto('/quota-import');
+  const origin = new URL(page.url()).origin;
+  const limit = async (target: typeof page) => {
+    const client = await target.context().newCDPSession(target);
+    await client.send('Storage.overrideQuotaForOrigin', {
+      origin,
+      quotaSize: quota,
+    });
+  };
+  await limit(page);
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const existing = storage.newDraft('# 原来的文章\n\n正文', DEFAULT_SETTINGS);
+    await storage.saveDraft(existing);
+    const imageId = crypto.randomUUID();
+    const incoming = storage.newDraft(
+      '# 导入的大文章\n\n![图](local-image:' + imageId + ')',
+      DEFAULT_SETTINGS,
+    );
+    let errorName = '';
+    try {
+      await storage.importSharedDraft(
+        incoming,
+        [{ id: imageId, blob: new Blob([new Uint8Array(256 * 1024)]) }],
+        'quota-share',
+      );
+    } catch (error) {
+      errorName = error instanceof DOMException ? error.name : 'Error';
+    }
+    const saved = await storage.loadDraft(existing.id);
+    let saveError = '';
+    try {
+      await storage.saveDraft(
+        {
+          ...saved!,
+          markdown: '# 原来的文章\n\n改过了',
+          version: saved!.version + 1,
+          savedAt: Date.now(),
+        },
+        saved!.version,
+      );
+    } catch (error) {
+      saveError = error instanceof DOMException ? error.name : 'Error';
+    }
+    const usage = await storage.measureDraftDiskUsage();
+    return {
+      errorName,
+      saveError,
+      imported: !!(await storage.loadDraft(incoming.id)),
+      marked: !!(await storage.importedShareDraft('quota-share')),
+      image: !!(await storage.imageBlob('local-image:' + imageId)),
+      drafts: usage.draftCount,
+      images: usage.imageCount,
+      markdown: (await storage.loadDraft(existing.id))?.markdown,
+      bytes: (await navigator.storage.estimate()).usage ?? 0,
+    };
+  });
+  expect(result.errorName).toBe('QuotaExceededError');
+  expect(result.imported).toBe(false);
+  expect(result.marked).toBe(false);
+  expect(result.image).toBe(false);
+  expect(result.drafts).toBe(1);
+  expect(result.images).toBe(0);
+  expect(result.markdown).toBe('# 原来的文章\n\n正文');
+  expect(result.saveError).toBe('QuotaExceededError');
+  expect(result.bytes).toBeGreaterThan(quota);
+});
