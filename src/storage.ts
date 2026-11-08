@@ -19,17 +19,20 @@ export function summarizeDraft(draft: DraftSummary): DraftSummary {
     draft;
   return { id, title, customTitle, readOnly, version, createdAt, savedAt };
 }
+function imageIdsIn(markdown: string) {
+  return [
+    ...new Set(
+      Array.from(
+        markdown.matchAll(/local-image:([a-zA-Z0-9-]+)/g),
+        (match) => match[1],
+      ),
+    ),
+  ];
+}
 function draftInfo(draft: Draft): DraftInfo {
   return {
     ...summarizeDraft(draft),
-    imageIds: [
-      ...new Set(
-        Array.from(
-          draft.markdown.matchAll(/local-image:([a-zA-Z0-9-]+)/g),
-          (match) => match[1],
-        ),
-      ),
-    ],
+    imageIds: imageIdsIn(draft.markdown),
   };
 }
 export function compareDraftCreation(a: DraftSummary, b: DraftSummary) {
@@ -280,15 +283,71 @@ export async function measureDraftDiskUsage(): Promise<DraftDiskUsage> {
 
 const IMAGE_SESSION_LOCK = 'mojian-image-session';
 
-async function collectUnusedImages() {
+export type UnusedImageCleanup =
+  | { status: 'busy' }
+  | { status: 'unknown' }
+  | { status: 'cleared'; count: number; bytes: number };
+
+// Saved references live in draftInfo. `markdown` adds the open article, including
+// edits that are not saved yet. Undo history is intentionally not scanned.
+async function deleteUnreferencedImages(markdown: string) {
   const database = await db();
   const tx = database.transaction(['draftInfo', 'images'], 'readwrite');
-  const drafts = await tx.objectStore('draftInfo').getAll();
-  const referenced = new Set(drafts.flatMap((draft) => draft.imageIds));
-  const images = tx.objectStore('images');
-  for (const id of await images.getAllKeys())
-    if (!referenced.has(id)) await images.delete(id);
+  const referenced = new Set(
+    (await tx.objectStore('draftInfo').getAll()).flatMap(
+      (item) => item.imageIds,
+    ),
+  );
+  for (const id of imageIdsIn(markdown)) referenced.add(id);
+  let count = 0;
+  let bytes = 0;
+  let cursor = await tx.objectStore('images').openCursor();
+  while (cursor) {
+    if (referenced.has(String(cursor.key))) {
+      cursor = await cursor.continue();
+      continue;
+    }
+    count += 1;
+    bytes += cursor.value.size;
+    await cursor.delete();
+    cursor = await cursor.continue();
+  }
   await tx.done;
+  return { count, bytes };
+}
+
+async function anotherImageSessionOpen(): Promise<boolean | null> {
+  if (!navigator.locks?.query) return null;
+  const probe = `mojian-client-${crypto.randomUUID()}`;
+  try {
+    let clientId = '';
+    await navigator.locks.request(probe, async () => {
+      const snapshot = await navigator.locks.query();
+      clientId =
+        snapshot.held?.find((lock) => lock.name === probe)?.clientId ?? '';
+    });
+    if (!clientId) return null;
+    const snapshot = await navigator.locks.query();
+    return (snapshot.held ?? []).some(
+      (lock) => lock.name === IMAGE_SESSION_LOCK && lock.clientId !== clientId,
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function clearUnreferencedImages(
+  markdown: string,
+): Promise<UnusedImageCleanup> {
+  const others = await anotherImageSessionOpen();
+  if (others === null) return { status: 'unknown' };
+  if (others) return { status: 'busy' };
+  const removed = await deleteUnreferencedImages(markdown);
+  return { status: 'cleared', ...removed };
+}
+
+async function collectUnusedImages() {
+  await deleteUnreferencedImages('');
 }
 
 // Every live editor holds a shared lock, including while it has unsaved edits

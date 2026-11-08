@@ -334,3 +334,181 @@ test('disk usage counts saved text and separates unreferenced images', async ({
   expect(result.usage.items[0]?.imageBytes).toBe(result.used);
   expect(result.usage.items[1]?.imageBytes).toBe(0);
 });
+
+test('clearing unused images keeps saved drafts and the open article', async ({
+  page,
+}) => {
+  await page.route('**/clear-unused', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await page.goto('/clear-unused');
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const savedBlob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    canvas.width = 12;
+    const orphanBlob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    canvas.width = 16;
+    const pendingBlob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    const saved = await storage.storeImage(savedBlob);
+    const orphan = await storage.storeImage(orphanBlob);
+    const pending = await storage.storeImage(pendingBlob);
+    await storage.saveDraft(
+      storage.newDraft('# 占用\n\n![图](' + saved + ')', DEFAULT_SETTINGS),
+    );
+    let imageReads = 0;
+    const get = IDBObjectStore.prototype.get;
+    const getAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.get = function (...args) {
+      if (this.name === 'images') imageReads++;
+      return get.apply(this, args);
+    };
+    IDBObjectStore.prototype.getAll = function (...args) {
+      if (this.name === 'images') imageReads++;
+      return getAll.apply(this, args);
+    };
+    const cleared = await storage.clearUnreferencedImages(
+      '还在写 ![图](' + pending + ')',
+    );
+    const readsDuringClear = imageReads;
+    IDBObjectStore.prototype.get = get;
+    IDBObjectStore.prototype.getAll = getAll;
+    return {
+      cleared,
+      imageReads: readsDuringClear,
+      orphanBytes: orphanBlob.size,
+      saved: !!(await storage.imageBlob(saved)),
+      pending: !!(await storage.imageBlob(pending)),
+      orphan: await storage.imageBlob(orphan),
+    };
+  });
+  expect(result.cleared).toEqual({
+    status: 'cleared',
+    count: 1,
+    bytes: result.orphanBytes,
+  });
+  expect(result.imageReads).toBe(0);
+  expect(result.saved).toBe(true);
+  expect(result.pending).toBe(true);
+  expect(result.orphan).toBeUndefined();
+});
+
+test('the open page can clear images and another page cannot', async ({
+  page,
+  context,
+}) => {
+  await page.route('**/clear-session', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await page.goto('/clear-session');
+  const src = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 8;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    (window as any).__releaseImages = await storage.beginImageSession();
+    await storage.storeImage(blob);
+    const removed = await storage.clearUnreferencedImages('');
+    return { removed, size: blob.size };
+  });
+  expect(src.removed).toEqual({
+    status: 'cleared',
+    count: 1,
+    bytes: src.size,
+  });
+  const other = await context.newPage();
+  await other.route('**/clear-session', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await other.goto('/clear-session');
+  const blocked = await other.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 9;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    const orphan = await storage.storeImage(blob);
+    const result = await storage.clearUnreferencedImages('');
+    return { result, orphan: !!(await storage.imageBlob(orphan)) };
+  });
+  expect(blocked.result).toEqual({ status: 'busy' });
+  expect(blocked.orphan).toBe(true);
+  await page.evaluate(() => (window as any).__releaseImages());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () => (await navigator.locks.query()).held?.length || 0,
+      ),
+    )
+    .toBe(0);
+  const cleared = await other.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const result = await storage.clearUnreferencedImages('');
+    return {
+      status: result.status,
+      images: (await storage.measureDraftDiskUsage()).imageCount,
+    };
+  });
+  expect(cleared).toEqual({ status: 'cleared', images: 0 });
+});
+
+test('cleanup waits when the browser cannot check other pages', async ({
+  page,
+}) => {
+  await page.route('**/clear-without-locks', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await page.goto('/clear-without-locks');
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 8;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    const src = await storage.storeImage(blob);
+    Object.defineProperty(navigator, 'locks', { value: undefined });
+    const cleared = await storage.clearUnreferencedImages('');
+    return { cleared, remains: !!(await storage.imageBlob(src)) };
+  });
+  expect(result.cleared).toEqual({ status: 'unknown' });
+  expect(result.remains).toBe(true);
+});
+
+test('the storage dialog clears images left behind in this visit', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(
+    page.getByRole('button', { name: '查看本地草稿占用' }),
+  ).toBeVisible();
+  await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 8;
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    await storage.storeImage(blob);
+  });
+  await page.getByRole('button', { name: '展开侧栏' }).click();
+  await page.getByRole('button', { name: '切换到草稿' }).click();
+  await page.getByRole('button', { name: '新建文章' }).click();
+  await page.getByRole('button', { name: '查看本地草稿占用' }).click();
+  await expect(page.locator('.storage-usage')).toContainText('未引用');
+  await page.getByRole('button', { name: '清理未引用图片' }).click();
+  await expect(page.locator('.storage-usage')).not.toContainText('未引用');
+  await expect(page.locator('.app-footer')).toContainText('本地');
+});

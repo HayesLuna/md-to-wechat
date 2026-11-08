@@ -1037,8 +1037,24 @@ button.primary:hover {
   white-space: nowrap;
 }
 .storage-usage li span:last-child {
+  display: flex;
   flex: none;
+  align-items: center;
+  gap: 10px;
   color: #7e838d;
+}
+.storage-usage .storage-clear {
+  min-height: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #3d6fad;
+  font: inherit;
+  line-height: inherit;
+}
+.storage-usage .storage-clear:hover {
+  background: transparent;
+  text-decoration: underline;
 }
 .app-footer .version-label {
   font: inherit;

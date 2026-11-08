@@ -49,6 +49,7 @@ import {
   type Draft,
   storeImage,
   measureDraftDiskUsage,
+  clearUnreferencedImages,
   type DraftDiskUsage,
   download,
   downloadImage,
@@ -171,6 +172,10 @@ export default function App() {
   const [media, setMedia] = useState<MediaPreviewItem | null>(null);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [diskUsage, setDiskUsage] = useState<DraftDiskUsage | null>(null);
+  const [clearingImages, setClearingImages] = useState(false);
+  const clearingImagesRef = useRef(false);
+  const diskTicket = useRef(0);
+  const diskReads = useRef(0);
   const draftOrder = useRef(drafts);
   draftOrder.current = drafts;
   const reorderQueue = useRef<Promise<void>>(Promise.resolve());
@@ -225,12 +230,17 @@ export default function App() {
     activate,
   } = useDraftSession({ editor: latestEditor, notify, setDrafts });
   useEffect(() => {
+    const ticket = ++diskTicket.current;
     let active = true;
+    diskReads.current += 1;
     measureDraftDiskUsage()
       .then((usage) => {
-        if (active) setDiskUsage(usage);
+        if (active && ticket === diskTicket.current) setDiskUsage(usage);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        diskReads.current -= 1;
+      });
     return () => {
       active = false;
     };
@@ -308,6 +318,56 @@ export default function App() {
   const [label, setLabel] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [processing, setProcessing] = useState(false);
+  const clearUnusedImages = async () => {
+    if (clearingImagesRef.current) return;
+    if (switchingRef.current) {
+      notify('文章正在切换，请稍后再清理。');
+      return;
+    }
+    if (processing) {
+      notify('图片正在保存，请稍后再清理。');
+      return;
+    }
+    clearingImagesRef.current = true;
+    setClearingImages(true);
+    try {
+      const result = await clearUnreferencedImages(readCurrent().markdown);
+      if (result.status === 'busy') {
+        notify('还有其他页面打开，请先关闭后再清理。');
+        return;
+      }
+      if (result.status === 'unknown') {
+        notify('无法确认其他页面是否打开，未清理。');
+        return;
+      }
+      const removedCount = result.count;
+      const removedBytes = result.bytes;
+      if (diskReads.current > 0) {
+        const ticket = ++diskTicket.current;
+        const usage = await measureDraftDiskUsage();
+        if (ticket === diskTicket.current) setDiskUsage(usage);
+      } else {
+        diskTicket.current += 1;
+        setDiskUsage((usage) =>
+          usage
+            ? {
+                ...usage,
+                imageCount: Math.max(0, usage.imageCount - removedCount),
+                imageBytes: Math.max(0, usage.imageBytes - removedBytes),
+                unusedCount: Math.max(0, usage.unusedCount - removedCount),
+                unusedBytes: Math.max(0, usage.unusedBytes - removedBytes),
+              }
+            : usage,
+        );
+      }
+      if (removedCount === 0) notify('这些图片仍在当前正文中。');
+    } catch {
+      notify('清理未完成，请重试。');
+    } finally {
+      clearingImagesRef.current = false;
+      setClearingImages(false);
+    }
+  };
   const [copying, setCopying] = useState(false);
   const target = useRef<ReturnType<typeof captureTarget> | null>(null);
   const imageRequest = useRef(0);
@@ -861,6 +921,10 @@ export default function App() {
     fromPaste = false,
     image?: JSONContent,
   ) => {
+    if (clearingImagesRef.current) {
+      notify('正在清理未引用图片，请稍后再插入。');
+      return;
+    }
     if (processing || !editor || readOnlyRef.current) return;
     if (fromPaste) {
       target.current?.cancel();
@@ -2022,6 +2086,15 @@ export default function App() {
                     <span>
                       {diskUsage.unusedCount} 张 ·{' '}
                       {formatDiskBytes(diskUsage.unusedBytes)}
+                      <button
+                        type="button"
+                        className="storage-clear"
+                        aria-label="清理未引用图片"
+                        disabled={clearingImages}
+                        onClick={() => void clearUnusedImages()}
+                      >
+                        清理
+                      </button>
                     </span>
                   </li>
                 )}
