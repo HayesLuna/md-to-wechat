@@ -150,6 +150,7 @@ test('hovering an editor heading shows its level without changing the text', asy
         pointerEvents: style.pointerEvents,
         paddingBottom: style.paddingBottom,
         transitionDuration: style.transitionDuration,
+        fontSize: style.fontSize,
       };
     });
   expect(await level('.article-editor h1')).toEqual({
@@ -158,6 +159,7 @@ test('hovering an editor heading shows its level without changing the text', asy
     pointerEvents: 'none',
     paddingBottom: '8px',
     transitionDuration: '0.12s',
+    fontSize: '12px',
   });
   await expect(page.locator('.article-editor h1')).toHaveAccessibleName('一级');
   for (const [tag, label, text] of [
@@ -168,21 +170,52 @@ test('hovering an editor heading shows its level without changing the text', asy
     ['h5', 'H5', '五级'],
     ['h6', 'H6', '六级'],
   ] as const) {
-    const selector = `.article-editor ${tag}`;
+    const selector = `.article-editor > ${tag}`;
     await page.locator(selector).hover();
     await expect
       .poll(() => level(selector))
-      .toEqual({
+      .toMatchObject({
         content: `"${label}" / ""`,
         opacity: '1',
         pointerEvents: 'none',
         paddingBottom: '8px',
         transitionDuration: '0.12s',
+        fontSize: '12px',
       });
     await expect(page.locator(selector)).toHaveText(text);
     await expect(page.locator(selector)).toHaveAccessibleName(text);
   }
-  expect(await level('.article-editor h1')).toMatchObject({ opacity: '0' });
+  expect(await level('.article-editor > h1')).toMatchObject({ opacity: '0' });
+  await page.evaluate(() =>
+    (window as any).__mojian.setMarkdown('# 一级\n\n> ## 引用标题'),
+  );
+  const fits = (selector: string) =>
+    page.locator(selector).evaluate((element) => {
+      const label = getComputedStyle(element, '::before');
+      const needed = parseFloat(label.width) + parseFloat(label.marginRight);
+      const box = element.getBoundingClientRect();
+      const quote = element.closest('blockquote');
+      const host = element.closest('.editor-host')!.getBoundingClientRect();
+      const limit = quote
+        ? quote.getBoundingClientRect().left +
+          parseFloat(getComputedStyle(quote).borderLeftWidth)
+        : host.left;
+      return box.left - needed >= limit - 0.5;
+    });
+  for (const [width, height] of [
+    [1440, 1000],
+    [800, 900],
+    [380, 800],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const selector of [
+      '.article-editor > h1',
+      '.article-editor blockquote h2',
+    ]) {
+      await page.locator(selector).hover();
+      expect(await fits(selector), `${selector} at ${width}px`).toBe(true);
+    }
+  }
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect
     .poll(() => level('.article-editor h2'))

@@ -422,7 +422,7 @@ button.primary:hover {
     box-sizing: border-box;
     padding-bottom: inherit;
     font:
-      500 11px/1 ui-monospace,
+      400 12px/1 ui-monospace,
       SFMono-Regular,
       Menlo,
       monospace;
@@ -461,20 +461,12 @@ button.primary:hover {
     transition: none;
   }
 }
-/* A quoted heading only has the quote padding for a gutter. Shrink the label
-   so it stays inside that padding on the narrow layout. */
-@media (hover: hover) and (pointer: fine) and (max-width: 800px) {
-  .article-editor blockquote :is(h1, h2, h3, h4, h5, h6)::before {
-    margin-right: 2px;
-    font-size: 10px;
-  }
-}
 .article-editor blockquote {
   border-left: 3px solid var(--accent);
   background: #f7f7f6;
   border-radius: var(--selection-radius);
   margin: 22px 0;
-  padding: 14px 20px;
+  padding: 14px 20px 14px 24px;
   color: #77797f;
 }
 .article-editor blockquote p {
@@ -1561,7 +1553,7 @@ button.primary:hover {
     font-size: 18px;
   }
   .article-editor blockquote {
-    padding: 12px 15px;
+    padding: 12px 15px 12px 24px;
   }
   .app-footer {
     height: 30px;
@@ -1625,7 +1617,7 @@ button.primary:hover {
     font-size: 10px;
   }
   .editor-host {
-    padding: 22px 18px 70px;
+    padding: 22px 18px 70px 24px;
   }
   .article-editor h1 {
     font-size: 24px;
