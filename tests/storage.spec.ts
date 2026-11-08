@@ -13,7 +13,7 @@ test('storage reuses connections, deduplicates image loads and releases connecti
     const open = indexedDB.open.bind(indexedDB);
     let opens = 0;
     indexedDB.open = ((...args: Parameters<typeof open>) => {
-      opens++;
+      if (args[0] === 'mojian-v1') opens++;
       return open(...args);
     }) as typeof open;
     const canvas = document.createElement('canvas');
@@ -513,7 +513,7 @@ test('the storage dialog clears images left behind in this visit', async ({
   await expect(page.locator('.app-footer')).toContainText('本地');
 });
 
-test('a share import that exceeds browser quota leaves no draft but blocks later saves in that tab', async ({
+test('a share import that exceeds browser quota leaves no draft and still allows another save', async ({
   page,
 }) => {
   const quota = 160 * 1024;
@@ -586,7 +586,7 @@ test('a share import that exceeds browser quota leaves no draft but blocks later
   expect(result.image).toBe(false);
   expect(result.drafts).toBe(1);
   expect(result.images).toBe(0);
-  expect(result.markdown).toBe('# 原来的文章\n\n正文');
-  expect(result.saveError).toBe('QuotaExceededError');
-  expect(result.bytes).toBeGreaterThan(quota);
+  expect(result.markdown).toBe('# 原来的文章\n\n改过了');
+  expect(result.saveError).toBe('');
+  expect(result.bytes).toBeLessThan(quota);
 });

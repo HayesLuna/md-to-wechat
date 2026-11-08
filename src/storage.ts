@@ -442,6 +442,7 @@ export async function storeImage(file: Blob) {
   const bitmap = await createImageBitmap(file);
   bitmap.close();
   const id = crypto.randomUUID();
+  await reserveImageQuota([{ id, blob: file }]);
   await (await db()).put('images', file, id);
   return 'local-image:' + id;
 }
@@ -557,11 +558,55 @@ export async function importedShareDraft(source: string) {
   return draft;
 }
 
+// Chrome and Safari keep a blob counted after a quota failure rolls back.
+// Prove the images fit in a disposable database first; deleting it releases
+// that reservation without touching saved drafts.
+async function reserveImageQuota(images: { id: string; blob: Blob }[]) {
+  if (!images.length) return;
+  const name = `mojian-quota-probe-${crypto.randomUUID()}`;
+  const open = indexedDB.open(name, 1);
+  open.onupgradeneeded = () => {
+    if (!open.result.objectStoreNames.contains('blobs'))
+      open.result.createObjectStore('blobs');
+  };
+  let database: IDBDatabase | undefined;
+  let failure: unknown;
+  try {
+    database = await new Promise<IDBDatabase>((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = database!.transaction('blobs', 'readwrite');
+      const store = tx.objectStore('blobs');
+      for (const image of images) store.put(image.blob, image.id);
+      tx.oncomplete = () => resolve();
+      tx.onabort = () =>
+        reject(
+          tx.error ??
+            new DOMException(
+              'The quota has been exceeded.',
+              'QuotaExceededError',
+            ),
+        );
+    });
+  } catch (error) {
+    failure = error;
+  }
+  database?.close();
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+  if (failure) throw failure;
+}
 export async function importSharedDraft(
   draft: Draft,
   images: { id: string; blob: Blob }[],
   source: string,
 ) {
+  if (!(await importedShareDraft(source))) await reserveImageQuota(images);
   const database = await db();
   const tx = database.transaction(
     ['draft', 'draftInfo', 'images', 'meta'],
