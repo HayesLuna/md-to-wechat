@@ -205,6 +205,78 @@ export async function saveDraftOrder(ids: string[]) {
 export async function loadDraft(id: string) {
   return (await db()).get('draft', id);
 }
+export type DraftDiskItem = {
+  id: string;
+  title: string;
+  textBytes: number;
+  imageBytes: number;
+};
+export type DraftDiskUsage = {
+  draftCount: number;
+  textBytes: number;
+  imageCount: number;
+  imageBytes: number;
+  unusedCount: number;
+  unusedBytes: number;
+  items: DraftDiskItem[];
+};
+// Saved drafts only. Image bytes come from Blob metadata, not file contents.
+export async function measureDraftDiskUsage(): Promise<DraftDiskUsage> {
+  const database = await db();
+  const tx = database.transaction(['draft', 'draftInfo', 'images']);
+  const info = await tx.objectStore('draftInfo').getAll();
+  const referenced = new Set(info.flatMap((item) => item.imageIds));
+  const imagesByDraft = new Map(info.map((item) => [item.id, item.imageIds]));
+  const sizes = new Map<string, number>();
+  let imageCount = 0;
+  let imageBytes = 0;
+  let unusedCount = 0;
+  let unusedBytes = 0;
+  let imageCursor = await tx.objectStore('images').openCursor();
+  while (imageCursor) {
+    const size = imageCursor.value.size;
+    const id = String(imageCursor.key);
+    sizes.set(id, size);
+    imageCount++;
+    imageBytes += size;
+    if (!referenced.has(id)) {
+      unusedCount++;
+      unusedBytes += size;
+    }
+    imageCursor = await imageCursor.continue();
+  }
+  const encoder = new TextEncoder();
+  const items: DraftDiskItem[] = [];
+  let textBytes = 0;
+  let cursor = await tx.objectStore('draft').openCursor();
+  while (cursor) {
+    const bytes = encoder.encode(cursor.value.markdown).length;
+    textBytes += bytes;
+    const imageBytesForDraft = (
+      imagesByDraft.get(cursor.value.id) ?? []
+    ).reduce((sum, id) => sum + (sizes.get(id) ?? 0), 0);
+    items.push({
+      id: cursor.value.id,
+      title: cursor.value.title || '未命名文章',
+      textBytes: bytes,
+      imageBytes: imageBytesForDraft,
+    });
+    cursor = await cursor.continue();
+  }
+  items.sort(
+    (a, b) => b.textBytes + b.imageBytes - (a.textBytes + a.imageBytes),
+  );
+  await tx.done;
+  return {
+    draftCount: items.length,
+    textBytes,
+    imageCount,
+    imageBytes,
+    unusedCount,
+    unusedBytes,
+    items,
+  };
+}
 
 const IMAGE_SESSION_LOCK = 'mojian-image-session';
 

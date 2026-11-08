@@ -9,6 +9,13 @@ test('first screen and preview', async ({ page }) => {
   await expect(page.locator('.article-editor h1')).toHaveText(
     '写作，从一张白纸开始',
   );
+  await expect(page.locator('.app-footer')).toContainText('本地');
+  await page.getByRole('button', { name: '查看本地草稿占用' }).click();
+  await expect(
+    page.getByRole('heading', { name: '本地草稿占用' }),
+  ).toBeVisible();
+  await expect(page.locator('.storage-usage')).toContainText('未引用图片');
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await expect(page.locator('.preview-paper h1')).toHaveText(
     '写作，从一张白纸开始',

@@ -48,6 +48,8 @@ import {
   saveDraftOrder,
   type Draft,
   storeImage,
+  measureDraftDiskUsage,
+  type DraftDiskUsage,
   download,
   downloadImage,
   imageExists,
@@ -120,7 +122,7 @@ import {
   addCenteredTablePart,
 } from './editorExtensions';
 type Modal =
-  | { type: 'link' | 'image' | 'assets' | 'downloads' | 'help' }
+  | { type: 'link' | 'image' | 'assets' | 'downloads' | 'help' | 'storage' }
   | { type: 'confirm'; title: string; message: string; action: () => void }
   | { type: 'rename'; draft: DraftSummary };
 function placeDraft(
@@ -157,9 +159,18 @@ function alignDraftIds(items: DraftSummary[], ids: string[]) {
   });
   return [...items.filter((item) => byId.has(item.id)), ...known];
 }
+function formatDiskBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) {
+    const value = bytes / 1024;
+    return `${value < 10 ? value.toFixed(1) : Math.round(value)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 export default function App() {
   const [media, setMedia] = useState<MediaPreviewItem | null>(null);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [diskUsage, setDiskUsage] = useState<DraftDiskUsage | null>(null);
   const draftOrder = useRef(drafts);
   draftOrder.current = drafts;
   const reorderQueue = useRef<Promise<void>>(Promise.resolve());
@@ -213,6 +224,17 @@ export default function App() {
     saveNow,
     activate,
   } = useDraftSession({ editor: latestEditor, notify, setDrafts });
+  useEffect(() => {
+    let active = true;
+    measureDraftDiskUsage()
+      .then((usage) => {
+        if (active) setDiskUsage(usage);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [drafts]);
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   useLayoutEffect(() => {
@@ -1554,6 +1576,20 @@ export default function App() {
           字数：{words.toLocaleString()}
           <i />
           预计阅读：{Math.max(1, Math.ceil(words / 500))} 分钟
+          {diskUsage && (
+            <>
+              <i />
+              <button
+                type="button"
+                className="disk-usage"
+                aria-label="查看本地草稿占用"
+                onClick={() => setModal({ type: 'storage' })}
+              >
+                本地{' '}
+                {formatDiskBytes(diskUsage.textBytes + diskUsage.imageBytes)}
+              </button>
+            </>
+          )}
         </span>
         <span>
           <LockKeyhole size={12} />
@@ -1768,11 +1804,13 @@ export default function App() {
                     ? '下载本地图片'
                     : modal.type === 'help'
                       ? '写作说明'
-                      : modal.type === 'confirm'
-                        ? modal.title
-                        : modal.type === 'rename'
-                          ? '重命名文章'
-                          : '操作'
+                      : modal.type === 'storage'
+                        ? '本地草稿占用'
+                        : modal.type === 'confirm'
+                          ? modal.title
+                          : modal.type === 'rename'
+                            ? '重命名文章'
+                            : '操作'
           }
           onClose={closeModal}
         >
@@ -1955,6 +1993,39 @@ export default function App() {
                 </button>
               </div>
             </>
+          )}
+          {modal.type === 'storage' && diskUsage && (
+            <div className="storage-usage">
+              <p>
+                合计{' '}
+                {formatDiskBytes(diskUsage.textBytes + diskUsage.imageBytes)}
+                。正文 {formatDiskBytes(diskUsage.textBytes)}，图片{' '}
+                {formatDiskBytes(diskUsage.imageBytes)}（{diskUsage.imageCount}{' '}
+                张）。
+              </p>
+              <ul>
+                {diskUsage.items.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.title}</span>
+                    <span>
+                      正文 {formatDiskBytes(item.textBytes)}
+                      {item.imageBytes > 0 &&
+                        ` · 图片 ${formatDiskBytes(item.imageBytes)}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p>
+                未引用图片 {diskUsage.unusedCount} 张，
+                {formatDiskBytes(diskUsage.unusedBytes)}
+                。没有标签页正在编辑时，这些图片会自动清理。
+                {diskUsage.items.reduce(
+                  (sum, item) => sum + item.imageBytes,
+                  0,
+                ) > diskUsage.imageBytes &&
+                  '同一张图片被多篇草稿使用时，会计入每一篇；合计只算一次。'}
+              </p>
+            </div>
           )}
           {modal.type === 'help' && (
             <div className="help-content">

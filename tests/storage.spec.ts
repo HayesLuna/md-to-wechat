@@ -287,3 +287,50 @@ test('current draft library and image collection never reread article bodies', a
     image: true,
   });
 });
+
+test('disk usage counts saved text and separates unreferenced images', async ({
+  page,
+}) => {
+  await page.route('**/storage-usage', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+  );
+  await page.goto('/storage-usage');
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/storage.ts');
+    const { DEFAULT_SETTINGS } = await import('/src/sample.ts');
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const used = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    canvas.width = 12;
+    const unused = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((value) => resolve(value!)),
+    );
+    const src = await storage.storeImage(used);
+    await storage.storeImage(unused);
+    const markdown = '# 占用\n\n![图](' + src + ')';
+    await storage.saveDraft(storage.newDraft(markdown, DEFAULT_SETTINGS));
+    await storage.saveDraft(storage.newDraft('没有图片', DEFAULT_SETTINGS));
+    const usage = await storage.measureDraftDiskUsage();
+    return {
+      usage,
+      textBytes: new TextEncoder().encode(markdown + '没有图片').length,
+      used: used.size,
+      unused: unused.size,
+    };
+  });
+  expect(result.usage.draftCount).toBe(2);
+  expect(result.usage.textBytes).toBe(result.textBytes);
+  expect(result.usage.imageCount).toBe(2);
+  expect(result.usage.imageBytes).toBe(result.used + result.unused);
+  expect(result.usage.unusedCount).toBe(1);
+  expect(result.usage.unusedBytes).toBe(result.unused);
+  expect(result.usage.items.map((item) => item.title)).toEqual([
+    '占用',
+    '未命名文章',
+  ]);
+  expect(result.usage.items[0]?.imageBytes).toBe(result.used);
+  expect(result.usage.items[1]?.imageBytes).toBe(0);
+});

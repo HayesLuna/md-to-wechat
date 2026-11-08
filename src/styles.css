@@ -996,6 +996,49 @@ button.primary:hover {
   color: #7e838d;
   padding: 3px;
 }
+.app-footer .disk-usage {
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.app-footer .disk-usage:hover {
+  color: #3c4048;
+  text-decoration: underline;
+}
+.storage-usage {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  color: #3c4048;
+  font-size: 14px;
+}
+.storage-usage p {
+  margin: 0;
+}
+.storage-usage ul {
+  display: grid;
+  gap: 8px;
+  max-height: min(360px, 50vh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.storage-usage li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.storage-usage li span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storage-usage li span:last-child {
+  flex: none;
+  color: #7e838d;
+}
 .app-footer .version-label {
   font: inherit;
   min-width: 0;
