@@ -92,12 +92,27 @@ export function diagram(source: string, signal?: AbortSignal): Promise<string> {
       const m = await engine;
       if (!created.users)
         throw new DOMException('图形任务已取消', 'AbortError');
-      const result = await m.render('mojian-' + crypto.randomUUID(), source);
-      return DOMPurify.sanitize(result.svg, {
-        USE_PROFILES: { svg: true, svgFilters: true },
-        FORBID_TAGS: ['foreignObject', 'script'],
-        FORBID_ATTR: ['onload', 'onclick'],
-      });
+      // Mermaid needs attached DOM for SVG measurement. Its default body child
+      // briefly adds page scrollbars, shifting the whole app horizontally.
+      const container = document.createElement('div');
+      container.setAttribute('aria-hidden', 'true');
+      container.style.cssText =
+        'position:fixed;top:0;left:0;width:100%;height:0;overflow:hidden;visibility:hidden;pointer-events:none';
+      document.body.append(container);
+      try {
+        const result = await m.render(
+          'mojian-' + crypto.randomUUID(),
+          source,
+          container,
+        );
+        return DOMPurify.sanitize(result.svg, {
+          USE_PROFILES: { svg: true, svgFilters: true },
+          FORBID_TAGS: ['foreignObject', 'script'],
+          FORBID_ATTR: ['onload', 'onclick'],
+        });
+      } finally {
+        container.remove();
+      }
     });
     created.promise = pending.then(
       (svg) => {

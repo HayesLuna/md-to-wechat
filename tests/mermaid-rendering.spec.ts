@@ -240,3 +240,38 @@ test('offscreen diagrams do not load Mermaid until scrolled near the viewport', 
   await expect(page.locator('.diagram svg')).toBeVisible();
   expect(engines).toHaveLength(1);
 });
+
+test('lazy Mermaid rendering keeps page bounds and article horizontal position stable', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const samples = await page.evaluate(async () => {
+    (window as any).__mojian.setMarkdown(
+      '# 稳定位置\n\n```mermaid\nflowchart TD\n' +
+        Array.from({ length: 12 }, (_, i) => `A${i} --> A${i + 1}`).join('\n') +
+        '\n```',
+    );
+    const samples: { width: number; height: number; x: number }[] = [];
+    do {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const heading = document.querySelector('.article-editor h1');
+      if (heading)
+        samples.push({
+          width: document.documentElement.scrollWidth,
+          height: document.documentElement.scrollHeight,
+          x: heading.getBoundingClientRect().x,
+        });
+    } while (!document.querySelector('.diagram svg'));
+    return samples;
+  });
+  expect(samples.length).toBeGreaterThan(1);
+  const viewport = page.viewportSize()!;
+  for (const sample of samples) {
+    expect(sample.width).toBe(viewport.width);
+    expect(sample.height).toBe(viewport.height);
+    expect(sample.x).toBe(samples[0].x);
+  }
+});
