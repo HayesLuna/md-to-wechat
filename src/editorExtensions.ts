@@ -935,6 +935,19 @@ export const EditingRules = Extension.create({
             ) {
               return this.editor.commands.lift('blockquote');
             }
+            if (
+              event.key === 'Backspace' &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey &&
+              !event.shiftKey &&
+              selection instanceof TextSelection &&
+              selection.empty &&
+              $from.parentOffset === 0 &&
+              $from.parent.type.name === 'heading'
+            ) {
+              return this.editor.commands.setParagraph();
+            }
             // Typora-style quote editing: Backspace joins an interior paragraph with
             // the previous block. Enter lifts an empty paragraph out of the quote.
             // Bypass Blockquote's default Backspace handler, which lifts/splits instead.

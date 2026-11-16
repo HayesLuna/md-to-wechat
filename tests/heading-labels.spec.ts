@@ -223,3 +223,80 @@ test('hovering an editor heading shows its level without changing the text', asy
       transitionDuration: '0s',
     });
 });
+
+for (const [context, prefix, quote] of [
+  ['after Mermaid', '```mermaid\nflowchart LR\nA --> B\n```\n\n', ''],
+  ['after prose', '前文\n\n', ''],
+  ['at document start', '', ''],
+  ['inside a quote', '> 前文\n>\n', '> '],
+] as const)
+  test(`Backspace at heading start ${context} converts only the heading to prose`, async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error' || message.type() === 'warning')
+        errors.push(message.text());
+    });
+    await page.goto('/');
+    await expect(page).toHaveURL('/');
+    await expect(page).toHaveTitle('墨笺 · Markdown 公众号排版');
+    await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    for (let level = 1; level <= 6; level++) {
+      await page.evaluate(
+        (markdown) => (window as any).__mojian.setMarkdown(markdown),
+        `${prefix}${quote}${'#'.repeat(level)} **微**信`,
+      );
+      if (context === 'after Mermaid')
+        await expect(page.locator('.diagram svg')).toBeVisible();
+      const before = await page.evaluate(() => {
+        const editor = (window as any).__mojian.editor;
+        let start = 0;
+        editor.state.doc.descendants((node: any, pos: number) => {
+          if (node.type.name === 'heading') start = pos + 1;
+        });
+        editor.commands.setTextSelection(start);
+        editor.commands.focus();
+        return { document: editor.getJSON(), start };
+      });
+      await expect(page.locator('.article-editor')).toBeFocused();
+      await page.keyboard.press('Backspace');
+      const expected = structuredClone(before.document);
+      const parent = quote ? expected.content[0] : expected;
+      const heading = parent.content.find(
+        (node: any) => node.type === 'heading',
+      );
+      heading.type = 'paragraph';
+      delete heading.attrs;
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as any).__mojian.editor.getJSON()),
+        )
+        .toEqual(expected);
+      await expect(
+        page.locator('.article-editor p').filter({ hasText: /^微信$/ }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          (window as any).__mojian.editor.state.selection.toJSON(),
+        ),
+      ).toMatchObject({
+        type: 'text',
+        anchor: before.start,
+        head: before.start,
+      });
+      if (context === 'after Mermaid' && level === 2)
+        await page.screenshot({ path: '/tmp/mojian-heading-backspace.png' });
+      await page.keyboard.press('ControlOrMeta+z');
+      expect(
+        await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
+      ).toEqual(before.document);
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      expect(
+        await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
+      ).toEqual(expected);
+    }
+    expect(errors).toEqual([]);
+  });
