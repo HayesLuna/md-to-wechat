@@ -60,7 +60,7 @@ for (const [name, text] of [
     ).toBe(from + 3);
   });
 
-test('GitHub colors agree in editor and preview, preview has line numbers, and Mermaid stays light', async ({
+test('GitHub colors agree in editor and preview, preview omits editor line numbers, and Mermaid stays light', async ({
   page,
 }) => {
   await ready(
@@ -108,11 +108,8 @@ test('GitHub colors agree in editor and preview, preview has line numbers, and M
     'rgb(3, 47, 98)',
   );
   await expect(card.locator('[data-code-line]')).toHaveCount(3);
-  await expect(card.locator('[data-code-line-number]')).toHaveText([
-    '1\u00a0\u00a0',
-    '2\u00a0\u00a0',
-    '3\u00a0\u00a0',
-  ]);
+  await expect(code.locator('.code-gutter-row')).toHaveCount(3);
+  await expect(card.locator('[data-code-line-number]')).toHaveCount(0);
   expect(
     await card
       .locator('[data-code-line]')
@@ -120,43 +117,7 @@ test('GitHub colors agree in editor and preview, preview has line numbers, and M
       .evaluate((el) => getComputedStyle(el, '::before').content),
   ).toBe('none');
 });
-test('preview line number width follows digit boundaries and shrinks after editing', async ({
-  page,
-}) => {
-  await ready(page, '```text\nline\n```');
-  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-  const card = page.locator('.preview-paper [data-code-block]');
-  const widths: number[] = [];
-  for (const count of [9, 10, 99, 100, 999, 1000, 9]) {
-    await page.evaluate((count) => {
-      (window as any).__mojian.setMarkdown(
-        '```text\n' + Array(count).fill('line').join('\n') + '\n```',
-      );
-    }, count);
-    await expect(card.locator('[data-code-line]')).toHaveCount(count);
-    const geometry = await card.evaluate((el) => {
-      const lines = el.querySelectorAll('[data-code-line]');
-      const first = lines[0];
-      const last = lines[lines.length - 1];
-      const number = first.previousElementSibling!;
-      return {
-        width:
-          number.getBoundingClientRect().width -
-          parseFloat(getComputedStyle(number).paddingLeft),
-        first: first.firstElementChild!.getBoundingClientRect().left,
-        last: last.firstElementChild!.getBoundingClientRect().left,
-      };
-    });
-    expect(geometry.first).toBeCloseTo(geometry.last, 1);
-    widths.push(geometry.width);
-  }
-  const unit = widths[0] / 3;
-  expect(unit).toBeGreaterThan(0);
-  for (const [i, digits] of [1, 2, 2, 3, 3, 4, 1].entries())
-    expect(widths[i]).toBeCloseTo(unit * (digits + 2), 1);
-});
-
-test('preview line numbers stay fixed and aligned while long code scrolls in both themes', async ({
+test('preview keeps long code horizontally scrollable in both themes', async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -178,35 +139,17 @@ test('preview line numbers stay fixed and aligned while long code scrolls in bot
       await card.scrollIntoViewIfNeeded();
       const scroll = card.locator('[data-code-scroll]');
       await scroll.evaluate((el) => (el.scrollLeft = 0));
-      const positions = () =>
-        scroll.evaluate((el) => {
-          const line = el
-            .querySelector('[data-code-line]')!
-            .getBoundingClientRect();
-          const number = el.querySelector('[data-code-line-number]')!;
-          const bounds = number.getBoundingClientRect();
-          return {
-            textLeft: line.left,
-            numberLeft: bounds.left - el.getBoundingClientRect().left,
-            background: getComputedStyle(number).backgroundColor,
-            visible: number.contains(
-              document.elementFromPoint(
-                bounds.left + 5,
-                bounds.top + bounds.height / 2,
-              ),
-            ),
-          };
-        });
-      const before = await positions();
+      const textLeft = () =>
+        scroll
+          .locator('[data-code-line]')
+          .first()
+          .evaluate((line) => line.getBoundingClientRect().left);
+      const before = await textLeft();
       for (const offset of [100, 5000, 0]) {
         await scroll.evaluate((el, x) => (el.scrollLeft = x), offset);
         const actual = await scroll.evaluate((el) => el.scrollLeft);
         if (offset) expect(actual).toBeGreaterThan(0);
-        const after = await positions();
-        expect(after.textLeft).toBeCloseTo(before.textLeft - actual, 0);
-        expect(after.numberLeft).toBeCloseTo(0, 0);
-        expect(after.background).toBe(background);
-        expect(after.visible).toBe(true);
+        expect(await textLeft()).toBeCloseTo(before - actual, 0);
       }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),

@@ -1123,7 +1123,9 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
             ),
           ),
         },
-        lines: lineElements.map((lines) => lines.map((e) => e.textContent)),
+        lines: lineElements.map((lines) =>
+          lines.map((e) => e.parentElement?.textContent),
+        ),
         comments: lineElements[0]
           .slice(0, 2)
           .map((e) => e.querySelector('span[style]')?.getAttribute('style')),
@@ -1131,6 +1133,7 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
           'script,foreignObject,svg [onload],svg [href]',
         ).length,
         svgCount: root.querySelectorAll('svg').length,
+        lineNumbers: root.querySelectorAll('[data-code-line-number]').length,
       };
     });
     expect(clip.types).toEqual(
@@ -1178,6 +1181,7 @@ test('fixed SVG code cards and per-line NBSP output preserve raw clipboard code'
         .map((line) => (line ? line.replace(/ /g, '\u00a0') : '\u00a0'));
     expect(clip.lines[0]).toEqual(expected(code));
     expect(clip.lines[1]).toEqual(expected(unknown));
+    expect(clip.lineNumbers).toBe(0);
     expect(clip.text).toContain(code);
     expect(clip.text).toContain(unknown);
     expect(clip.text).not.toContain('\u00a0');

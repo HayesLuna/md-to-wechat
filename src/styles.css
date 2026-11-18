@@ -978,15 +978,6 @@ button.primary:hover {
 .preview-paper [data-code-line] {
   background-color: inherit;
 }
-.preview-paper [data-code-line-number] {
-  display: inline-block !important;
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  margin-left: -14px !important;
-  padding-left: 14px !important;
-  background-color: inherit;
-}
 .preview-paper {
   background: white;
   margin: 14px auto 28px;

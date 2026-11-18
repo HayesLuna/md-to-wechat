@@ -248,6 +248,7 @@ function* buildCodeCard(
     for (const child of node.childNodes) visit(child, next);
   };
   visit(highlighted, []);
+  const background = dark ? '#0d1117' : '#ffffff';
   const outer = document.createElement('div');
   outer.setAttribute('data-code-block', '');
   outer.setAttribute('data-code-index', String(index));
@@ -258,7 +259,7 @@ function* buildCodeCard(
   const pre = document.createElement('pre');
   pre.setAttribute(
     'style',
-    `display:block;width:100%;max-width:100%;border-radius:8px;overflow:hidden;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#d0d7de'};background:${dark ? '#0d1117' : '#ffffff'};color:${dark ? '#c9d1d9' : '#24292e'};font-size:14px;line-height:24px;white-space:normal;`,
+    `display:block;width:100%;max-width:100%;border-radius:8px;overflow:hidden;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#d0d7de'};background:${background};color:${dark ? '#c9d1d9' : '#24292e'};font-size:14px;line-height:24px;white-space:normal;`,
   );
   const header = document.createElement('span');
   header.setAttribute('data-code-chrome', '');
@@ -282,19 +283,6 @@ function* buildCodeCard(
     'display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:normal !important;',
   );
   for (const [i, line] of lines.entries()) {
-    const number = document.createElement('span');
-    number.setAttribute('data-code-line-number', '');
-    number.setAttribute('aria-hidden', 'true');
-    number.setAttribute(
-      'style',
-      `display:inline !important;margin:0;padding:0;line-height:inherit;white-space:pre;font-weight:400;font-style:normal;user-select:none;-webkit-user-select:none;color:${dark ? '#8b949e' : '#6e7781'};`,
-    );
-    // Physical spaces survive importers that discard span width/padding. Each
-    // number and its code share one row, so inserted paragraphs cannot offset
-    // a separate gutter from the code column.
-    number.textContent =
-      String(i + 1).padStart(String(lines.length).length, '\u00a0') +
-      '\u00a0\u00a0';
     const row = document.createElement('section');
     row.setAttribute('data-code-row', '');
     row.setAttribute(
@@ -332,7 +320,7 @@ function* buildCodeCard(
         leaf.textContent = node.textContent;
         node.replaceWith(leaf);
       }
-    row.append(number, section);
+    row.append(section);
     container.append(row);
     if (i % 16 === 15) yield;
   }
