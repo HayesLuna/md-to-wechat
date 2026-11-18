@@ -1074,7 +1074,13 @@ export default function App() {
       notify(output!.errors.join(' '));
       return;
     }
-    if (output!.assets.length) setModal({ type: 'assets' });
+    if (
+      output!.assets.some(
+        (asset) =>
+          asset.kind === 'image' || (output!.previewReady && !asset.embedded),
+      )
+    )
+      setModal({ type: 'assets' });
     else void doCopy();
   };
   const copySource = () =>
@@ -1215,7 +1221,9 @@ export default function App() {
             <strong>{a.label}</strong>
             <small>
               {a.kind === 'diagram'
-                ? '下载 PNG 后在公众号手动插入'
+                ? a.embedded
+                  ? '已随正文复制 · PNG 可作备用'
+                  : '下载 PNG 后在公众号手动插入'
                 : a.missing
                   ? '资源缺失，请重新选择图片'
                   : '仅保存在当前浏览器 · 需要重新上传'}
@@ -2007,8 +2015,8 @@ export default function App() {
           {modal.type === 'assets' && (
             <>
               <p>
-                本地图片和 Mermaid
-                图形不能保证随富文本迁移。请下载后上传到公众号；复制正文会在对应位置保留静态占位说明。
+                本地图片及未能直接复制的图形需下载后上传到公众号，正文会保留占位说明。已适配的
+                Mermaid 图形会随正文复制。
               </p>
               <p className="muted">
                 公开网络图片也可能受公众号防盗链限制，粘贴后请检查。

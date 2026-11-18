@@ -108,27 +108,17 @@ test('GitHub colors agree in editor and preview, preview has line numbers, and M
     'rgb(3, 47, 98)',
   );
   await expect(card.locator('[data-code-line]')).toHaveCount(3);
-  await expect(card.locator('[data-code-lines]')).toHaveCSS(
-    'counter-reset',
-    'code-line 0',
-  );
+  await expect(card.locator('[data-code-line-number]')).toHaveText([
+    '1\u00a0\u00a0',
+    '2\u00a0\u00a0',
+    '3\u00a0\u00a0',
+  ]);
   expect(
     await card
       .locator('[data-code-line]')
       .first()
-      .evaluate((el) => {
-        const number = getComputedStyle(el, '::before');
-        return {
-          content: number.content,
-          increment: number.counterIncrement,
-          visible: number.display !== 'none' && parseFloat(number.width) > 0,
-        };
-      }),
-  ).toEqual({
-    content: 'counter(code-line)',
-    increment: 'code-line 1',
-    visible: true,
-  });
+      .evaluate((el) => getComputedStyle(el, '::before').content),
+  ).toBe('none');
 });
 test('preview line number width follows digit boundaries and shrinks after editing', async ({
   page,
@@ -148,8 +138,11 @@ test('preview line number width follows digit boundaries and shrinks after editi
       const lines = el.querySelectorAll('[data-code-line]');
       const first = lines[0];
       const last = lines[lines.length - 1];
+      const number = first.previousElementSibling!;
       return {
-        width: parseFloat(getComputedStyle(first, '::before').width),
+        width:
+          number.getBoundingClientRect().width -
+          parseFloat(getComputedStyle(number).paddingLeft),
         first: first.firstElementChild!.getBoundingClientRect().left,
         last: last.firstElementChild!.getBoundingClientRect().left,
       };
@@ -157,13 +150,13 @@ test('preview line number width follows digit boundaries and shrinks after editi
     expect(geometry.first).toBeCloseTo(geometry.last, 1);
     widths.push(geometry.width);
   }
-  const unit = widths[0];
+  const unit = widths[0] / 3;
   expect(unit).toBeGreaterThan(0);
   for (const [i, digits] of [1, 2, 2, 3, 3, 4, 1].entries())
-    expect(widths[i]).toBeCloseTo(unit * digits, 1);
+    expect(widths[i]).toBeCloseTo(unit * (digits + 2), 1);
 });
 
-test('preview line numbers stay fixed while long code scrolls in both themes', async ({
+test('preview line numbers stay fixed and aligned while long code scrolls in both themes', async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -185,31 +178,35 @@ test('preview line numbers stay fixed while long code scrolls in both themes', a
       await card.scrollIntoViewIfNeeded();
       const scroll = card.locator('[data-code-scroll]');
       await scroll.evaluate((el) => (el.scrollLeft = 0));
-      const textLeft = () =>
-        card
-          .locator('[data-code-line] > span')
-          .first()
-          .evaluate((el) => el.getBoundingClientRect().left);
-      const before = await textLeft();
+      const positions = () =>
+        scroll.evaluate((el) => {
+          const line = el
+            .querySelector('[data-code-line]')!
+            .getBoundingClientRect();
+          const number = el.querySelector('[data-code-line-number]')!;
+          const bounds = number.getBoundingClientRect();
+          return {
+            textLeft: line.left,
+            numberLeft: bounds.left - el.getBoundingClientRect().left,
+            background: getComputedStyle(number).backgroundColor,
+            visible: number.contains(
+              document.elementFromPoint(
+                bounds.left + 5,
+                bounds.top + bounds.height / 2,
+              ),
+            ),
+          };
+        });
+      const before = await positions();
       for (const offset of [100, 5000, 0]) {
         await scroll.evaluate((el, x) => (el.scrollLeft = x), offset);
         const actual = await scroll.evaluate((el) => el.scrollLeft);
         if (offset) expect(actual).toBeGreaterThan(0);
-        expect(await textLeft()).toBeCloseTo(before - actual, 0);
-        const gutter = await scroll.evaluate((el) => {
-          const line = el.querySelector('[data-code-line]')!;
-          const bounds = line.getBoundingClientRect();
-          const style = getComputedStyle(line, '::before');
-          return {
-            fixed:
-              document.elementFromPoint(
-                el.getBoundingClientRect().left + 20,
-                bounds.top + bounds.height / 2,
-              ) === line,
-            background: style.backgroundColor,
-          };
-        });
-        expect(gutter).toEqual({ fixed: true, background });
+        const after = await positions();
+        expect(after.textLeft).toBeCloseTo(before.textLeft - actual, 0);
+        expect(after.numberLeft).toBeCloseTo(0, 0);
+        expect(after.background).toBe(background);
+        expect(after.visible).toBe(true);
       }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),

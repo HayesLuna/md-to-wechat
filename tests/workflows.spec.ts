@@ -696,7 +696,7 @@ test('drag image resize is one undoable action, preserve context selection, norm
   await expect(page.locator('.toast')).toContainText('正文仍在');
 });
 
-test('local placeholders are confirmed then written in both clipboard formats', async ({
+test('local placeholders and embedded diagrams are written in both clipboard formats', async ({
   page,
   context,
 }) => {
@@ -725,10 +725,13 @@ test('local placeholders are confirmed then written in both clipboard formats', 
     expect.arrayContaining(['text/html', 'text/plain']),
   );
   expect(clip.html).toContain('缺失但保留位置');
-  expect(clip.text).toContain('请在此处插入 Mermaid 图形 1');
+  expect(clip.text).toContain('[Mermaid 图表]');
+  expect(clip.text).not.toContain('请在此处插入 Mermaid');
   expect(clip.html).not.toContain('blob:');
   expect(clip.html).not.toContain('data:');
-  expect(clip.html).not.toContain('<svg');
+  expect(clip.html).toContain('<svg');
+  expect(clip.html).not.toContain('marker-end');
+  expect(clip.html).not.toContain('url(#');
 });
 
 test('public URL images load before insertion; failed URL and canceled loading leave draft unchanged', async ({

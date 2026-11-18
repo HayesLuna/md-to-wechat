@@ -258,7 +258,7 @@ function* buildCodeCard(
   const pre = document.createElement('pre');
   pre.setAttribute(
     'style',
-    `display:block;width:100%;max-width:100%;border-radius:8px;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#d0d7de'};background:${dark ? '#0d1117' : '#ffffff'};color:${dark ? '#c9d1d9' : '#24292e'};font-size:14px;line-height:1.75;white-space:normal;`,
+    `display:block;width:100%;max-width:100%;border-radius:8px;overflow:hidden;margin:0;padding:0 !important;box-sizing:border-box;border:1px solid ${dark ? '#30363d' : '#d0d7de'};background:${dark ? '#0d1117' : '#ffffff'};color:${dark ? '#c9d1d9' : '#24292e'};font-size:14px;line-height:24px;white-space:normal;`,
   );
   const header = document.createElement('span');
   header.setAttribute('data-code-chrome', '');
@@ -268,25 +268,44 @@ function* buildCodeCard(
   scroll.setAttribute('data-ignore-width', '');
   scroll.setAttribute(
     'style',
-    'display:block;width:100%;max-width:100%;overflow-x:auto !important;-webkit-overflow-scrolling:touch;box-sizing:border-box;',
+    `display:block;width:100%;max-width:100%;overflow-x:auto !important;-webkit-overflow-scrolling:touch;box-sizing:border-box;color-scheme:${dark ? 'dark' : 'light'};scrollbar-width:thin;scrollbar-color:${dark ? '#6e7681 #161b22' : '#c1c5cb #f6f8fa'};`,
   );
   const code = document.createElement('code');
   code.setAttribute(
     'style',
-    'display:block;padding:0.5em 1em 1em;text-indent:0;text-align:left;line-height:1.75;font-family:Menlo,"Operator Mono",Consolas,Monaco,monospace;font-size:90%;margin:0;white-space:pre !important;word-break:normal !important;overflow-wrap:normal !important;min-width:max-content;',
+    'display:block;padding:7px 14px 14px;text-indent:0;text-align:left;line-height:24px;font-family:Menlo,"Operator Mono",Consolas,Monaco,monospace;font-size:14px;margin:0;white-space:normal !important;word-break:normal !important;overflow-wrap:normal !important;min-width:max-content;',
   );
   const container = document.createElement('div');
   container.setAttribute('data-code-lines', '');
   container.setAttribute(
     'style',
-    `display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:pre !important;--code-line-number-width:${String(lines.length).length}ch;`,
+    'display:block;box-sizing:border-box;min-width:max-content;padding:0;white-space:normal !important;',
   );
   for (const [i, line] of lines.entries()) {
-    const section = document.createElement('section');
+    const number = document.createElement('span');
+    number.setAttribute('data-code-line-number', '');
+    number.setAttribute('aria-hidden', 'true');
+    number.setAttribute(
+      'style',
+      `display:inline !important;margin:0;padding:0;line-height:inherit;white-space:pre;font-weight:400;font-style:normal;user-select:none;-webkit-user-select:none;color:${dark ? '#8b949e' : '#6e7781'};`,
+    );
+    // Physical spaces survive importers that discard span width/padding. Each
+    // number and its code share one row, so inserted paragraphs cannot offset
+    // a separate gutter from the code column.
+    number.textContent =
+      String(i + 1).padStart(String(lines.length).length, '\u00a0') +
+      '\u00a0\u00a0';
+    const row = document.createElement('section');
+    row.setAttribute('data-code-row', '');
+    row.setAttribute(
+      'style',
+      'display:block;margin:0 !important;padding:0 !important;font-size:14px;line-height:24px !important;white-space:pre !important;word-break:normal;overflow-wrap:normal;',
+    );
+    const section = document.createElement('span');
     section.setAttribute('data-code-line', '');
     section.setAttribute(
       'style',
-      'display:block;margin:0;padding:0;line-height:1.75;white-space:pre;word-break:normal;overflow-wrap:normal;',
+      'display:inline !important;margin:0;padding:0;line-height:inherit;white-space:pre;word-break:normal;overflow-wrap:normal;',
     );
     const indent = /^ */.exec(line)![0].length;
     let remaining = indent;
@@ -313,7 +332,8 @@ function* buildCodeCard(
         leaf.textContent = node.textContent;
         node.replaceWith(leaf);
       }
-    container.append(section);
+    row.append(number, section);
+    container.append(row);
     if (i % 16 === 15) yield;
   }
   code.append(container);

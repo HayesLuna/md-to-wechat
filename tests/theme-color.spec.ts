@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 
-test('article headings, rules, links and quotes follow the selected theme color in preview and clipboard', async ({
+test('article headings, links and quotes follow the selected theme color without heading rules in preview and clipboard', async ({
   page,
 }) => {
   await page.goto('/');
@@ -42,8 +42,8 @@ test('article headings, rules, links and quotes follow the selected theme color 
               headings.every(
                 (h) =>
                   h.style.color === expected &&
-                  h.style.borderBottomColor === expected &&
-                  h.style.borderBottomWidth === '1px',
+                  !h.style.borderBottomWidth &&
+                  h.style.fontWeight === '700',
               ) &&
               doc.querySelector<HTMLElement>('a')?.style.color === expected &&
               doc.querySelector<HTMLElement>('blockquote')?.style

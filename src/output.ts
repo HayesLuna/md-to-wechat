@@ -19,6 +19,7 @@ export type Asset = {
   src?: string;
   source?: string;
   missing?: boolean;
+  embedded?: boolean;
 };
 export type Output = {
   html: string;
@@ -49,7 +50,7 @@ async function inlineStyles(
   const color = /^#[0-9a-f]{6}$/i.test(s.color)
     ? s.color
     : DEFAULT_SETTINGS.color;
-  const headingStyle = `color:${color};border-bottom:1px solid ${color};padding-bottom:8px;`;
+  const headingStyle = `color:${color};font-weight:700;padding:0;`;
   const dark = s.codeTheme === 'dark';
   root.setAttribute(
     'style',
@@ -57,12 +58,12 @@ async function inlineStyles(
   );
   const rules: Record<string, string> = {
     p: 'margin:0 0 20px;line-height:inherit;',
-    h1: `font-size:26px;line-height:1.45;font-weight:700;margin:8px 0 24px;${headingStyle}`,
-    h2: `font-size:22px;line-height:1.5;font-weight:700;margin:30px 0 18px;${headingStyle}`,
-    h3: `font-size:19px;line-height:1.5;margin:24px 0 14px;${headingStyle}`,
-    h4: `font-size:17px;line-height:1.5;font-weight:700;margin:22px 0 12px;${headingStyle}`,
-    h5: `font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;${headingStyle}`,
-    h6: `font-size:16px;line-height:1.5;font-weight:700;margin:20px 0 12px;${headingStyle}`,
+    h1: `font-size:26px;line-height:1.4;margin:8px 0 24px;${headingStyle}`,
+    h2: `font-size:22px;line-height:1.45;margin:32px 0 16px;${headingStyle}`,
+    h3: `font-size:19px;line-height:1.5;margin:26px 0 12px;${headingStyle}`,
+    h4: `font-size:17px;line-height:1.5;margin:22px 0 10px;${headingStyle}`,
+    h5: `font-size:16px;line-height:1.5;margin:20px 0 8px;${headingStyle}`,
+    h6: `font-size:15px;line-height:1.5;margin:18px 0 8px;${headingStyle}`,
     blockquote: `margin:20px 0;padding:14px 18px;border-left:3px solid ${color};background:#f6f6f5;color:#686868;`,
     ul: 'padding-left:24px;margin:14px 0 20px;',
     ol: 'padding-left:26px;margin:14px 0 20px;',
@@ -341,15 +342,22 @@ export function readableText(
     if (!(node instanceof Element))
       return Array.from(node.childNodes, (n) => walk(n, depth)).join('');
     const tag = node.tagName;
+    if (node.hasAttribute('data-code-separator')) return '';
+    if (node.localName === 'svg') return '[Mermaid 图表]\n';
     if (tag === 'BR') return '\n';
-    if (node.hasAttribute('data-code-block'))
-      return (
-        '\n' +
-        (codeSources[Number(node.getAttribute('data-code-index'))]?.text ||
-          node.querySelector('code')?.textContent ||
-          '') +
-        '\n\n'
-      );
+    if (node.hasAttribute('data-code-block')) {
+      const source =
+        codeSources[Number(node.getAttribute('data-code-index'))]?.text;
+      if (source !== undefined) return '\n' + source + '\n\n';
+      const lines = Array.from(node.querySelectorAll('[data-code-line]'));
+      const text = lines.length
+        ? lines
+            .map((line) => line.textContent || '')
+            .join('\n')
+            .replace(/\u00a0/g, ' ')
+        : node.querySelector('code')?.textContent || '';
+      return '\n' + text + '\n\n';
+    }
     if (tag === 'PRE') return '\n' + (node.textContent || '') + '\n\n';
     if (tag === 'IMG')
       return '[图片：' + (node.getAttribute('alt') || '图片') + ']\n';
@@ -498,15 +506,17 @@ export async function renderArticle(
     signal?.throwIfAborted();
     const previewDiagrams = root.querySelectorAll('[data-diagram-index]');
     const copyDiagrams = clipboard.querySelectorAll('[data-diagram-index]');
+    const exportedDiagrams = new Map<string, HTMLElement>();
     await Promise.all(
       sources.map(async (source, i) => {
         const target = previewDiagrams[i];
         const copy = copyDiagrams[i];
-        assets.push({
+        const asset: Asset = {
           kind: 'diagram',
           label: `Mermaid 图形 ${i + 1}`,
           source,
-        });
+        };
+        assets.push(asset);
         try {
           if (options.diagrams !== false)
             target.innerHTML = await diagram(source, signal);
@@ -531,6 +541,18 @@ export async function renderArticle(
         p.textContent = `[请在此处插入 Mermaid 图形 ${i + 1}，先下载 PNG 并上传到公众号]`;
         const indent = copy.getAttribute('data-block-indent');
         if (indent) p.setAttribute('data-block-indent', indent);
+        const svg = diagramContent.querySelector('svg');
+        if (svg) {
+          try {
+            const { wechatDiagram } = await import('./wechatDiagram');
+            exportedDiagrams.set(String(i), await wechatDiagram(svg, signal));
+            p.setAttribute('data-wechat-diagram-index', String(i));
+            asset.embedded = true;
+          } catch {
+            signal?.throwIfAborted();
+            // Keep the existing visible PNG fallback for unsupported diagrams.
+          }
+        }
         copy.replaceWith(p);
       }),
     );
@@ -551,7 +573,7 @@ export async function renderArticle(
     const sanitizeOptions = {
       FORBID_TAGS: ['script', 'style', 'svg', 'input', 'button', 'iframe'],
       FORBID_ATTR: ['id', 'class'],
-      ADD_ATTR: ['style', 'data-code-block'],
+      ADD_ATTR: ['style', 'data-code-block', 'data-wechat-diagram-index'],
     };
     const clean = document.createElement('div');
     clean.innerHTML = DOMPurify.sanitize(
@@ -573,6 +595,20 @@ export async function renderArticle(
         }),
       );
     }
+    // Only our separately sanitized renderer output can bypass the article's
+    // SVG ban; pasted/user-authored HTML still follows the original policy.
+    for (const slot of cleanArticle.querySelectorAll<HTMLElement>(
+      '[data-wechat-diagram-index]',
+    )) {
+      const diagram = exportedDiagrams.get(slot.dataset.wechatDiagramIndex!);
+      if (diagram) {
+        const frame = document.createElement('section');
+        frame.style.cssText = slot.style.cssText;
+        frame.style.margin = '0';
+        frame.append(diagram);
+        slot.replaceWith(frame);
+      } else slot.removeAttribute('data-wechat-diagram-index');
+    }
     const renderCard = codeCardRenderer(codeSources, s.codeTheme === 'dark');
     for (const target of [root, clean]) {
       for (const pre of target.querySelectorAll<HTMLElement>(
@@ -587,15 +623,38 @@ export async function renderArticle(
           s.codeTheme === 'dark',
           checkpoint,
         );
+        let replacement: HTMLElement = card;
         if (codeSources[index].indent) {
           const frame = document.createElement('div');
+          frame.setAttribute('data-code-frame', '');
           frame.style.paddingLeft = imageIndentPadding(
             codeSources[index].indent,
           );
           frame.style.boxSizing = 'border-box';
           frame.append(card);
-          pre.replaceWith(frame);
-        } else pre.replaceWith(card);
+          replacement = frame;
+        }
+        const previous = pre.previousElementSibling;
+        const previousCard = previous?.matches('[data-code-block]')
+          ? (previous as HTMLElement)
+          : previous?.matches('[data-code-frame]')
+            ? previous.querySelector<HTMLElement>('[data-code-block]')
+            : null;
+        if (previousCard) {
+          // A real paragraph keeps neighboring PREs distinct when a rich-text
+          // editor unwraps containers or normalizes their margins on paste.
+          // The nonempty line also survives trimming of whitespace-only nodes.
+          const separator = document.createElement('p');
+          separator.setAttribute('data-code-separator', '');
+          separator.setAttribute('aria-hidden', 'true');
+          separator.style.cssText =
+            'margin:0;padding:0;font-size:1px;line-height:20px;min-height:20px;';
+          separator.textContent = '\u200b';
+          previousCard.style.marginBottom = '0';
+          card.style.marginTop = '0';
+          pre.before(separator);
+        }
+        pre.replaceWith(replacement);
       }
     }
     signal?.throwIfAborted();
