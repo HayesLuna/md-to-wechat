@@ -8,6 +8,193 @@ async function ready(page: Page, text: string) {
     text,
   );
 }
+
+for (const [position, prefix] of [
+  ['paragraph start', ''],
+  ['after a space', '前文 '],
+  ['directly after text', '前文'],
+]) {
+  for (const inside of [true, false]) {
+    test(`clicking ${inside ? 'inside' : 'outside'} the inline code start | ${position}`, async ({
+      page,
+    }) => {
+      await ready(page, prefix + '`hello` 后文');
+      const paragraph = page.locator('.article-editor p');
+      const code = paragraph.locator('code');
+      const box = (await code.boundingBox())!;
+      await page.mouse.move(box.x + (inside ? 2 : -2), box.y + box.height / 2);
+      await page.mouse.down();
+      await expect(page.locator('.article-editor')).toHaveCSS(
+        'caret-color',
+        'rgba(0, 0, 0, 0)',
+      );
+      await page.mouse.up();
+
+      const caret = paragraph.locator('.inline-code-start-caret');
+      await expect(caret).toHaveCount(1);
+      const caretX = await caret.evaluate(
+        (element) => element.getBoundingClientRect().left,
+      );
+      if (inside) {
+        expect(caretX).toBeGreaterThan(box.x);
+        expect(caretX).toBeLessThan(box.x + box.width);
+      } else {
+        expect(caretX).toBeLessThan(box.x);
+      }
+
+      await page.keyboard.type('x');
+      await expect(code).toHaveText(inside ? 'xhello' : 'hello');
+      await expect(paragraph).toHaveText(prefix + 'xhello 后文');
+      await expect(caret).toHaveCount(0);
+    });
+  }
+}
+
+test('quick clicks on opposite sides of the inline code start use the last side', async ({
+  page,
+}) => {
+  await ready(page, '前文`hello`后文');
+  const paragraph = page.locator('.article-editor p');
+  const code = paragraph.locator('code');
+  const box = (await code.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.click(box.x + 2, y);
+  await page.mouse.click(box.x - 2, y);
+  await page.keyboard.type('x');
+  await expect(code).toHaveText('hello');
+  await expect(paragraph).toHaveText('前文xhello后文');
+});
+
+test('Right enters the inline code start from the clicked outside position', async ({
+  page,
+}) => {
+  await ready(page, '`hello` 后文');
+  const code = page.locator('.article-editor p code');
+  const insideCaret = code.locator('.inline-code-start-caret');
+  const box = (await code.boundingBox())!;
+  await page.mouse.click(box.x - 2, box.y + box.height / 2);
+
+  await page.keyboard.press('ArrowRight');
+  await expect(insideCaret).toHaveCount(1);
+  await page.keyboard.press('ArrowLeft');
+  await expect(insideCaret).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('x');
+  await expect(code).toHaveText('xhello');
+});
+
+test('Right enters the inline code start from prose, then moves past the first character', async ({
+  page,
+}) => {
+  await ready(page, '正文`hello`后文');
+  const code = page.locator('.article-editor p code');
+  await page.evaluate(() => {
+    const { editor } = (window as any).__mojian;
+    editor.commands.setTextSelection(2);
+    editor.view.focus();
+  });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(code.locator('.inline-code-start-caret')).toHaveCount(1);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('x');
+  await expect(code).toHaveText('hxello');
+});
+
+for (const inside of [true, false]) {
+  test(`undo restores typing ${inside ? 'inside' : 'outside'} the inline code start`, async ({
+    page,
+  }) => {
+    const prefix = inside ? '前文 ' : '';
+    await ready(page, prefix + '`hello` 后文');
+    const paragraph = page.locator('.article-editor p');
+    const code = paragraph.locator('code');
+    const box = (await code.boundingBox())!;
+    await page.mouse.click(box.x + (inside ? 2 : -2), box.y + box.height / 2);
+    await page.keyboard.type('x');
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(paragraph).toHaveText(prefix + 'hello 后文');
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await expect(paragraph).toHaveText(prefix + 'xhello 后文');
+    await page.keyboard.press('ControlOrMeta+z');
+
+    await page.keyboard.type('y');
+    await expect(paragraph).toHaveText(prefix + 'yhello 后文');
+    await expect(code).toHaveText(inside ? 'yhello' : 'hello');
+  });
+}
+
+test('the inline code start caret follows the first character of right-to-left text', async ({
+  page,
+}) => {
+  await ready(page, '前文 `שלום` 后文');
+  const code = page.locator('.article-editor p code');
+  const box = (await code.boundingBox())!;
+  await page.mouse.click(box.x - 2, box.y + box.height / 2);
+  await page.keyboard.press('ArrowRight');
+
+  const caret = code.locator('.inline-code-start-caret');
+  const { caretX, firstCharacterRight } = await caret.evaluate((element) => {
+    const range = document.createRange();
+    range.setStart(element.nextSibling!, 0);
+    range.setEnd(element.nextSibling!, 1);
+    const transform = getComputedStyle(element, '::after').transform;
+    return {
+      caretX:
+        element.getBoundingClientRect().left +
+        new DOMMatrixReadOnly(transform === 'none' ? undefined : transform).m41,
+      firstCharacterRight: range.getBoundingClientRect().right,
+    };
+  });
+  expect(Math.abs(caretX - firstCharacterRight)).toBeLessThan(1);
+  await page.keyboard.insertText('א');
+  await expect(code).toHaveText('אשלום');
+});
+
+for (const [first, rest] of [
+  ['h', 'ello'],
+  ['h', ''],
+  ['🧑‍💻', 'ello'],
+]) {
+  const source = first + rest;
+  test(`Left visits both sides of the inline code start for "${source}"`, async ({
+    page,
+  }) => {
+    await ready(page, '前文 `' + source + '` 后文');
+    const code = page.locator('.article-editor p code');
+    const clickAfterFirstCharacter = async (firstLength: number) => {
+      const { x, y } = await code.evaluate((element, offset) => {
+        const range = document.createRange();
+        range.setStart(element.firstChild!, offset);
+        range.collapse(true);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x, y: rect.y + rect.height / 2 };
+      }, firstLength);
+      await page.mouse.click(x, y);
+    };
+    const caretInsideCode = () =>
+      code.evaluate((element) =>
+        element.contains(window.getSelection()?.anchorNode ?? null),
+      );
+
+    await clickAfterFirstCharacter(first.length);
+    await page.keyboard.press('ArrowLeft');
+    expect(await caretInsideCode()).toBe(true);
+    await page.keyboard.type('x');
+    await expect(code).toHaveText('x' + source);
+
+    await clickAfterFirstCharacter(1);
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    expect(await caretInsideCode()).toBe(false);
+    await page.keyboard.type('y');
+    await expect(code).toHaveText('x' + source);
+    await expect(page.locator('.article-editor p')).toHaveText(
+      '前文 yx' + source + ' 后文',
+    );
+  });
+}
+
 for (const [name, text] of [
   ['paragraph', '前面后面'],
   ['bold', '**前面后面**'],

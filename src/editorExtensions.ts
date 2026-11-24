@@ -39,6 +39,7 @@ import {
 } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
+import { inlineCodeCaretPlugin } from './inlineCodeCaret';
 
 // Markdown permits emphasis around inline code. StarterKit's default code
 // mark excludes all other marks, making valid Markdown fail insertion checks.
@@ -46,7 +47,10 @@ export const MarkdownStarterKit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() || []).map((extension) =>
       extension.name === 'code'
-        ? extension.extend({ excludes: '' })
+        ? extension.extend({
+            excludes: '',
+            addProseMirrorPlugins: () => [inlineCodeCaretPlugin()],
+          })
         : extension,
     );
   },
