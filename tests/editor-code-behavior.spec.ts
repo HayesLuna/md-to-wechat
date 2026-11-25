@@ -608,6 +608,10 @@ for (const [tag, opening, closing, lo, hi] of [
     const end = await delimiterPoint(editor, 'opening', hi, opening);
     await page.mouse.move(start.x + 0.5, start.y);
     await page.mouse.down();
+    // Dragging a single narrow glyph can stay under the browser's drag
+    // threshold (CI fonts are wider), so overshoot first and shrink back to
+    // the same endpoints before releasing.
+    await page.mouse.move(end.x + 40, end.y, { steps: 5 });
     await page.mouse.move(end.x - 0.5, end.y, { steps: 5 });
     await page.mouse.up();
     await expect
