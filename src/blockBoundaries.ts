@@ -15,9 +15,12 @@ import {
   ordinaryTextAtCoords,
   beginTextSelection,
   endTextSelection,
+  inlineTextAnchor,
+  tableTextAtCoords,
   textPointMatches,
 } from './textHitTesting';
 import { placeCodeCaret } from './codeFolding';
+import { revealedMarkClick } from './inlineCodeCaret';
 import { closeHistory } from '@tiptap/pm/history';
 import { imageIndent, isImageName } from './outputUtils';
 
@@ -403,7 +406,7 @@ export const BlockBoundaries = Extension.create({
               !(event.target instanceof Element) ||
               !surface?.contains(event.target) ||
               event.target.closest(
-                'button,input,select,textarea,a,[role="separator"],.tableWrapper',
+                'button,input,select,textarea,[role="separator"]',
               )
             )
               return;
@@ -416,11 +419,37 @@ export const BlockBoundaries = Extension.create({
             }
             if (activate(event)) return;
             const point = { left: event.clientX, top: event.clientY };
+            const inTable = !!event.target.closest('.tableWrapper');
             // Non-editable inline wrappers can cover otherwise blank space.
             // Native dragging there drags the atom rather than selecting text.
             const inEditableContent =
               view.dom.contains(event.target) &&
               !event.target.closest('[contenteditable="false"]');
+            if (inEditableContent && !view.composing) {
+              const revealed = revealedMarkClick(view, event);
+              const text = !revealed
+                ? inlineTextAnchor(view, event.target, point)
+                : undefined;
+              const anchor = revealed?.pos ?? text?.pos;
+              if (anchor !== undefined) {
+                beginTextSelection(
+                  view,
+                  event,
+                  {
+                    selection: TextSelection.create(view.state.doc, anchor),
+                    line: view.coordsAtPos(anchor, revealed?.side),
+                    inlineMark: revealed ?? undefined,
+                    keepSyntax: text?.keepSyntax,
+                  },
+                  (point) =>
+                    inTable
+                      ? tableTextAtCoords(view, point)
+                      : ordinaryTextAtCoords(view, point),
+                );
+                return;
+              }
+            }
+            if (inTable || event.target.closest('a')) return;
             if (inEditableContent && textPointMatches(view, point)) return;
             const target = ordinaryTextAtCoords(view, point);
             if (!target) return;

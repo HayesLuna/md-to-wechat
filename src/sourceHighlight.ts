@@ -10,6 +10,12 @@ import {
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import {
+  inlineMarkBoundary,
+  inlineSyntaxEdge,
+  isInlineSyntaxClick,
+  showsInlineSyntax,
+} from './inlineSyntaxEdges';
+import {
   highlightPairs,
   matchHighlight,
   type HighlightPair,
@@ -47,7 +53,7 @@ export function afterHighlightClosingSyntax(state: EditorState, pos: number) {
 function activePairs(
   state: EditorState,
   base = key.getState(state)?.base,
-  includeClosingEdge = false,
+  includeEdges = false,
 ) {
   const { from, to, empty } = state.selection;
   return (
@@ -60,8 +66,9 @@ function activePairs(
     .map(pairFromDecoration)
     .filter((pair) =>
       empty
-        ? from > pair.from &&
-          (from < pair.to || (includeClosingEdge && from === pair.to))
+        ? includeEdges
+          ? showsInlineSyntax(from, pair.from, pair.to)
+          : from > pair.from && from < pair.to
         : from < pair.to && to > pair.from,
     );
 }
@@ -199,7 +206,7 @@ export const TyporaHighlight = Mark.create({
   ],
   renderMarkdown: (node, helpers) => `==${helpers.renderChildren(node)}==`,
   addProseMirrorPlugins() {
-    let collapsedClick: number | undefined;
+    let highlightClick: { pos: number; outside: boolean } | undefined;
     // Immutable text blocks retain their parsed pairs through edits elsewhere,
     // cursor moves and undo. Selection changes only reveal nearby delimiters.
     const cache = new WeakMap<PMNode, HighlightPair[]>();
@@ -361,8 +368,7 @@ export const TyporaHighlight = Mark.create({
       if (!focused) return base;
       const hidden: Decoration[] = [],
         visible: Decoration[] = [];
-      // Keep the closing syntax visible while the caret rests just after it.
-      // Formatting commands still treat that position as outside the pair.
+      // Reveal the syntax even when the caret is immediately outside.
       const pairs = activePairs(state, base, true);
       if (!pairs.length) return base;
       const starts = new Set(pairs.map((pair) => pair.from));
@@ -422,12 +428,20 @@ export const TyporaHighlight = Mark.create({
           handleClick: (view, pos, event) => {
             // Focus reveals syntax and shifts the text before mouseup. Use the
             // position measured on mousedown while the syntax was still hidden.
-            const clicked = collapsedClick;
-            collapsedClick = undefined;
-            if (clicked !== undefined && !event.shiftKey) {
+            const clicked = highlightClick;
+            highlightClick = undefined;
+            if (clicked && isInlineSyntaxClick(view, event)) {
+              // A nested mark still owns its own edge inside the highlight.
+              if (
+                !clicked.outside &&
+                inlineMarkBoundary(view.state, clicked.pos)
+              )
+                return false;
               view.dispatch(
                 view.state.tr
-                  .setSelection(TextSelection.create(view.state.doc, clicked))
+                  .setSelection(
+                    TextSelection.create(view.state.doc, clicked.pos),
+                  )
                   .setMeta(key, true),
               );
               view.focus();
@@ -437,7 +451,11 @@ export const TyporaHighlight = Mark.create({
               event.target instanceof Element
                 ? event.target.closest('mark')
                 : null;
-            if (!mark || !view.dom.contains(mark) || event.shiftKey)
+            if (
+              !mark ||
+              !view.dom.contains(mark) ||
+              !isInlineSyntaxClick(view, event)
+            )
               return false;
             const from = view.posAtDOM(mark, 0);
             const to = view.posAtDOM(mark, mark.childNodes.length);
@@ -496,15 +514,8 @@ export const TyporaHighlight = Mark.create({
           },
           handleDOMEvents: {
             mousedown: (view, event) => {
-              collapsedClick = undefined;
-              if (
-                event.button !== 0 ||
-                event.shiftKey ||
-                event.altKey ||
-                event.ctrlKey ||
-                event.metaKey ||
-                event.detail > 1
-              )
+              highlightClick = undefined;
+              if (!isInlineSyntaxClick(view, event) || event.detail > 1)
                 return false;
               const pos = view.posAtCoords({
                 left: event.clientX,
@@ -516,14 +527,26 @@ export const TyporaHighlight = Mark.create({
                 .find(Math.max(0, pos - 2), pos + 2, (spec) => !!spec.highlight)
                 .map(pairFromDecoration)
                 .find((pair) => pos >= pair.from && pos <= pair.to);
-              if (
-                pair &&
-                plugin.visible
-                  .find(pair.to - 2, pair.to, (spec) => !!spec.delimiter)
-                  .some((decoration) => decoration.to === pair.to)
-              )
-                collapsedClick =
-                  pos >= pair.to - 2 ? pair.to : Math.max(pair.from + 2, pos);
+              if (pair) {
+                const from = pair.from + 2;
+                const to = pair.to - 2;
+                const edge = inlineSyntaxEdge(pos, from, to);
+                const collapsed = plugin.visible
+                  .find(pair.from, from, (spec) => !!spec.delimiter)
+                  .some((delimiter) => delimiter.from === pair.from);
+                highlightClick = {
+                  pos: !collapsed
+                    ? pos
+                    : edge === -1
+                      ? pair.from
+                      : edge === 1
+                        ? pair.to
+                        : pos,
+                  outside: collapsed
+                    ? edge !== null
+                    : pos === pair.from || pos === pair.to,
+                };
+              }
               return false;
             },
             focus: (view) => {

@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import { markdownHighlight } from './highlight';
+import { markdownUnderline } from './markdownUnderline';
 
 export type ArticleHeading = { level: number; text: string; line: number };
 type InlineToken = {
@@ -7,7 +8,9 @@ type InlineToken = {
   content: string;
   children?: InlineToken[] | null;
 };
-const parser = new MarkdownIt({ html: false }).use(markdownHighlight);
+const parser = new MarkdownIt({ html: false })
+  .use(markdownHighlight)
+  .use(markdownUnderline);
 
 function inlineText(tokens: InlineToken[]): string {
   return tokens

@@ -45,7 +45,15 @@ import {
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
-import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
+import {
+  hasInlineSyntaxSelection,
+  materializeInlineSyntaxSelection,
+} from './inlineSyntaxSelection';
+import {
+  cancelEditorMarkdown,
+  flushEditorMarkdown,
+  scheduleEditorMarkdown,
+} from './editorMarkdown';
 
 const HighlightMarkdown = Markdown.extend({
   onBeforeCreate(event) {
@@ -207,6 +215,7 @@ export function EditorPane({
         ),
       handleDOMEvents: {
         copy: (view, event) => {
+          if (hasInlineSyntaxSelection(view.state)) return false;
           const editor = editorRef.current;
           const selection = editor?.state.selection;
           if (
@@ -238,7 +247,16 @@ export function EditorPane({
             });
           return true;
         },
-        cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
+        cut: (view, event) =>
+          !hasInlineSyntaxSelection(view.state) &&
+          copyTaskMarkdown(editorRef.current, event, true),
+        compositionstart: (view) => {
+          // Flush earlier edits before the syntax selection is temporarily
+          // materialized for the browser's composition session.
+          if (hasInlineSyntaxSelection(view.state))
+            flushEditorMarkdown(editorRef.current);
+          return false;
+        },
         keydown: (_view, event) => {
           plainPaste.current = !!(
             (event.ctrlKey || event.metaKey) &&
@@ -265,7 +283,7 @@ export function EditorPane({
           return true;
         },
       },
-      handlePaste: (_view, event) => {
+      handlePaste: (view, event) => {
         if (readOnlyRef.current) return true;
         const literal = plainPaste.current;
         plainPaste.current = false;
@@ -315,6 +333,32 @@ export function EditorPane({
           !shouldParseMarkdownPaste(text, html)
         )
           return false;
+        if (hasInlineSyntaxSelection(view.state)) {
+          const blocks = centerUnalignedPastedTables(
+            safeDocument(editor, text),
+          ).content;
+          if (!blocks?.length) return false;
+          const inserted = editor.commands.command(({ tr, commands }) => {
+            const materialized = materializeInlineSyntaxSelection(
+              view.state,
+              tr,
+            );
+            if (!materialized) return false;
+            const first = blocks[0];
+            const content =
+              blocks.length === 1 &&
+              first.type === 'paragraph' &&
+              tr.selection.$from.parent.inlineContent
+                ? first.content
+                : blocks;
+            closeHistory(tr);
+            if (content?.length && commands.insertContent(content)) return true;
+            tr.setMeta('preventDispatch', true);
+            return false;
+          });
+          if (inserted) event.preventDefault();
+          return inserted;
+        }
         const { selection } = editor.state;
         const { $from, $to } = selection;
         const prefix = $from.parent.textBetween(

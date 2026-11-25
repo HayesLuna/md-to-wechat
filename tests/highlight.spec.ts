@@ -921,7 +921,7 @@ for (const width of [1440, 390])
               ? ['测', '试']
               : ['测试']
             : markdown.includes('**')
-              ? ['测新', '试']
+              ? ['测', '新试']
               : ['测新试'],
         );
         expect(
@@ -932,7 +932,7 @@ for (const width of [1440, 390])
           edge
             ? markdown.replace('试==', '试==新')
             : markdown.includes('**')
-              ? '==**测新**试==后面'
+              ? '==**测**新试==后面'
               : markdown.replace('测试', '测新试'),
         );
       }

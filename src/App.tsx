@@ -10,6 +10,7 @@ import {
   useDeferredValue,
 } from 'react';
 import type { Editor, JSONContent } from '@tiptap/core';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import {
   Upload,
@@ -90,11 +91,10 @@ const ShareImport = lazy(() =>
     .catch(() => ({ default: ShareUnavailable })),
 );
 function imageInsertion(
-  editor: Editor,
+  parent: ProseMirrorNode,
   attrs: JSONContent['attrs'],
 ): JSONContent {
   const image = { type: 'inlineImage', attrs };
-  const parent = editor.state.selection.$from.parent;
   return parent.inlineContent && !parent.type.spec.code
     ? image
     : { type: 'paragraph', content: [image] };
@@ -846,13 +846,13 @@ export default function App() {
         image.src = address;
       });
       if (req !== imageRequest.current) return;
-      savedTarget.restore();
       target.current = null;
+      savedTarget.restore();
       editor
         .chain()
         .focus()
         .insertContent(
-          imageInsertion(editor, {
+          imageInsertion(editor.state.selection.$from.parent, {
             src: address,
             alt: label.trim() || '图片',
             percent: 50,
@@ -861,7 +861,13 @@ export default function App() {
         .run();
       setModal(null);
     } catch (e) {
-      if (req === imageRequest.current) setDialogError((e as Error).message);
+      if (req === imageRequest.current) {
+        if (target.current === savedTarget) {
+          savedTarget.release();
+          target.current = null;
+        }
+        setDialogError((e as Error).message);
+      }
     } finally {
       if (req === imageRequest.current) setProcessing(false);
     }
@@ -879,9 +885,10 @@ export default function App() {
     if (fromPaste) {
       target.current?.cancel();
       target.current = captureTarget(editor);
+    } else if (!target.current) {
+      target.current = captureTarget(editor);
     }
-    const savedTarget = target.current || captureTarget(editor);
-    target.current = savedTarget;
+    const savedTarget = target.current;
     const req = ++imageRequest.current;
     setProcessing(true);
     setDialogError('');
@@ -895,24 +902,38 @@ export default function App() {
         throw new Error('本地图片资源缺失，剪贴板中没有可导入的图片。');
       const src = reusable ? original : await storeImage(file!);
       if (req !== imageRequest.current) return;
-      savedTarget.restore();
       target.current = null;
-      editor
+      const attrs = {
+        ...image?.attrs,
+        src,
+        alt: image?.attrs?.alt ?? file?.name ?? '剪贴板图片',
+        percent: image?.attrs?.percent ?? 50,
+      };
+      const inserted = editor
         .chain()
+        .command(({ tr, commands }) => {
+          if (
+            savedTarget.restore(tr) &&
+            commands.insertContent(
+              imageInsertion(tr.selection.$from.parent, attrs),
+            )
+          )
+            return true;
+          tr.setMeta('preventDispatch', true);
+          return false;
+        })
         .focus()
-        .insertContent(
-          imageInsertion(editor, {
-            ...image?.attrs,
-            src,
-            alt: image?.attrs?.alt ?? file?.name ?? '剪贴板图片',
-            percent: image?.attrs?.percent ?? 50,
-          }),
-        )
         .run();
+      if (!inserted)
+        throw new Error('图片插入位置已变化，请重新选择位置后再粘贴。');
       setModal(null);
       notify('本地图片已插入，迁移到公众号时需要重新上传。');
     } catch (e) {
       if (req === imageRequest.current) {
+        if (target.current === savedTarget) {
+          savedTarget.release();
+          target.current = null;
+        }
         setDialogError((e as Error).message);
         notify((e as Error).message);
       }

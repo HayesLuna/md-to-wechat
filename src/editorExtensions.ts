@@ -1,5 +1,6 @@
 import {
   Extension,
+  Mark,
   wrappingInputRule,
   nodeInputRule,
   type Editor,
@@ -39,20 +40,74 @@ import {
 } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
-import { inlineCodeCaretPlugin } from './inlineCodeCaret';
+import { inlineMarkCaretPlugin } from './inlineCodeCaret';
+import { additionalInlineRules, openingBacktickRule } from './inlineMarkInput';
+import { inlineSyntaxMarkView, inlineSyntaxPlugin } from './inlineSyntax';
+import {
+  captureInlineSyntaxSelection,
+  inlineSyntaxSelectionPlugin,
+} from './inlineSyntaxSelection';
+import { inlineSyntaxMarks, isInlineSyntaxMark } from './inlineSyntaxEdges';
+import { underlineSpan } from './markdownUnderline';
 
 // Markdown permits emphasis around inline code. StarterKit's default code
 // mark excludes all other marks, making valid Markdown fail insertion checks.
+const InlineSyntaxEditing = Extension.create({
+  name: 'inlineSyntaxEditing',
+  addProseMirrorPlugins: () => [
+    inlineSyntaxPlugin(),
+    inlineSyntaxSelectionPlugin(),
+    inlineMarkCaretPlugin(),
+  ],
+});
+
 export const MarkdownStarterKit = StarterKit.extend({
   addExtensions() {
-    return (this.parent?.() || []).map((extension) =>
-      extension.name === 'code'
-        ? extension.extend({
-            excludes: '',
-            addProseMirrorPlugins: () => [inlineCodeCaretPlugin()],
-          })
-        : extension,
-    );
+    const extensions = (this.parent?.() || []).map((extension) => {
+      const name = extension.name;
+      if (!(extension instanceof Mark) || !isInlineSyntaxMark(name))
+        return extension;
+
+      const mark = extension.extend({
+        addMarkView: () => inlineSyntaxMarkView,
+        addInputRules() {
+          const rules = this.parent?.() || [];
+          return name === 'code'
+            ? [...rules, openingBacktickRule(this.type)]
+            : [
+                ...rules,
+                ...additionalInlineRules(this.type, inlineSyntaxMarks[name]),
+              ];
+        },
+      });
+      if (name === 'code')
+        return mark.extend({
+          excludes: '',
+        });
+      if (name === 'underline')
+        return mark.extend({
+          renderMarkdown: (node, h) => `<u>${h.renderChildren(node)}</u>`,
+          markdownTokenizer: {
+            name: 'underline',
+            level: 'inline',
+            start: (source) => /<u>|\+\+/i.exec(source)?.index ?? -1,
+            tokenize(source, _tokens, lexer) {
+              const span = underlineSpan(source, {
+                inlineTokens: lexer.inlineTokens,
+              });
+              if (!span) return undefined;
+              return {
+                type: 'underline',
+                raw: span.raw,
+                text: span.text,
+                tokens: lexer.inlineTokens(span.text),
+              };
+            },
+          },
+        });
+      return mark;
+    });
+    return [...extensions, InlineSyntaxEditing];
   },
 });
 
@@ -313,27 +368,41 @@ export function ancestor(editor: Editor, name: string) {
 }
 export function captureTarget(editor: Editor) {
   let bookmark = editor.state.selection.getBookmark();
+  const syntax = captureInlineSyntaxSelection(editor.state);
   let active = true;
-  const map = ({ transaction }: EditorEvents['transaction']) => {
-    if (active) bookmark = bookmark.map(transaction.mapping);
+  const map = ({
+    transaction,
+    appendedTransactions,
+  }: EditorEvents['transaction']) => {
+    if (!active) return;
+    for (const tr of [transaction, ...(appendedTransactions ?? [])]) {
+      bookmark = bookmark.map(tr.mapping);
+      syntax?.map(tr);
+    }
   };
   editor.on('transaction', map);
+  const release = () => {
+    active = false;
+    editor.off('transaction', map);
+  };
   return {
-    restore() {
-      if (!active) return;
-      active = false;
-      editor.off('transaction', map);
+    restore(target?: Transaction) {
+      if (!active) return false;
+      release();
       try {
-        editor.view.dispatch(
-          editor.state.tr.setSelection(bookmark.resolve(editor.state.doc)),
-        );
+        const tr = target ?? editor.state.tr;
+        tr.setSelection(bookmark.resolve(tr.doc));
+        if (target) return !syntax || syntax.restore(tr);
+        editor.view.dispatch(tr);
+        return true;
       } catch {
-        editor.commands.focus('end');
+        if (!target) editor.commands.focus('end');
+        return false;
       }
     },
+    release,
     cancel() {
-      active = false;
-      editor.off('transaction', map);
+      release();
       editor.commands.focus();
     },
   };

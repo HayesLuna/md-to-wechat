@@ -1,6 +1,7 @@
 import tableRule from 'markdown-it/lib/rules_block/table.mjs';
 import MarkdownIt from 'markdown-it';
 import { markdownHighlight } from './highlight';
+import { markdownUnderline } from './markdownUnderline';
 import {
   safeURL,
   widthFromTitle,
@@ -22,6 +23,7 @@ export function parseArticle(markdown: string) {
   }[] = [];
   const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
   md.use(markdownHighlight);
+  md.use(markdownUnderline);
   // Consume only our table metadata, leaving ordinary HTML disabled.
   md.block.ruler.before('table', 'table_indent', (state, line, end, silent) => {
     const text = state.src.slice(

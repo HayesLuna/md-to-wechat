@@ -362,8 +362,51 @@ button.primary:hover {
   background: #fff3a3;
   color: inherit;
 }
+.article-editor [data-md-opening]::before {
+  content: attr(data-md-opening);
+}
+.article-editor [data-md-closing]::after {
+  content: attr(data-md-closing);
+}
+.article-editor [data-md-opening]::before,
+.article-editor [data-md-closing]::after,
 .article-editor .highlight-delimiter {
   color: #95969f;
+  font-weight: 400;
+  font-style: normal;
+}
+.article-editor :is(s, u)[data-md-opening]::before,
+.article-editor :is(s, u)[data-md-closing]::after {
+  display: inline-block;
+  text-decoration: none;
+}
+.article-editor::selection,
+.article-editor ::selection,
+.article-editor [data-md-opening-selected]::before,
+.article-editor [data-md-closing-selected]::after {
+  background-color: var(--selection-background);
+}
+.article-editor [data-md-opening-selected]::before,
+.article-editor [data-md-closing-selected]::after {
+  color: inherit;
+}
+.article-editor [data-md-opening-partial]::before,
+.article-editor [data-md-closing-partial]::after {
+  background-color: transparent;
+  background-image: linear-gradient(
+    to right,
+    transparent var(--selection-start),
+    var(--selection-background) var(--selection-start) var(--selection-end),
+    transparent var(--selection-end)
+  );
+}
+.article-editor [data-md-opening-partial]::before {
+  --selection-start: var(--md-opening-selection-start);
+  --selection-end: var(--md-opening-selection-end);
+}
+.article-editor [data-md-closing-partial]::after {
+  --selection-start: var(--md-closing-selection-start);
+  --selection-end: var(--md-closing-selection-end);
 }
 .article-editor .highlight-delimiter:not(.expanded) {
   /* Keep the native caret full height while collapsing the syntax width. */
@@ -526,22 +569,23 @@ button.primary:hover {
   border-radius: 3px;
   font-family: Consolas, Menlo, monospace;
 }
-.inline-code-start-caret {
+.inline-mark-boundary-caret {
   display: inline-block;
   position: relative;
   width: 0;
-  height: 0;
+  height: 1em;
   pointer-events: none;
 }
 /* Hide the intermediate native caret while the mouse button is down. */
 .article-editor:focus:not(.inline-code-composing):is(
-    .inline-code-click-pending,
-    :has(.inline-code-start-caret)
+    .inline-mark-click-pending,
+    .inline-syntax-range,
+    :has(.inline-mark-boundary-caret)
   ) {
   caret-color: transparent;
 }
 .article-editor:focus:not(.inline-code-composing)
-  .inline-code-start-caret::after {
+  .inline-mark-boundary-caret::after {
   content: '';
   position: absolute;
   left: 0;
@@ -549,7 +593,7 @@ button.primary:hover {
   width: 1px;
   height: 1.15em;
   background: #252528;
-  transform: translateX(var(--inline-code-caret-offset, 0px));
+  transform: translateX(var(--inline-mark-caret-offset, 0px));
   animation: editor-cursor-blink 1.1s steps(2, start) infinite;
 }
 .article-editor hr {
