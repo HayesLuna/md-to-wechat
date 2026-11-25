@@ -10,7 +10,6 @@ import {
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import {
-  inlineMarkBoundary,
   inlineSyntaxEdge,
   isInlineSyntaxClick,
   showsInlineSyntax,
@@ -20,6 +19,8 @@ import {
   matchHighlight,
   type HighlightPair,
 } from './highlight';
+import { splitContentDecorations } from './sourceDelimiter';
+import { sourceInlinePairs } from './sourceInlinePairs';
 
 export const HighlightLiteral = Mark.create({
   name: 'highlightLiteral',
@@ -36,7 +37,8 @@ const key = new PluginKey<{
 }>('mojian-source-highlight');
 
 function pairFromDecoration(decoration: Decoration): HighlightPair {
-  return { from: decoration.from - 2, to: decoration.to + 2 };
+  const pair = decoration.spec.pair as HighlightPair | undefined;
+  return pair ?? { from: decoration.from - 2, to: decoration.to + 2 };
 }
 
 // Blank-space hit testing can land among collapsed closing equals, which have
@@ -56,6 +58,7 @@ function activePairs(
   includeEdges = false,
 ) {
   const { from, to, empty } = state.selection;
+  const seen = new Set<string>();
   return (
     base?.find(
       Math.max(0, from - 2),
@@ -64,13 +67,16 @@ function activePairs(
     ) || []
   )
     .map(pairFromDecoration)
-    .filter((pair) =>
-      empty
+    .filter((pair) => {
+      const id = `${pair.from}:${pair.to}`;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return empty
         ? includeEdges
           ? showsInlineSyntax(from, pair.from, pair.to)
           : from > pair.from && from < pair.to
-        : from < pair.to && to > pair.from,
-    );
+        : from < pair.to && to > pair.from;
+    });
 }
 
 function emptyPair(state: EditorState) {
@@ -228,18 +234,49 @@ export const TyporaHighlight = Mark.create({
             ? source.replace(/=/g, '\ufffc')
             : source;
         });
+        // Source-editable inline code keeps backticks in the document. Mask
+        // those spans so == inside `...` stays literal even for paste HTML.
+        for (const pair of sourceInlinePairs(text)) {
+          if (pair.kind !== 'code') continue;
+          text =
+            text.slice(0, pair.from) +
+            '\ufffc'.repeat(pair.to - pair.from) +
+            text.slice(pair.to);
+        }
         pairs = highlightPairs(text, false);
         cache.set(node, pairs);
       }
+      let sourceText = '';
+      node.forEach((child) => {
+        sourceText += child.isText
+          ? child.text!
+          : child.type.name === 'hardBreak'
+            ? '\n'
+            : '\ufffc';
+      });
+      const nestedDelimiters = sourceInlinePairs(sourceText).flatMap(
+        (pair) => [
+          {
+            from: pos + 1 + pair.from,
+            to: pos + 1 + pair.from + pair.openLen,
+          },
+          {
+            from: pos + 1 + pair.to - pair.closeLen,
+            to: pos + 1 + pair.to,
+          },
+        ],
+      );
       return pairs.flatMap((relative) => {
         const from = pos + 1 + relative.from,
           to = pos + 1 + relative.to;
+        const pair = { from, to };
         return [
-          Decoration.inline(
+          ...splitContentDecorations(
             from + 2,
             to - 2,
+            nestedDelimiters,
             { nodeName: 'mark' },
-            { highlight: true },
+            { highlight: true, pair },
           ),
           Decoration.inline(
             from,
@@ -431,12 +468,6 @@ export const TyporaHighlight = Mark.create({
             const clicked = highlightClick;
             highlightClick = undefined;
             if (clicked && isInlineSyntaxClick(view, event)) {
-              // A nested mark still owns its own edge inside the highlight.
-              if (
-                !clicked.outside &&
-                inlineMarkBoundary(view.state, clicked.pos)
-              )
-                return false;
               view.dispatch(
                 view.state.tr
                   .setSelection(

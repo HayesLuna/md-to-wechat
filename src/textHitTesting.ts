@@ -2,19 +2,7 @@ import type { EditorView } from '@tiptap/pm/view';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection, cellAround, inSameTable } from '@tiptap/pm/tables';
 import { afterHighlightClosingSyntax } from './sourceHighlight';
-import {
-  revealedMarkAtCoords,
-  setInlineBoundaryClick,
-  setOutsideInlineMark,
-  type BoundaryClick,
-} from './inlineCodeCaret';
-import { inlineMarkBoundary, inlineSyntaxSelector } from './inlineSyntaxEdges';
-import {
-  hasInlineSyntaxSelection,
-  retainInlineSyntax,
-  revealedInlineMarks,
-  setInlineSyntaxSelection,
-} from './inlineSyntaxSelection';
+import { afterSourceClosingSyntax } from './sourceInlineSyntax';
 
 export type TextLine = {
   left: number;
@@ -43,33 +31,19 @@ export function inlineTextAnchor(
   target: Element,
   point: { left: number; top: number },
 ) {
-  const mark = target.closest(`${inlineSyntaxSelector}, mark`);
-  const { state } = view;
-  const revealed = revealedInlineMarks(state);
-  if (!mark && !revealed.length) return;
-  // Revealing the syntax shifts the text on mouse down. Record the document
-  // position before the browser can recompute the drag origin in that layout.
+  const mark = target.closest('code, strong, em, s, u, mark');
+  if (!mark || !view.dom.contains(mark)) return;
+  // Revealing collapsed delimiters shifts layout. Capture the model position
+  // before the browser recomputes the drag origin against the expanded text.
   const pos = view.posAtCoords(point)?.pos;
   if (pos === undefined) return;
-  const { from, to } = state.selection;
-  // Preserve native dragging of already selected text.
+  const { from, to } = view.state.selection;
   if (from < pos && pos < to) return;
   if (
-    mark &&
-    view.dom.contains(mark) &&
     pos > view.posAtDOM(mark, 0) &&
     pos < view.posAtDOM(mark, mark.childNodes.length)
   )
-    return { pos, keepSyntax: false };
-  if (mark) return;
-  // Starting in adjacent prose must not hide a revealed delimiter until
-  // it is known whether the user is clicking or dragging across it.
-  const $pos = state.doc.resolve(pos);
-  if (
-    revealed.some(({ from }) => state.doc.resolve(from).sameParent($pos)) &&
-    textPointMatches(view, point)
-  )
-    return { pos, keepSyntax: true };
+    return { pos };
 }
 
 // Model positions are ordered by visual row inside an ordinary textblock.
@@ -237,21 +211,6 @@ export function ordinaryTextAtCoords(
   const left = point.left;
   const glyphY = (line.top + line.bottom) / 2;
   const doc = view.dom.ownerDocument;
-  const projectedMark = revealedMarkAtCoords(
-    view,
-    doc.elementFromPoint(left, glyphY),
-    { left, top: glyphY },
-  );
-  if (
-    projectedMark &&
-    projectedMark.pos >= row.from &&
-    projectedMark.pos <= row.to
-  )
-    return {
-      selection: TextSelection.create(view.state.doc, projectedMark.pos),
-      line,
-      inlineMark: projectedMark,
-    };
   // A partly clipped row can have its center outside the scroll viewport.
   // Do not invoke PM's linear DOM fallback there. Prefer the browser caret API,
   // then binary search only this visual row if no native caret is available.
@@ -281,15 +240,12 @@ export function ordinaryTextAtCoords(
   }
   const start = pos + 1,
     end = start + node.content.size;
-  const selection = TextSelection.create(
-    view.state.doc,
-    point.left > line.right
-      ? afterHighlightClosingSyntax(
-          view.state,
-          Math.max(start, Math.min(end, hit)),
-        )
-      : Math.max(start, Math.min(end, hit)),
-  );
+  let caret = Math.max(start, Math.min(end, hit));
+  if (point.left > line.right) {
+    caret = afterHighlightClosingSyntax(view.state, caret);
+    caret = afterSourceClosingSyntax(view.state, caret);
+  }
+  const selection = TextSelection.create(view.state.doc, caret);
   return { selection, line };
 }
 
@@ -318,7 +274,6 @@ export function retainLineAffinity(
 export type TextHit = {
   selection: TextSelection;
   line: TextLine;
-  inlineMark?: BoundaryClick;
   keepSyntax?: boolean;
 };
 
@@ -329,14 +284,12 @@ export function tableTextAtCoords(
   const target = view.dom.ownerDocument.elementFromPoint(point.left, point.top);
   const cell = target?.closest('td,th');
   if (!cell || !view.dom.contains(cell)) return null;
-  const inlineMark = revealedMarkAtCoords(view, target, point) ?? undefined;
-  const pos = inlineMark?.pos ?? view.posAtCoords(point)?.pos;
+  const pos = view.posAtCoords(point)?.pos;
   if (pos === undefined || !view.state.doc.resolve(pos).parent.inlineContent)
     return null;
   return {
     selection: TextSelection.create(view.state.doc, pos),
-    line: view.coordsAtPos(pos, inlineMark?.side),
-    inlineMark,
+    line: view.coordsAtPos(pos),
   };
 }
 
@@ -367,45 +320,16 @@ export function beginTextSelection(
       ? TextSelection.create(view.state.doc, anchor, hit.selection.head)
       : hit.selection;
     const { state } = view;
-    const syntax =
-      drag && (target.inlineMark || hit.inlineMark)
-        ? state.tr.setSelection(selection)
-        : null;
-    const selectingSyntax =
-      syntax &&
-      setInlineSyntaxSelection(state, syntax, {
-        anchor: target.inlineMark,
-        head: hit.inlineMark,
-      });
-    const projectedMark =
-      !selectingSyntax && selection.empty ? hit.inlineMark : undefined;
-    const boundary =
-      !selectingSyntax &&
-      selection.empty &&
-      inlineMarkBoundary(state, selection.head);
-    const tr = selectingSyntax
-      ? syntax!
-      : projectedMark
-        ? setInlineBoundaryClick(state.tr, projectedMark)
-        : boundary
-          ? setOutsideInlineMark(state.tr, selection.head, boundary)
-          : state.tr.setSelection(selection);
-    if (target.keepSyntax) retainInlineSyntax(tr, true);
+    const tr = state.tr.setSelection(selection);
     if (!drag && (hit.line.top < rect.top || hit.line.bottom > rect.bottom))
       tr.scrollIntoView();
     if (
-      selectingSyntax ||
-      target.keepSyntax ||
-      hasInlineSyntaxSelection(state) ||
-      projectedMark ||
-      boundary ||
       !selection.eq(state.selection) ||
       (selection.empty && state.storedMarks)
     )
       view.dispatch(tr);
     view.focus();
-    if (!selectingSyntax && selection.empty)
-      retainLineAffinity(view, selection, hit.line);
+    if (selection.empty) retainLineAffinity(view, selection, hit.line);
   };
   apply(target);
   let frame = 0,
@@ -415,7 +339,7 @@ export function beginTextSelection(
   const moved = (event: MouseEvent) =>
     (event.clientX - targetPoint.left) ** 2 +
       (event.clientY - targetPoint.top) ** 2 >
-    (target.inlineMark ? 1 : 16);
+    16;
   const targetPoint = { left: event.clientX, top: event.clientY };
   const update = (event: MouseEvent) => {
     if (view.isDestroyed || view.state.doc !== source) {
@@ -452,9 +376,7 @@ export function beginTextSelection(
       if (anchorCell.pos !== headCell.pos) {
         const selection = new CellSelection(anchorCell, headCell);
         if (!selection.eq(view.state.selection))
-          view.dispatch(
-            retainInlineSyntax(view.state.tr.setSelection(selection), true),
-          );
+          view.dispatch(view.state.tr.setSelection(selection));
         return;
       }
     }
@@ -516,7 +438,6 @@ export function beginTextSelection(
   const move = (event: MouseEvent) => {
     if (event.buttons !== 1) {
       cleanup();
-      releaseSyntax();
       return;
     }
     pending = event;
@@ -529,11 +450,6 @@ export function beginTextSelection(
     cancelAnimationFrame(frame);
     update(event);
     cleanup();
-    releaseSyntax();
-  };
-  const releaseSyntax = () => {
-    if (target.keepSyntax && !view.isDestroyed && view.state.doc === source)
-      view.dispatch(retainInlineSyntax(view.state.tr, false));
   };
   const cleanup = () => {
     cancelAnimationFrame(frame);

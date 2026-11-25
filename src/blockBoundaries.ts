@@ -20,7 +20,6 @@ import {
   textPointMatches,
 } from './textHitTesting';
 import { placeCodeCaret } from './codeFolding';
-import { revealedMarkClick } from './inlineCodeCaret';
 import { closeHistory } from '@tiptap/pm/history';
 import { imageIndent, isImageName } from './outputUtils';
 
@@ -426,20 +425,14 @@ export const BlockBoundaries = Extension.create({
               view.dom.contains(event.target) &&
               !event.target.closest('[contenteditable="false"]');
             if (inEditableContent && !view.composing) {
-              const revealed = revealedMarkClick(view, event);
-              const text = !revealed
-                ? inlineTextAnchor(view, event.target, point)
-                : undefined;
-              const anchor = revealed?.pos ?? text?.pos;
-              if (anchor !== undefined) {
+              const text = inlineTextAnchor(view, event.target, point);
+              if (text?.pos !== undefined) {
                 beginTextSelection(
                   view,
                   event,
                   {
-                    selection: TextSelection.create(view.state.doc, anchor),
-                    line: view.coordsAtPos(anchor, revealed?.side),
-                    inlineMark: revealed ?? undefined,
-                    keepSyntax: text?.keepSyntax,
+                    selection: TextSelection.create(view.state.doc, text.pos),
+                    line: view.coordsAtPos(text.pos),
                   },
                   (point) =>
                     inTable

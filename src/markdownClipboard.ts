@@ -20,7 +20,7 @@ function ordinarySpaces(node: JSONContent, inCode = false): JSONContent {
 }
 export function markdownSelection(editor: Editor | null, slice: Slice) {
   if (editor) {
-    const { $from, $to } = editor.state.selection;
+    const { $from, $to, from, to } = editor.state.selection;
     if ($from.sameParent($to) && $from.parent.type.name === 'codeBlock') {
       return $from.parent.textBetween(
         $from.parentOffset,
@@ -28,6 +28,23 @@ export function markdownSelection(editor: Editor | null, slice: Slice) {
         '\n',
         '\n',
       );
+    }
+    // Source-editable delimiters already live in the document. Prefer the raw
+    // text for ordinary inline selections so partial markers are not escaped.
+    if ($from.sameParent($to) && $from.parent.inlineContent) {
+      let rich = false;
+      editor.state.doc.nodesBetween(from, to, (node) => {
+        if (
+          node.type.name === 'inlineImage' ||
+          node.marks.some((mark) => mark.type.name === 'link')
+        )
+          rich = true;
+        return !rich;
+      });
+      if (!rich)
+        return editor.state.doc
+          .textBetween(from, to, '\n', '\ufffc')
+          .replace(/\u00a0/g, ' ');
     }
   }
   if (!editor?.markdown)

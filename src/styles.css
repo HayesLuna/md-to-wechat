@@ -362,51 +362,15 @@ button.primary:hover {
   background: #fff3a3;
   color: inherit;
 }
-.article-editor [data-md-opening]::before {
-  content: attr(data-md-opening);
-}
-.article-editor [data-md-closing]::after {
-  content: attr(data-md-closing);
-}
-.article-editor [data-md-opening]::before,
-.article-editor [data-md-closing]::after,
 .article-editor .highlight-delimiter {
   color: #95969f;
   font-weight: 400;
   font-style: normal;
-}
-.article-editor :is(s, u)[data-md-opening]::before,
-.article-editor :is(s, u)[data-md-closing]::after {
-  display: inline-block;
   text-decoration: none;
 }
 .article-editor::selection,
-.article-editor ::selection,
-.article-editor [data-md-opening-selected]::before,
-.article-editor [data-md-closing-selected]::after {
+.article-editor ::selection {
   background-color: var(--selection-background);
-}
-.article-editor [data-md-opening-selected]::before,
-.article-editor [data-md-closing-selected]::after {
-  color: inherit;
-}
-.article-editor [data-md-opening-partial]::before,
-.article-editor [data-md-closing-partial]::after {
-  background-color: transparent;
-  background-image: linear-gradient(
-    to right,
-    transparent var(--selection-start),
-    var(--selection-background) var(--selection-start) var(--selection-end),
-    transparent var(--selection-end)
-  );
-}
-.article-editor [data-md-opening-partial]::before {
-  --selection-start: var(--md-opening-selection-start);
-  --selection-end: var(--md-opening-selection-end);
-}
-.article-editor [data-md-closing-partial]::after {
-  --selection-start: var(--md-closing-selection-start);
-  --selection-end: var(--md-closing-selection-end);
 }
 .article-editor .highlight-delimiter:not(.expanded) {
   /* Keep the native caret full height while collapsing the syntax width. */

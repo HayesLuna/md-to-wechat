@@ -112,10 +112,16 @@ for (const [tag, opening, closing] of [
         return { x: x - 2, y: y + height / 2 };
       });
       await page.mouse.click(edge.x, edge.y);
-      await expect(
-        paragraph.locator('.inline-mark-boundary-caret'),
-      ).toHaveCount(1);
-      const target = await point(page, '前文测试中后文', offset);
+      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
+        2,
+      );
+      const target = await point(
+        page,
+        '前文' + opening + '测试中' + closing + '后文',
+        offset === 6
+          ? 2 + opening.length + 3
+          : 2 + opening.length + 3 + closing.length,
+      );
       const box = (await paragraph.boundingBox())!;
       await page.mouse.click(target.x + (offset === 7 ? 40 : 0), box.y - 1);
       await insertAt(page, target.pos);
@@ -138,7 +144,7 @@ test('blank to the right of a trailing formatted span inserts outside it', async
   ).toBe(source + 'X');
 });
 
-test('blank above the first code character enters the revealed opening delimiter', async ({
+test('blank above the first code character keeps typing inside the span', async ({
   page,
 }) => {
   await ready(page, '前文 `测试` 后文');
@@ -157,12 +163,10 @@ test('blank above the first code character enters the revealed opening delimiter
     });
   const initial = await textStart();
   await page.mouse.click(initial.x, initial.y);
-  await expect(code).toHaveAttribute('data-md-opening', '`');
-  await expect(code.locator('.inline-mark-boundary-caret')).toHaveCount(0);
+  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
   const shown = await textStart();
   const box = (await paragraph.boundingBox())!;
   await page.mouse.click(shown.x, box.y - 8);
-  await expect(code.locator('.inline-mark-boundary-caret')).toHaveCount(1);
   await page.keyboard.insertText('新');
   await expect(code).toHaveText('新测试');
 });
@@ -180,7 +184,7 @@ for (const [tag, opening, closing] of [
     for (const index of [0, 2]) {
       await page.keyboard.press('Home');
       await format.click();
-      await expect(format).toHaveAttribute('data-md-opening', opening);
+      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
       const x = await format.evaluate((element, index) => {
         const text = document
           .createTreeWalker(element, NodeFilter.SHOW_TEXT)
@@ -201,7 +205,7 @@ for (const [tag, opening, closing] of [
   });
 }
 
-test('dragging across a revealed underline delimiter highlights it and keeps both delimiters visible', async ({
+test('dragging across a revealed underline keeps both delimiters expanded', async ({
   page,
 }) => {
   const source = '前文<u>下划线</u>后文';
@@ -213,71 +217,52 @@ test('dragging across a revealed underline delimiter highlights it and keeps bot
       const { doc, selection } = (window as any).__mojian.editor.state;
       return doc.textBetween(selection.from, selection.to);
     });
-  for (const [endOffset, expected, edge, other] of [
-    [7, '线后文', 'closing', 'opening'],
-    [0, '前文下划', 'opening', 'closing'],
+  for (const [endOffset, expected] of [
+    [source.length, '线</u>后文'],
+    [0, '前文<u>下划'],
   ] as const) {
     await underline.click();
-    await expect(underline).toHaveAttribute('data-md-closing', '</u>');
-    const from = await point(page, '前文下划线后文', 4);
-    const end = await point(page, '前文下划线后文', endOffset);
+    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
+    const from = await point(page, source, 5);
+    const end = await point(page, source, endOffset);
     const y = (from.top + from.bottom) / 2;
     await page.mouse.move(from.x, y);
     await page.mouse.down();
     await page.mouse.move(end.x, y, { steps: 8 });
     await expect.poll(selected).toBe(expected);
-    await expect(underline).toHaveAttribute(`data-md-${edge}-selected`);
-    await expect(underline).not.toHaveAttribute(`data-md-${other}-selected`);
-    await expect(underline).toHaveAttribute('data-md-opening', '<u>');
-    await expect(underline).toHaveAttribute('data-md-closing', '</u>');
-    const backgrounds = await underline.evaluate((element, edge) => {
-      const selected = edge === 'opening' ? '::before' : '::after';
-      const unselected = edge === 'opening' ? '::after' : '::before';
-      return {
-        marker: getComputedStyle(element, selected).backgroundColor,
-        other: getComputedStyle(element, unselected).backgroundColor,
-        text: getComputedStyle(element, '::selection').backgroundColor,
-      };
-    }, edge);
-    expect(backgrounds.marker).toBe(backgrounds.text);
-    expect(backgrounds.marker).not.toBe(backgrounds.other);
+    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
     await page.mouse.up();
     await expect.poll(selected).toBe(expected);
-    await expect(underline).toHaveAttribute(`data-md-${edge}-selected`);
     await page.locator('.article-editor > p').last().click();
-    await expect(underline).not.toHaveAttribute('data-md-opening');
-    await expect(underline).not.toHaveAttribute('data-md-closing');
-    await expect(underline).not.toHaveAttribute(`data-md-${edge}-selected`);
+    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
   }
 });
 
-for (const [tag, syntax, text, selected] of [
-  ['u', '<u>下划线</u>', '前文下划线后文', '划线后文'],
-  ['mark', '==下划线==', '前文==下划线==后文', '划线==后文'],
+for (const [tag, syntax, text, selected, startAt] of [
+  ['u', '<u>下划线</u>', '前文<u>下划线</u>后文', '划线</u>后文', 5],
+  ['mark', '==下划线==', '前文==下划线==后文', '划线==后文', 5],
 ] as const) {
   test(`dragging from inside collapsed ${tag} keeps the original character as the anchor`, async ({
     page,
   }) => {
     await ready(page, '前文' + syntax + '后文');
-    const format = page.locator(`.article-editor > p ${tag}`);
-    const reveal = () =>
-      tag === 'u'
-        ? expect(format).toHaveAttribute('data-md-opening', '<u>')
-        : expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-    await expect(format).not.toHaveAttribute('data-md-opening');
     await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
-    const start = await point(page, text, tag === 'u' ? 3 : 5);
+    const start = await point(page, text, startAt);
     const y = (start.top + start.bottom) / 2;
     await page.mouse.move(start.x, y);
     await page.mouse.down();
-    await reveal();
+    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
     const end = await point(page, text, text.length);
     await page.mouse.move(end.x + 8, y, { steps: 8 });
-    const selection = () => page.evaluate(() => getSelection()?.toString());
+    const selection = () =>
+      page.evaluate(() => {
+        const { doc, selection } = (window as any).__mojian.editor.state;
+        return doc.textBetween(selection.from, selection.to);
+      });
     await expect.poll(selection).toBe(selected);
     await page.mouse.up();
     await expect.poll(selection).toBe(selected);
-    await reveal();
+    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
   });
 }
 

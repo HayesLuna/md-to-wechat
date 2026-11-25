@@ -895,7 +895,15 @@ for (const width of [1440, 390])
           };
         }, edge);
         await page.mouse.click(point.x, point.y);
-        const expectedPosition = edge ? 7 : 4;
+        const expectedPosition = await page.evaluate((closing) => {
+          const { doc } = (window as any).__mojian.editor.state;
+          const block = doc.firstChild!;
+          const text = block.textBetween(0, block.content.size, '\n', '\ufffc');
+          const start = text.indexOf('==');
+          const end = text.indexOf('==', start + 2) + 2;
+          // Document positions are 1-based inside the first paragraph.
+          return closing ? end + 1 : start + 3;
+        }, edge);
         await expect
           .poll(() =>
             page.evaluate(() => {

@@ -40,45 +40,21 @@ import {
 } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
-import { inlineMarkCaretPlugin } from './inlineCodeCaret';
-import { additionalInlineRules, openingBacktickRule } from './inlineMarkInput';
-import { inlineSyntaxMarkView, inlineSyntaxPlugin } from './inlineSyntax';
-import {
-  captureInlineSyntaxSelection,
-  inlineSyntaxSelectionPlugin,
-} from './inlineSyntaxSelection';
-import { inlineSyntaxMarks, isInlineSyntaxMark } from './inlineSyntaxEdges';
+import { isInlineSyntaxMark } from './inlineSyntaxEdges';
 import { underlineSpan } from './markdownUnderline';
 
-// Markdown permits emphasis around inline code. StarterKit's default code
-// mark excludes all other marks, making valid Markdown fail insertion checks.
-const InlineSyntaxEditing = Extension.create({
-  name: 'inlineSyntaxEditing',
-  addProseMirrorPlugins: () => [
-    inlineSyntaxPlugin(),
-    inlineSyntaxSelectionPlugin(),
-    inlineMarkCaretPlugin(),
-  ],
-});
-
+// Source-editable inline formats keep TipTap marks only for parse/paste
+// conversion. Paired delimiters live in the document; decorations render them.
 export const MarkdownStarterKit = StarterKit.extend({
   addExtensions() {
-    const extensions = (this.parent?.() || []).map((extension) => {
+    return (this.parent?.() || []).map((extension) => {
       const name = extension.name;
       if (!(extension instanceof Mark) || !isInlineSyntaxMark(name))
         return extension;
 
       const mark = extension.extend({
-        addMarkView: () => inlineSyntaxMarkView,
-        addInputRules() {
-          const rules = this.parent?.() || [];
-          return name === 'code'
-            ? [...rules, openingBacktickRule(this.type)]
-            : [
-                ...rules,
-                ...additionalInlineRules(this.type, inlineSyntaxMarks[name]),
-              ];
-        },
+        // Typing leaves delimiter characters for the source scanner to pair.
+        addInputRules: () => [],
       });
       if (name === 'code')
         return mark.extend({
@@ -107,7 +83,6 @@ export const MarkdownStarterKit = StarterKit.extend({
         });
       return mark;
     });
-    return [...extensions, InlineSyntaxEditing];
   },
 });
 
@@ -368,17 +343,14 @@ export function ancestor(editor: Editor, name: string) {
 }
 export function captureTarget(editor: Editor) {
   let bookmark = editor.state.selection.getBookmark();
-  const syntax = captureInlineSyntaxSelection(editor.state);
   let active = true;
   const map = ({
     transaction,
     appendedTransactions,
   }: EditorEvents['transaction']) => {
     if (!active) return;
-    for (const tr of [transaction, ...(appendedTransactions ?? [])]) {
+    for (const tr of [transaction, ...(appendedTransactions ?? [])])
       bookmark = bookmark.map(tr.mapping);
-      syntax?.map(tr);
-    }
   };
   editor.on('transaction', map);
   const release = () => {
@@ -392,7 +364,7 @@ export function captureTarget(editor: Editor) {
       try {
         const tr = target ?? editor.state.tr;
         tr.setSelection(bookmark.resolve(tr.doc));
-        if (target) return !syntax || syntax.restore(tr);
+        if (target) return true;
         editor.view.dispatch(tr);
         return true;
       } catch {
