@@ -1346,7 +1346,7 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
   });
   const before = await selection(page);
   await page.getByRole('button', { name: '斜体', exact: true }).click();
-  await expect(page.locator('.article-editor em')).toHaveText('选中的中文 ');
+  await expect(page.locator('.article-editor em')).toHaveText('选中的中文');
   await expect(page.locator('.article-editor em')).toHaveCSS(
     'font-style',
     'italic',
@@ -1355,8 +1355,15 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
     'font-synthesis',
     'style',
   );
-  expect((await selection(page)).from).toBe(before.from);
-  expect((await selection(page)).to).toBe(before.to);
+  // Delimiters are real characters, so the selection keeps the same text but
+  // shifts right by the inserted opener.
+  expect((await selection(page)).from).toBe(before.from + 1);
+  expect(
+    await page.evaluate(() => {
+      const { doc, selection } = (window as any).__mojian.editor.state;
+      return doc.textBetween(selection.from, selection.to);
+    }),
+  ).toBe('选中的中文');
   expect(await markdown(page)).toContain('*选中的中文');
   await page.getByRole('button', { name: '斜体', exact: true }).click();
   await expect(page.locator('.article-editor em')).toHaveCount(0);
@@ -1393,6 +1400,32 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
   expect(copied.types).toEqual(
     expect.arrayContaining(['text/html', 'text/plain']),
   );
+});
+
+test('toolbar keeps formatting active for a selection that spans whole blocks', async ({
+  page,
+}) => {
+  await ready(page);
+  await setDoc(page, '第一段\n\n**中间加粗**\n\n第三段');
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    let from = -1;
+    let to = -1;
+    e.state.doc.descendants((node: any, pos: number) => {
+      if (node.isText && node.text?.includes('第一段')) from = pos + 1;
+      if (node.isText && node.text?.includes('第三段'))
+        to = pos + node.text.length;
+    });
+    e.commands.setTextSelection({ from, to });
+    e.commands.focus();
+  });
+  const bold = page.getByRole('button', { name: '粗体', exact: true });
+  // The plain first and last blocks must not hide the bold block between them.
+  await expect(bold).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.article-editor strong')).toHaveText('中间加粗');
+  await bold.click();
+  expect(await markdown(page)).toBe('第一段\n\n中间加粗\n\n第三段');
+  await expect(bold).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('Ctrl and Cmd clicking editor links open actual new tabs without changing draft or selection', async ({
@@ -1798,8 +1831,8 @@ test('quote Backspace joins preceding paragraph while empty Enter splits the quo
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(2);
   await expect(
     page.locator('.article-editor blockquote > p').first(),
-  ).toHaveText('第一段 粗体第二段');
-  expect((await selection(page)).from).toBe(8);
+  ).toHaveText('第一段 **粗体**第二段');
+  expect((await selection(page)).from).toBe(12);
   await expect(page.locator('.article-editor strong')).toHaveText('粗体');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(3);
@@ -1828,7 +1861,7 @@ test('quote Backspace joins preceding paragraph while empty Enter splits the quo
   await page.keyboard.press('Backspace');
   await expect(page.locator('.article-editor blockquote')).toHaveCount(1);
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(2);
-  expect((await selection(page)).from).toBe(11);
+  expect((await selection(page)).from).toBe(15);
   await setDoc(page, '> 上半段\n>\n> 下半段');
   await cursor(page, '下半段', 0);
   await page.keyboard.press('Enter');

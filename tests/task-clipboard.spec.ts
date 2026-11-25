@@ -158,7 +158,9 @@ test('partial task selection keeps the task marker and inline formatting', async
     const e = (window as any).__mojian.editor;
     let from = -1;
     e.state.doc.descendants((n: any, p: number) => {
-      if (n.isText && n.text === '加粗内容') from = p;
+      // Inline source keeps its delimiters in one text node.
+      if (n.isText && n.text?.includes('加粗内容'))
+        from = p + n.text.indexOf('加粗内容');
     });
     e.commands.setTextSelection({ from: from + 1, to: from + 3 });
   });

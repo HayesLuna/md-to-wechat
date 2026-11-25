@@ -41,7 +41,7 @@ for (const level of [1, 2, 3, 4, 5, 6])
     await page.keyboard.type(prefix);
     await paste(page, ' 粘贴的**标题**\n\n后面的正文');
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的标题',
+      '粘贴的**标题**',
     );
     await expect(page.locator(`.article-editor h${level} strong`)).toHaveText(
       '标题',
@@ -51,14 +51,14 @@ for (const level of [1, 2, 3, 4, 5, 6])
     await expect(page.locator('.article-editor')).toHaveText(prefix);
     await page.keyboard.press('ControlOrMeta+Shift+z');
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的标题',
+      '粘贴的**标题**',
     );
     await page
       .getByRole('button', { name: 'Markdown 源码', exact: true })
       .click();
     await page.getByRole('button', { name: '所见即所得', exact: true }).click();
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的标题',
+      '粘贴的**标题**',
     );
   });
 
@@ -360,9 +360,9 @@ test('programming code HTML stays code and inline code can coexist with emphasis
   await page.evaluate(() => (window as any).__mojian.setMarkdown(''));
   await page.locator('.article-editor').click();
   await paste(page, '**`加粗代码`**、*`斜体代码`*、~~`删除代码`~~');
-  await expect(page.locator('.article-editor strong code')).toHaveText(
-    '加粗代码',
-  );
+  await expect(
+    page.locator('.article-editor strong code, .article-editor code strong'),
+  ).toHaveText('加粗代码');
   await expect(
     page.locator('.article-editor em code,.article-editor code em'),
   ).toHaveText('斜体代码');
@@ -378,9 +378,9 @@ test('programming code HTML stays code and inline code can coexist with emphasis
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('.article-editor code')).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+Shift+z');
-  await expect(page.locator('.article-editor strong code')).toHaveText(
-    '加粗代码',
-  );
+  await expect(
+    page.locator('.article-editor strong code, .article-editor code strong'),
+  ).toHaveText('加粗代码');
 });
 for (const wrapper of ['native', 'lang', 'data-language', 'mixed-pre'] as const)
   test(`Markdown-looking programming content stays code for ${wrapper} HTML`, async ({

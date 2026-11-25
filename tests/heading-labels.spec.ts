@@ -275,8 +275,10 @@ for (const [context, prefix, quote] of [
           page.evaluate(() => (window as any).__mojian.editor.getJSON()),
         )
         .toEqual(expected);
+      // Source delimiters stay in the document, so the paragraph text keeps
+      // the bold markers around the first character.
       await expect(
-        page.locator('.article-editor p').filter({ hasText: /^微信$/ }),
+        page.locator('.article-editor p').filter({ hasText: /^\*\*微\*\*信$/ }),
       ).toBeVisible();
       expect(
         await page.evaluate(() =>

@@ -9,10 +9,7 @@ import {
 } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { ReplaceStep } from '@tiptap/pm/transform';
-import {
-  inlineSyntaxEdge,
-  isInlineSyntaxClick,
-} from './inlineSyntaxEdges';
+import { inlineSyntaxEdge, isInlineSyntaxClick } from './inlineSyntaxEdges';
 import {
   activeSourcePairs,
   contentRange,
@@ -35,27 +32,40 @@ import { codeFence } from './inlineSyntaxEdges';
 const key = new PluginKey<{
   base: DecorationSet;
   visible: DecorationSet;
-  pairs: SourcePair[];
   focused: boolean;
 }>('mojian-source-inline');
 
-function blockPairs(node: PMNode, pos: number): SourcePair[] {
+// Text blocks are immutable nodes, so a block keeps its pairs until it is
+// edited. Caching them by node identity keeps drags and caret moves from
+// rescanning a long paragraph on every transaction.
+const blockPairCache = new WeakMap<PMNode, SourcePair[]>();
+
+function relativeBlockPairs(node: PMNode) {
   if (node.type.spec.code) return [];
-  let text = '';
-  node.forEach((child) => {
-    const source = child.isText
-      ? child.text!
-      : child.type.name === 'hardBreak'
-        ? '\n'
-        : '\ufffc';
-    // Literal equals / highlight content stays scannable; code marks still
-    // force a mask so nested source syntax inside a code mark is inert if any
-    // residual marks remain after paste conversion.
-    text += child.marks.some((mark) => mark.type.spec.code)
-      ? source.replace(/[`*~<]/g, '\ufffc')
-      : source;
-  });
-  return sourceInlinePairs(text).map((pair) => ({
+  let pairs = blockPairCache.get(node);
+  if (!pairs) {
+    let text = '';
+    node.forEach((child) => {
+      const source = child.isText
+        ? child.text!
+        : child.type.name === 'hardBreak'
+          ? '\n'
+          : '\ufffc';
+      // Literal equals / highlight content stays scannable; code marks still
+      // force a mask so nested source syntax inside a code mark is inert if any
+      // residual marks remain after paste conversion.
+      text += child.marks.some((mark) => mark.type.spec.code)
+        ? source.replace(/[`*~<]/g, '\ufffc')
+        : source;
+    });
+    pairs = sourceInlinePairs(text);
+    blockPairCache.set(node, pairs);
+  }
+  return pairs;
+}
+
+function blockPairs(node: PMNode, pos: number): SourcePair[] {
+  return relativeBlockPairs(node).map((pair) => ({
     ...pair,
     from: pos + 1 + pair.from,
     to: pos + 1 + pair.to,
@@ -72,7 +82,30 @@ function decorateBlock(node: PMNode, pos: number) {
         ? '\n'
         : '\ufffc';
   });
-  const highlightHoles = highlightPairs(text, false).flatMap((pair) => [
+  // `==` inside a code span or imported highlight content is literal, so mask
+  // both before pairing highlights; otherwise the highlight holes would cut the
+  // bold wrapper apart and drop the literal equals from it.
+  let scannable = '';
+  node.forEach((child) => {
+    const source = child.isText
+      ? child.text!
+      : child.type.name === 'hardBreak'
+        ? '\n'
+        : '\ufffc';
+    scannable += child.marks.some(
+      (mark) => mark.type.name === 'highlightLiteral',
+    )
+      ? source.replace(/=/g, '\ufffc')
+      : source;
+  });
+  for (const pair of sourceInlinePairs(text)) {
+    if (pair.kind !== 'code') continue;
+    scannable =
+      scannable.slice(0, pair.from) +
+      '\ufffc'.repeat(pair.to - pair.from) +
+      scannable.slice(pair.to);
+  }
+  const highlightHoles = highlightPairs(scannable, false).flatMap((pair) => [
     { from: pos + 1 + pair.from, to: pos + 1 + pair.from + 2 },
     { from: pos + 1 + pair.to - 2, to: pos + 1 + pair.to },
   ]);
@@ -81,15 +114,12 @@ function decorateBlock(node: PMNode, pos: number) {
 
 function decorate(doc: PMNode) {
   const decorations: Decoration[] = [];
-  const pairs: SourcePair[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return;
-    const found = blockPairs(node, pos);
-    pairs.push(...found);
-    decorations.push(...sourcePairDecorations(found));
+    decorations.push(...sourcePairDecorations(blockPairs(node, pos)));
     return false;
   });
-  return { decorations: DecorationSet.create(doc, decorations), pairs };
+  return DecorationSet.create(doc, decorations);
 }
 
 function collectPairs(doc: PMNode) {
@@ -102,9 +132,39 @@ function collectPairs(doc: PMNode) {
   return pairs;
 }
 
+function textblockAt(doc: PMNode, pos: number) {
+  const $pos = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth);
+    if (node.isTextblock) return { node, pos: $pos.before(depth) };
+  }
+  return null;
+}
+
+// Caret work only ever needs the pairs of the touched textblocks; scanning the
+// whole document on every transaction made long drafts quadratic.
+function pairsAt(doc: PMNode, pos: number) {
+  const block = textblockAt(doc, pos);
+  return block ? blockPairs(block.node, block.pos) : [];
+}
+
+function selectionPairs(state: EditorState) {
+  const { from, to } = state.selection;
+  if (from === to) return pairsAt(state.doc, from);
+  // A selection can cover several blocks; both revealing and the toolbar state
+  // must see every block it touches, not just the two ends.
+  const pairs: SourcePair[] = [];
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isTextblock) return;
+    pairs.push(...blockPairs(node, pos));
+    return false;
+  });
+  return pairs;
+}
+
 // Blank-space hit testing can land among collapsed closing delimiters.
 export function afterSourceClosingSyntax(state: EditorState, pos: number) {
-  const pair = collectPairs(state.doc).find(
+  const pair = pairsAt(state.doc, pos).find(
     (candidate) =>
       pos >= candidate.to - candidate.closeLen && pos <= candidate.to,
   );
@@ -195,9 +255,7 @@ function update(tr: Transaction, previous: DecorationSet) {
   if (remove.length > 128) {
     const removed = new Set(remove.map(identity));
     return DecorationSet.create(tr.doc, [
-      ...base
-        .find()
-        .filter((decoration) => !removed.has(identity(decoration))),
+      ...base.find().filter((decoration) => !removed.has(identity(decoration))),
       ...add,
     ]);
   }
@@ -206,7 +264,7 @@ function update(tr: Transaction, previous: DecorationSet) {
 
 function reveal(state: EditorState, base: DecorationSet, focused: boolean) {
   if (!focused) return base;
-  const pairs = activeSourcePairs(state, collectPairs(state.doc), true);
+  const pairs = activeSourcePairs(state, selectionPairs(state), true);
   return revealSourceDelimiters(state, base, pairs);
 }
 
@@ -230,12 +288,17 @@ function emptyPair(state: EditorState, opening: string, closing: string) {
   );
 }
 
-export function sourceInlineActive(editor: Editor | null, mark: SourceMarkName) {
+export function sourceInlineActive(
+  editor: Editor | null,
+  mark: SourceMarkName,
+) {
   if (!editor) return false;
   const kind = sourceMarkSyntax[mark].kind;
+  // The toolbar reads this for every state change, so keep the scan local to
+  // the selection instead of walking long documents on each caret move.
   const pairs = activeSourcePairs(
     editor.state,
-    collectPairs(editor.state.doc).filter((pair) => pair.kind === kind),
+    selectionPairs(editor.state).filter((pair) => pair.kind === kind),
   );
   if (pairs.length) return true;
   if (mark === 'code') {
@@ -287,17 +350,29 @@ export function toggleSourceInline(editor: Editor, mark: SourceMarkName) {
     tr.setSelection(TextSelection.create(tr.doc, pos + opening.length));
   } else {
     const ranges: { from: number; to: number }[] = [];
-    state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
-      if (!node.isTextblock) return;
-      if (!node.type.spec.code) {
-        const from = Math.max(pos + 1, state.selection.from);
-        const to = Math.min(pos + 1 + node.content.size, state.selection.to);
-        if (to > from) ranges.push({ from, to });
-      }
-      return false;
-    });
+    state.doc.nodesBetween(
+      state.selection.from,
+      state.selection.to,
+      (node, pos) => {
+        if (!node.isTextblock) return;
+        if (!node.type.spec.code) {
+          let from = Math.max(pos + 1, state.selection.from);
+          let to = Math.min(pos + 1 + node.content.size, state.selection.to);
+          // Delimiters cannot hug whitespace, so keep edge spaces outside.
+          while (from < to && /\s/.test(state.doc.textBetween(from, from + 1)))
+            from++;
+          while (to > from && /\s/.test(state.doc.textBetween(to - 1, to)))
+            to--;
+          if (to > from) ranges.push({ from, to });
+        }
+        return false;
+      },
+    );
     if (!ranges.length) return false;
-    for (const range of ranges.reverse()) {
+    const ordered = [...ranges].sort((a, b) => a.from - b.from);
+    const first = ordered[0];
+    const last = ordered[ordered.length - 1];
+    for (const range of [...ordered].reverse()) {
       let opening: string = syntax.opening;
       let closing: string = syntax.closing;
       if (mark === 'code') {
@@ -306,11 +381,12 @@ export function toggleSourceInline(editor: Editor, mark: SourceMarkName) {
       }
       tr.insertText(closing, range.to).insertText(opening, range.from);
     }
+    // Keep the selection on the wrapped text, not across the delimiters.
     tr.setSelection(
       TextSelection.create(
         tr.doc,
-        tr.mapping.map(state.selection.from, 1),
-        tr.mapping.map(state.selection.to, -1),
+        tr.mapping.map(first.from, 1),
+        tr.mapping.map(last.to, -1),
       ),
     );
   }
@@ -323,35 +399,37 @@ export const SourceInlineSyntax = Extension.create({
   name: 'sourceInlineSyntax',
   addProseMirrorPlugins() {
     let syntaxClick:
-      | { pos: number; outside: boolean; pair: SourcePair }
-      | undefined;
+      { pos: number; outside: boolean; pair: SourcePair } | undefined;
+    let compositionSelection:
+      { from: number; to: number; text: string } | undefined;
+    let lastSelection: { from: number; to: number } | undefined;
     return [
       new Plugin({
         key,
         state: {
           init: (_, state) => {
-            const { decorations, pairs } = decorate(state.doc);
+            const decorations = decorate(state.doc);
             return {
               base: decorations,
               visible: decorations,
-              pairs,
               focused: false,
             };
           },
           apply: (tr, previous, _oldState, state) => {
+            if (!state.selection.empty)
+              lastSelection = {
+                from: state.selection.from,
+                to: state.selection.to,
+              };
             const base = tr.docChanged
               ? update(tr, previous.base)
               : previous.base;
-            const pairs = tr.docChanged
-              ? collectPairs(state.doc)
-              : previous.pairs;
             const focused = tr.getMeta(key) ?? previous.focused;
             return tr.docChanged ||
               tr.selectionSet ||
               focused !== previous.focused
               ? {
                   base,
-                  pairs,
                   focused,
                   visible: reveal(state, base, focused),
                 }
@@ -410,7 +488,7 @@ export const SourceInlineSyntax = Extension.create({
             )
               return false;
             const pos = view.state.selection.from;
-            const pair = collectPairs(view.state.doc).find((candidate) =>
+            const pair = pairsAt(view.state.doc, pos).find((candidate) =>
               event.key === 'ArrowRight' || event.key === 'Delete'
                 ? candidate.from === pos
                 : candidate.to === pos,
@@ -433,6 +511,45 @@ export const SourceInlineSyntax = Extension.create({
             return true;
           },
           handleDOMEvents: {
+            compositionstart: (view) => {
+              // The browser may collapse or move the selection before this
+              // event, so rely on the last non-empty selection instead.
+              if (lastSelection && lastSelection.from !== lastSelection.to)
+                compositionSelection = {
+                  ...lastSelection,
+                  text: view.state.doc.textBetween(
+                    lastSelection.from,
+                    lastSelection.to,
+                  ),
+                };
+              return false;
+            },
+            compositionend: (view, event) => {
+              const saved = compositionSelection;
+              compositionSelection = undefined;
+              // Chrome deletes the selection when a composition is cancelled.
+              // Put the text back and restore the selection over it.
+              if (!saved || !saved.text || event.data) return false;
+              requestAnimationFrame(() => {
+                if (view.isDestroyed) return;
+                const size = () => view.state.doc.content.size;
+                const from = Math.min(saved.from, size());
+                if (
+                  view.state.doc.textBetween(
+                    from,
+                    Math.min(from + saved.text.length, size()),
+                  ) !== saved.text
+                )
+                  view.dispatch(view.state.tr.insertText(saved.text, from));
+                const end = Math.min(from + saved.text.length, size());
+                view.dispatch(
+                  view.state.tr.setSelection(
+                    TextSelection.create(view.state.doc, from, end),
+                  ),
+                );
+              });
+              return false;
+            },
             mousedown: (view, event) => {
               syntaxClick = undefined;
               if (!isInlineSyntaxClick(view, event) || event.detail > 1)
@@ -442,7 +559,7 @@ export const SourceInlineSyntax = Extension.create({
                 top: event.clientY,
               })?.pos;
               if (pos === undefined) return false;
-              const pair = collectPairs(view.state.doc).find(
+              const pair = pairsAt(view.state.doc, pos).find(
                 (candidate) => pos >= candidate.from && pos <= candidate.to,
               );
               if (!pair) return false;
@@ -501,10 +618,7 @@ export function prepareSourceInlineSerialize(document: {
 
 export function serializeSourceInlineMarkdown(
   document: { type?: string; content?: unknown },
-  serialize: (document: {
-    type?: string;
-    content?: unknown;
-  }) => string,
+  serialize: (document: { type?: string; content?: unknown }) => string,
 ) {
   return protectSourceInlineMarkdown(
     prepareSourceInlineSerialize(document),

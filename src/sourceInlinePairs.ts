@@ -6,31 +6,6 @@ function isEscaped(source: string, index: number) {
   return slashes % 2 === 1;
 }
 
-function skipCodeSpan(source: string, index: number) {
-  const run = /^`+/.exec(source.slice(index));
-  if (!run) return index;
-  const fence = run[0];
-  const end = source.indexOf(fence, index + fence.length);
-  return end < 0 ? index : end + fence.length;
-}
-
-/** Mask characters inside inline code so other scanners treat them as inert. */
-function maskCodeSpans(source: string) {
-  let out = '';
-  for (let i = 0; i < source.length; ) {
-    if (source[i] === '`' && !isEscaped(source, i)) {
-      const end = skipCodeSpan(source, i);
-      if (end > i) {
-        out += '\ufffc'.repeat(end - i);
-        i = end;
-        continue;
-      }
-    }
-    out += source[i++];
-  }
-  return out;
-}
-
 function canOpen(source: string, index: number, length: number) {
   const next = source[index + length];
   return next !== undefined && !/\s/.test(next);
@@ -111,28 +86,44 @@ function underlinePairs(source: string, masked: string) {
 
 function codePairs(source: string) {
   const pairs: SourcePair[] = [];
-  for (let i = 0; i < source.length; ) {
+  for (let i = 0; i < source.length;) {
     if (source[i] !== '`' || isEscaped(source, i)) {
       i++;
       continue;
     }
-    const run = /^`+/.exec(source.slice(i))![0];
-    const end = source.indexOf(run, i + run.length);
-    if (end < 0 || end === i + run.length) {
-      i += run.length;
+    const run = /^`+/.exec(source.slice(i))![0].length;
+    // Content may itself start with a backtick, merging it into the opener's
+    // run. Try shorter fences from the same run until one closes exactly.
+    let fence = 0;
+    let end = -1;
+    for (let length = run; length >= 1 && end < 0; length--) {
+      const marker = '`'.repeat(length);
+      let at = i + length;
+      while (at <= source.length - length) {
+        const found = source.indexOf(marker, at);
+        if (found < 0) break;
+        const width = /^`+/.exec(source.slice(found))![0].length;
+        if (width === length && found > i + length) {
+          end = found;
+          fence = length;
+          break;
+        }
+        at = found + width;
+      }
+    }
+    if (end < 0) {
+      i += run;
       continue;
     }
-    // Closing fence must not be longer by adjacent ticks; indexOf finds the
-    // next equal-length run, matching CommonMark's backtick span rule.
     pairs.push({
       from: i,
-      to: end + run.length,
-      openLen: run.length,
-      closeLen: run.length,
+      to: end + fence,
+      openLen: fence,
+      closeLen: fence,
       kind: 'code',
       tag: 'code',
     });
-    i = end + run.length;
+    i = end + fence;
   }
   return pairs;
 }
@@ -162,19 +153,17 @@ function emphasisPairs(masked: string) {
   return [...bold, ...italic];
 }
 
-function occupied(pairs: readonly SourcePair[]) {
-  const taken = new Uint8Array(
-    pairs.reduce((max, pair) => Math.max(max, pair.to), 0),
-  );
-  for (const pair of pairs)
-    for (let i = pair.from; i < pair.to; i++) taken[i] = 1;
-  return taken;
-}
-
-function withoutOccupied(pairs: SourcePair[], taken: Uint8Array) {
-  return pairs.filter((pair) => {
-    for (let i = pair.from; i < pair.to; i++) if (taken[i]) return false;
-    return true;
+// A pair may contain code (or sit inside it), but a pair that half-overlaps a
+// code span would produce unbalanced markup.
+function crossesAny(
+  pair: SourcePair,
+  ranges: readonly { from: number; to: number }[],
+) {
+  return ranges.some((range) => {
+    if (pair.from >= range.to || pair.to <= range.from) return false;
+    const contains = pair.from <= range.from && pair.to >= range.to;
+    const inside = pair.from >= range.from && pair.to <= range.to;
+    return !contains && !inside;
   });
 }
 
@@ -184,16 +173,18 @@ function withoutOccupied(pairs: SourcePair[], taken: Uint8Array) {
  */
 export function sourceInlinePairs(source: string): SourcePair[] {
   const codes = codePairs(source);
-  const masked = maskCodeSpans(source);
-  const underlines = underlinePairs(source, masked);
-  const strikes = symmetricPairs(masked, '~~', 'strike', 's');
-  // Underline/strike may overlap code masks already; drop anything that still
-  // lands on a code span, then mask those ranges before emphasis.
-  const taken = occupied(codes);
+  // Mask from the same pairing result so merged fences stay literal for the
+  // other scanners too.
+  const masked = maskOffsets(
+    source,
+    codes.map((pair) => ({ from: pair.from, to: pair.to })),
+  );
+  // Underline/strike may contain code; only drop the ones that cross a code
+  // boundary and would serialize to unbalanced markup.
   const outside = [
-    ...withoutOccupied(underlines, taken),
-    ...withoutOccupied(strikes, taken),
-  ];
+    ...underlinePairs(source, masked),
+    ...symmetricPairs(masked, '~~', 'strike', 's'),
+  ].filter((pair) => !crossesAny(pair, codes));
   // Code is fully literal. Underline/strike only reserve their delimiter
   // characters so nested emphasis inside their content can still pair.
   const forEmphasis = maskOffsets(masked, [

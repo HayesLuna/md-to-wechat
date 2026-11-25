@@ -15,12 +15,7 @@ export type SourcePair = {
 };
 
 export type SourceKind =
-  | 'bold'
-  | 'italic'
-  | 'strike'
-  | 'code'
-  | 'underline'
-  | 'highlight';
+  'bold' | 'italic' | 'strike' | 'code' | 'underline' | 'highlight';
 
 export function contentRange(pair: SourcePair) {
   return { from: pair.from + pair.openLen, to: pair.to - pair.closeLen };

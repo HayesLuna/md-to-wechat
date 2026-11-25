@@ -38,7 +38,8 @@ function sortedSourceMarks(
 }
 
 function withoutSourceMarks(
-  marks: readonly { type: string; attrs?: Record<string, unknown> }[] | undefined,
+  marks:
+    readonly { type: string; attrs?: Record<string, unknown> }[] | undefined,
 ) {
   return (marks || []).filter((mark) => !isSourceMark(mark.type));
 }
@@ -55,16 +56,14 @@ function delimiterFor(
   return sourceMarkSyntax[name][edge];
 }
 
-function codeContentFrom(
-  children: JSONContent[],
-  start: number,
-): string {
+function codeContentFrom(children: JSONContent[], start: number): string {
   let text = '';
   for (let index = start; index < children.length; index++) {
     const child = children[index];
     if (!child.marks?.some((mark) => mark.type === 'code')) break;
     text +=
-      child.text ?? (child.type === 'hardBreak' ? '\n' : child.type ? '\ufffc' : '');
+      child.text ??
+      (child.type === 'hardBreak' ? '\n' : child.type ? '\ufffc' : '');
   }
   return text;
 }
@@ -80,7 +79,10 @@ export function parseSourceInlineMarks(document: JSONContent): JSONContent {
     if (!node.type || node.type === 'text') return node;
 
     const children = node.content.map((child) => restore(child, code));
-    if (code || !children.some((child) => child.marks?.some((m) => isSourceMark(m.type))))
+    if (
+      code ||
+      !children.some((child) => child.marks?.some((m) => isSourceMark(m.type)))
+    )
       return { ...node, content: children };
 
     // Only rewrite textblock-like content that actually carries marks on leaves.
@@ -91,38 +93,38 @@ export function parseSourceInlineMarks(document: JSONContent): JSONContent {
 
     const editable: JSONContent[] = [];
     let open: SourceMarkName[] = [];
+    // A code span's closing fence must match the one chosen for its content,
+    // otherwise multi-backtick spans serialize into unrunnable source.
+    const fences: Partial<Record<SourceMarkName, string>> = {};
+    const closingText = (name: SourceMarkName) =>
+      name === 'code' && fences.code
+        ? fences.code
+        : delimiterFor(name, 'closing', '');
     for (let index = 0; index < children.length; index++) {
       const child = children[index];
       const next = sortedSourceMarks(child.marks);
       for (const name of [...open].reverse()) {
         if (next.includes(name)) continue;
-        editable.push({
-          type: 'text',
-          text: delimiterFor(name, 'closing', ''),
-        });
+        editable.push({ type: 'text', text: closingText(name) });
       }
       for (const name of next) {
         if (open.includes(name)) continue;
-        const text =
-          name === 'code' ? codeContentFrom(children, index) : '';
+        const text = name === 'code' ? codeContentFrom(children, index) : '';
+        const opening = delimiterFor(name, 'opening', text);
+        if (name === 'code') fences.code = opening;
         editable.push({
           type: 'text',
-          text: delimiterFor(name, 'opening', text),
+          text: opening,
         });
       }
       open = next;
       editable.push({
         ...child,
-        ...(child.marks
-          ? { marks: withoutSourceMarks(child.marks) }
-          : {}),
+        ...(child.marks ? { marks: withoutSourceMarks(child.marks) } : {}),
       });
     }
     for (const name of [...open].reverse()) {
-      editable.push({
-        type: 'text',
-        text: delimiterFor(name, 'closing', ''),
-      });
+      editable.push({ type: 'text', text: closingText(name) });
     }
     return { ...node, content: editable };
   };
@@ -156,7 +158,18 @@ function marksForOffset(
   const marks: { type: string }[] = [];
   for (const pair of pairs) {
     if (offset >= pair.from + pair.openLen && offset < pair.to - pair.closeLen)
-      marks.push({ type: pair.kind === 'bold' ? 'bold' : pair.kind === 'italic' ? 'italic' : pair.kind === 'strike' ? 'strike' : pair.kind === 'code' ? 'code' : 'underline' });
+      marks.push({
+        type:
+          pair.kind === 'bold'
+            ? 'bold'
+            : pair.kind === 'italic'
+              ? 'italic'
+              : pair.kind === 'strike'
+                ? 'strike'
+                : pair.kind === 'code'
+                  ? 'code'
+                  : 'underline',
+      });
   }
   // Stable nesting order for serializer.
   return marks.sort(
@@ -311,10 +324,7 @@ export function materializeSourceInlineMarks(
         while (
           end < piece.end &&
           !delimiter[end] &&
-          marksEqual(
-            marksForOffset(pairs, offset),
-            marksForOffset(pairs, end),
-          )
+          marksEqual(marksForOffset(pairs, offset), marksForOffset(pairs, end))
         )
           end++;
         pushText(

@@ -95,11 +95,9 @@ for (const [tag, opening, closing] of [
   test(`blank above text following active ${tag} projects to the clicked column or line end`, async ({
     page,
   }) => {
-    for (const offset of [6, 7]) {
-      await ready(
-        page,
-        '前文' + opening + '测试中' + closing + '后文\n\n下一段正文',
-      );
+    const source = '前文' + opening + '测试中' + closing + '后文';
+    for (const atLineEnd of [false, true]) {
+      await ready(page, source + '\n\n下一段正文');
       const paragraph = page.locator('.article-editor > p').first();
       const formatted = paragraph.locator(tag);
       const edge = await formatted.evaluate((element) => {
@@ -115,15 +113,14 @@ for (const [tag, opening, closing] of [
       await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
         2,
       );
+      // Either the column right after the formatted text, or past the line end.
       const target = await point(
         page,
-        '前文' + opening + '测试中' + closing + '后文',
-        offset === 6
-          ? 2 + opening.length + 3
-          : 2 + opening.length + 3 + closing.length,
+        source,
+        atLineEnd ? source.length : 2 + opening.length + 3,
       );
       const box = (await paragraph.boundingBox())!;
-      await page.mouse.click(target.x + (offset === 7 ? 40 : 0), box.y - 1);
+      await page.mouse.click(target.x + (atLineEnd ? 200 : 0), box.y - 1);
       await insertAt(page, target.pos);
     }
   });
@@ -134,9 +131,9 @@ test('blank to the right of a trailing formatted span inserts outside it', async
 }) => {
   const source = '前文 `测试`';
   await ready(page, source);
-  const inside = await point(page, '前文 测试', 4);
+  const inside = await point(page, source, 5);
   await page.mouse.click(inside.x, (inside.top + inside.bottom) / 2);
-  const trailing = await point(page, '前文 测试', 5);
+  const trailing = await point(page, source, source.length);
   await page.mouse.click(trailing.x + 70, (trailing.top + trailing.bottom) / 2);
   await page.keyboard.insertText('X');
   expect(
@@ -184,7 +181,9 @@ for (const [tag, opening, closing] of [
     for (const index of [0, 2]) {
       await page.keyboard.press('Home');
       await format.click();
-      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
+      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
+        2,
+      );
       const x = await format.evaluate((element, index) => {
         const text = document
           .createTreeWalker(element, NodeFilter.SHOW_TEXT)
@@ -223,7 +222,7 @@ test('dragging across a revealed underline keeps both delimiters expanded', asyn
   ] as const) {
     await underline.click();
     await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-    const from = await point(page, source, 5);
+    const from = await point(page, source, 7);
     const end = await point(page, source, endOffset);
     const y = (from.top + from.bottom) / 2;
     await page.mouse.move(from.x, y);
@@ -239,7 +238,7 @@ test('dragging across a revealed underline keeps both delimiters expanded', asyn
 });
 
 for (const [tag, syntax, text, selected, startAt] of [
-  ['u', '<u>下划线</u>', '前文<u>下划线</u>后文', '划线</u>后文', 5],
+  ['u', '<u>下划线</u>', '前文<u>下划线</u>后文', '划线</u>后文', 6],
   ['mark', '==下划线==', '前文==下划线==后文', '划线==后文', 5],
 ] as const) {
   test(`dragging from inside collapsed ${tag} keeps the original character as the anchor`, async ({
@@ -366,7 +365,7 @@ test('a click above an inline-formatted heading retains its code mark and insert
   page,
 }) => {
   await ready(page, '前面的正文\n\n## 带有**加粗文字**和 `inline` 的标题');
-  const text = '带有加粗文字和 inline 的标题',
+  const text = '带有**加粗文字**和 `inline` 的标题',
     at = await point(page, text, text.indexOf('inline') + 3);
   const heading = (await page.locator('.article-editor h2').boundingBox())!;
   await page.mouse.click(at.x, heading.y - 10);

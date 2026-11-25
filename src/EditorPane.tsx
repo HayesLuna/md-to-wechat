@@ -23,7 +23,7 @@ import {
 import { NodeSelection, Plugin } from '@tiptap/pm/state';
 import { copyImage } from './clipboard';
 import { closeHistory } from '@tiptap/pm/history';
-import { Slice } from '@tiptap/pm/model';
+import { Fragment, Slice } from '@tiptap/pm/model';
 import {
   InlineImage,
   SmartCode,
@@ -41,7 +41,10 @@ import {
   prepareSourceInlineSerialize,
   sourceInlineActive,
 } from './sourceInlineSyntax';
-import { protectSourceInlineMarkdown } from './sourceInlineMarkdown';
+import {
+  materializeSourceInlineMarks,
+  protectSourceInlineMarkdown,
+} from './sourceInlineMarkdown';
 import { safeURL, isImageName } from './outputUtils';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
@@ -52,10 +55,7 @@ import {
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
-import {
-  cancelEditorMarkdown,
-  scheduleEditorMarkdown,
-} from './editorMarkdown';
+import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
 const HighlightMarkdown = Markdown.extend({
   onBeforeCreate(event) {
@@ -207,6 +207,23 @@ export function EditorPane({
     () => ({
       clipboardTextSerializer: (slice) =>
         markdownSelection(editorRef.current, slice),
+      // Copy rich HTML from real marks: the document keeps source delimiters as
+      // text, so serializing it directly would emit literal `**` into the HTML.
+      transformCopied: (slice, view) => {
+        const materialized = materializeSourceInlineMarks({
+          type: 'doc',
+          content: slice.content.toJSON(),
+        });
+        if (!materialized.content) return slice;
+        const { schema } = view.state;
+        return new Slice(
+          Fragment.fromArray(
+            materialized.content.map((node) => schema.nodeFromJSON(node)),
+          ),
+          slice.openStart,
+          slice.openEnd,
+        );
+      },
       attributes: {
         class: 'article-editor',
         spellcheck: 'false',
@@ -253,8 +270,7 @@ export function EditorPane({
             });
           return true;
         },
-        cut: (_view, event) =>
-          copyTaskMarkdown(editorRef.current, event, true),
+        cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
         keydown: (_view, event) => {
           plainPaste.current = !!(
             (event.ctrlKey || event.metaKey) &&

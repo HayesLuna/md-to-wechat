@@ -39,9 +39,7 @@ async function expandedDelimiter(
   await expect(expanded.first()).toBeVisible();
   if (syntax) {
     const match = expanded.filter({
-      hasText: new RegExp(
-        `^${syntax.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
-      ),
+      hasText: new RegExp(`^${syntax.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
     });
     await expect(match.first()).toBeVisible();
     return edge === 'opening' ? match.first() : match.last();
@@ -197,7 +195,7 @@ test('a native caret before the closing delimiter deletes in the requested direc
     .poll(() =>
       page.evaluate(() => (window as any).__mojian.editor.state.selection.head),
     )
-    .toBe(6);
+    .toBe(7);
   await page.keyboard.press('Delete');
   await expect(editor).toHaveText('前文 `测试 后文');
   await page.keyboard.press('ControlOrMeta+z');
@@ -399,7 +397,7 @@ test('IME cancellation restores the selection and commit replaces the delimiter 
       }),
     )
     .toBe('u');
-  await expect(editor).toHaveText('前文下划线后文');
+  await expect(editor).toHaveText('前文<u>下划线</u>后文');
   await session.send('Input.imeSetComposition', {
     text: '你',
     selectionStart: 1,
@@ -442,7 +440,7 @@ test('dragging a delimiter across cells uses a cell selection before deleting', 
   await page.keyboard.press('Backspace');
   await expect(cells).toHaveText(['', '']);
   await page.keyboard.press('ControlOrMeta+z');
-  await expect(cells).toHaveText(['前文下划线后文', '第二格']);
+  await expect(cells).toHaveText(['前文<u>下划线</u>后文', '第二格']);
 });
 
 test('copying a complete code span preserves the literal source and its rich format', async ({
@@ -503,7 +501,7 @@ test('the outer delimiter of nested formatting can be hit between its characters
   await page.mouse.click(middle.x + 0.5, middle.y);
   await page.keyboard.insertText('X');
   await expect(editor).toHaveText('前文 <u>*X*下划线**</u> 后文');
-  await expect(editor.locator('u')).toHaveText('下划线');
+  await expect(editor.locator('u').filter({ hasText: '下划线' })).toBeVisible();
 });
 
 test('an underline delimiter inside a link can be dragged without selecting the link text', async ({
@@ -548,12 +546,13 @@ test('pasting a PNG replaces the saved delimiter selection in one undo step', as
   });
   const image = editor.locator('.node-inlineImage');
   await expect(image.locator('img')).toHaveAttribute('alt', 'delimiter.png');
+  // The image replaces the selected "u", splitting the "<u>" opener in two.
   expect(
     await image.evaluate((element) => [
       element.previousSibling?.textContent,
       element.nextSibling?.textContent,
     ]),
-  ).toEqual(['前文<', '>下划线</u>后文']);
+  ).toEqual(['<', '>']);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(image).toHaveCount(0);
   await expect(mark).toHaveText('下划线');
@@ -699,9 +698,10 @@ for (const [tag, delimiter, source, inside, outside] of [
         await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
           2,
         );
-        await expect(
-          page.locator('.highlight-delimiter.expanded'),
-        ).toHaveText([delimiter, delimiter]);
+        await expect(page.locator('.highlight-delimiter.expanded')).toHaveText([
+          delimiter,
+          delimiter,
+        ]);
       }
     }
     expect(
@@ -751,12 +751,13 @@ test('underline round-trips as Typora syntax and is rendered in publication prev
 }) => {
   await ready(page, '前文 <u>**下划线**</u> 与 ++旧下划线++ 后文');
   const editor = page.locator('.article-editor');
-  await expect(
-    editor.locator('u').filter({ hasText: '下划线' }),
-  ).toHaveText(['下划线', '旧下划线']);
-  await expect(editor.locator('strong').filter({ hasText: '下划线' })).toHaveText(
+  await expect(editor.locator('u').filter({ hasText: '下划线' })).toHaveText([
     '下划线',
-  );
+    '旧下划线',
+  ]);
+  await expect(
+    editor.locator('strong').filter({ hasText: '下划线' }),
+  ).toHaveText('下划线');
   const canonical = await page.evaluate(() => {
     const { editor } = (window as any).__mojian;
     const markdown = editor.getMarkdown();
@@ -850,7 +851,7 @@ test('typing the opening backtick last formats existing text as inline code', as
   ).toBe('前文 `hello` 后文');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(code).toHaveCount(0);
-  await expect(editor).toHaveText('前文 `hello` 后文');
+  await expect(editor).toHaveText('前文 hello` 后文');
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await expect(code).toHaveText('hello');
   // Caret remains after the opening delimiter once the pair is restored.
@@ -1003,7 +1004,9 @@ for (const [name, text] of [
       const e = (window as any).__mojian.editor;
       let at = -1;
       e.state.doc.descendants((n: any, p: number) => {
-        if (n.isText && n.text === '前面后面') at = p + 2;
+        // Source delimiters keep the paragraph in one text node.
+        if (n.isText && n.text?.includes('前面后面'))
+          at = p + n.text.indexOf('前面后面') + 2;
       });
       e.commands.setTextSelection(at);
       e.commands.focus();
@@ -1027,11 +1030,14 @@ for (const [name, text] of [
       ),
     ).toBe(from + 2);
     await page.keyboard.type('X');
+    // Inline source keeps its delimiters as text; block markers are not part
+    // of the text content.
+    const content = text.replace(/^(#{1,6} |- \[[ x]\] |- |\d+\. )/, '');
     expect(
       await page.evaluate(
         () => (window as any).__mojian.editor.state.doc.textContent,
       ),
-    ).toBe('前面\t\tX后面');
+    ).toBe(content.replace('前面后面', '前面\t\tX后面'));
     expect(
       await page.evaluate(
         () => (window as any).__mojian.editor.state.selection.from,

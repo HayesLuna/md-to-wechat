@@ -37,8 +37,15 @@ const key = new PluginKey<{
 }>('mojian-source-highlight');
 
 function pairFromDecoration(decoration: Decoration): HighlightPair {
-  const pair = decoration.spec.pair as HighlightPair | undefined;
-  return pair ?? { from: decoration.from - 2, to: decoration.to + 2 };
+  // Store the pair as offsets relative to this content slice: absolute positions
+  // in a spec go stale as soon as the decoration set is mapped across an edit,
+  // which silently stopped delimiters revealing after earlier blocks shifted.
+  const lead = decoration.spec.lead as number | undefined;
+  const trail = decoration.spec.trail as number | undefined;
+  return {
+    from: decoration.from - (lead ?? 2),
+    to: decoration.to + (trail ?? 2),
+  };
 }
 
 // Blank-space hit testing can land among collapsed closing equals, which have
@@ -254,29 +261,37 @@ export const TyporaHighlight = Mark.create({
             ? '\n'
             : '\ufffc';
       });
-      const nestedDelimiters = sourceInlinePairs(sourceText).flatMap(
-        (pair) => [
-          {
-            from: pos + 1 + pair.from,
-            to: pos + 1 + pair.from + pair.openLen,
-          },
-          {
-            from: pos + 1 + pair.to - pair.closeLen,
-            to: pos + 1 + pair.to,
-          },
-        ],
-      );
+      const nestedDelimiters = sourceInlinePairs(sourceText).flatMap((pair) => [
+        {
+          from: pos + 1 + pair.from,
+          to: pos + 1 + pair.from + pair.openLen,
+        },
+        {
+          from: pos + 1 + pair.to - pair.closeLen,
+          to: pos + 1 + pair.to,
+        },
+      ]);
       return pairs.flatMap((relative) => {
         const from = pos + 1 + relative.from,
           to = pos + 1 + relative.to;
-        const pair = { from, to };
         return [
           ...splitContentDecorations(
             from + 2,
             to - 2,
             nestedDelimiters,
             { nodeName: 'mark' },
-            { highlight: true, pair },
+            { highlight: true },
+          ).map((decoration) =>
+            Decoration.inline(
+              decoration.from,
+              decoration.to,
+              { nodeName: 'mark' },
+              {
+                highlight: true,
+                lead: decoration.from - from,
+                trail: to - decoration.to,
+              },
+            ),
           ),
           Decoration.inline(
             from,

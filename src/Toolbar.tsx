@@ -1,10 +1,7 @@
 import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
 import { highlightActive, toggleSourceHighlight } from './sourceHighlight';
-import {
-  sourceInlineActive,
-  toggleSourceInline,
-} from './sourceInlineSyntax';
+import { sourceInlineActive, toggleSourceInline } from './sourceInlineSyntax';
 import {
   Bold,
   Italic,
