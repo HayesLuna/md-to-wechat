@@ -33,6 +33,7 @@ import {
   StructuredListItem,
   StructuredTaskItem,
   MarkdownStarterKit,
+  normalizeListItemContent,
 } from './editorExtensions';
 import { TyporaHighlight, HighlightLiteral } from './sourceHighlight';
 import {
@@ -83,8 +84,8 @@ function modifiedLink(event: MouseEvent, dom: HTMLElement) {
 export function safeDocument(editor: Editor, markdown: string) {
   const json = editor.markdown!.parse(markdown);
   function clean(n: JSONContent) {
-    if (n.type === 'listItem' && n.content?.[0]?.type !== 'paragraph')
-      n.content = [{ type: 'paragraph' }, ...(n.content || [])];
+    if (n.type === 'listItem' || n.type === 'taskItem')
+      n.content = normalizeListItemContent(n.content);
     if (n.marks)
       n.marks = n.marks.filter(
         (m) => m.type !== 'link' || safeURL(m.attrs?.href || ''),

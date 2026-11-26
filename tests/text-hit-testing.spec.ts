@@ -692,3 +692,36 @@ test('empty code row 1 accepts a side-space caret without selecting the previous
   await page.mouse.click(row.x, row.y);
   await insertAt(page, row.pos);
 });
+
+for (const [label, prefix] of [
+  ['list item', '- '],
+  ['task item', '- [ ] '],
+]) {
+  test(`tight ${label} text after a code block wraps in a paragraph and accepts mouse focus`, async ({
+    page,
+  }) => {
+    const line = '看到本地日志打印 `200` 空体，说明穿透路由已通。';
+    const md = `${prefix}先试探穿透：\n  \`\`\`bash\n  curl -i https://example.com\n  \`\`\`\n  ${line}`;
+    await ready(page, md);
+    await page.evaluate(() => (window as any).__mojian.editor.state.doc.check());
+    const target = await page.evaluate(() => {
+      const e = (window as any).__mojian.editor;
+      let start = -1;
+      e.state.doc.descendants((n: any, p: number) => {
+        if (n.isTextblock && n.textContent.includes('看到本地日志打印'))
+          start = p;
+      });
+      if (start < 0) throw new Error('missing paragraph');
+      const pos = start + 1 + 4;
+      const rect = e.view.coordsAtPos(pos);
+      return { pos, x: rect.left + 0.15, y: (rect.top + rect.bottom) / 2 };
+    });
+    await page.mouse.click(target.x, target.y);
+    await insertAt(page, target.pos);
+    const saved = await page.evaluate(() =>
+      (window as any).__mojian.getMarkdown(),
+    );
+    expect(saved).toContain('`200`');
+    expect(saved).not.toContain('\\`200\\`');
+  });
+}

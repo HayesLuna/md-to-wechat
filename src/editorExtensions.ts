@@ -86,6 +86,37 @@ export const MarkdownStarterKit = StarterKit.extend({
   },
 });
 
+const listItemInlineTypes = new Set(['text', 'hardBreak', 'inlineImage']);
+
+/**
+ * Ensures every direct child of a list/task item is a block node and the first
+ * child is a paragraph. Tight list items with blocks (such as code blocks)
+ * followed by text produce bare inline nodes that cannot host a ProseMirror caret.
+ */
+export function normalizeListItemContent(
+  content: JSONContent[] | undefined,
+): JSONContent[] {
+  const normalized: JSONContent[] = [];
+  let inlineBuffer: JSONContent[] = [];
+  const flush = () => {
+    if (!inlineBuffer.length) return;
+    normalized.push({ type: 'paragraph', content: inlineBuffer });
+    inlineBuffer = [];
+  };
+  for (const child of content || []) {
+    if (!child.type || listItemInlineTypes.has(child.type)) {
+      inlineBuffer.push(child);
+    } else {
+      flush();
+      normalized.push(child);
+    }
+  }
+  flush();
+  if (normalized[0]?.type !== 'paragraph')
+    normalized.unshift({ type: 'paragraph' });
+  return normalized;
+}
+
 export const StructuredTaskItem = TaskItem.extend({
   parseHTML() {
     // Editor HTML has a direct content wrapper. A descendant div may belong
@@ -96,17 +127,19 @@ export const StructuredTaskItem = TaskItem.extend({
         element.querySelector(':scope > div') ?? element,
     }));
   },
+  parseMarkdown(token, h) {
+    const parsed = this.parent?.(token, h) || [];
+    if (parsed && !Array.isArray(parsed))
+      parsed.content = normalizeListItemContent(parsed.content);
+    return parsed;
+  },
 });
 
 export const StructuredListItem = ListItem.extend({
   parseMarkdown(token, h) {
     const parsed = this.parent?.(token, h) || [];
-    if (
-      parsed &&
-      !Array.isArray(parsed) &&
-      parsed.content?.[0]?.type !== 'paragraph'
-    )
-      parsed.content = [h.createNode('paragraph'), ...(parsed.content || [])];
+    if (parsed && !Array.isArray(parsed))
+      parsed.content = normalizeListItemContent(parsed.content);
     return parsed;
   },
   renderMarkdown(node, h, ctx) {
