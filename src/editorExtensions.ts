@@ -695,6 +695,19 @@ export const EditingRules = Extension.create({
     return [
       new Plugin({
         key,
+        filterTransaction(tr, state) {
+          // Deleting or cutting selected text within a single block should
+          // empty that block rather than letting TipTap's clearDocument replace
+          // a lone code block, heading, quote, or list item with a paragraph.
+          if (
+            tr.docChanged &&
+            state.selection instanceof TextSelection &&
+            !state.selection.empty &&
+            state.selection.$from.sameParent(state.selection.$to)
+          )
+            tr.setMeta('preventClearDocument', true);
+          return true;
+        },
         state: {
           init: (_, state) => ({
             indentDecorations: buildIndentDecorations(state.doc),

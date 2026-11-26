@@ -54,13 +54,21 @@ class BlockBookmark {
     readonly edge: 'left' | 'right' | null = null,
   ) {}
   map(mapping: Mappable) {
-    return new BlockBookmark(mapping.map(this.pos), this.edge);
+    return new BlockBookmark(
+      mapping.map(this.pos, this.edge === 'right' ? -1 : 1),
+      this.edge,
+    );
   }
   resolve(doc: Node): Selection {
     const $pos = doc.resolve(Math.min(this.pos, doc.content.size));
-    return isBoundary($pos)
-      ? new BlockCursor($pos, this.edge)
-      : Selection.near($pos);
+    if (!isBoundary($pos)) return Selection.near($pos);
+    const edge =
+      this.edge === 'right' && !isCursorBlock($pos.nodeBefore)
+        ? 'left'
+        : this.edge === 'left' && !isCursorBlock($pos.nodeAfter)
+          ? 'right'
+          : this.edge;
+    return new BlockCursor($pos, edge);
   }
 }
 class BlockCursorSelection extends GapCursor {
@@ -155,13 +163,25 @@ function paintedBlock(view: EditorView, pos: number) {
     : dom;
 }
 
+function trailingBlockSelection(view: EditorView, event: MouseEvent) {
+  const last = view.state.doc.lastChild;
+  if (!isCursorBlock(last)) return null;
+  const pos = view.state.doc.content.size - last!.nodeSize;
+  const rect = paintedBlock(view, pos)?.getBoundingClientRect();
+  if (!rect || event.clientY <= rect.bottom) return null;
+  const $end = view.state.doc.resolve(view.state.doc.content.size);
+  return isBoundary($end)
+    ? sideSelection(view.state.doc, $end.pos, 'right')
+    : null;
+}
+
 function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
   const bounds = view.dom.getBoundingClientRect();
   const hit = view.posAtCoords({
     left: Math.max(bounds.left + 1, Math.min(bounds.right - 1, event.clientX)),
     top: event.clientY,
   });
-  if (!hit) return null;
+  if (!hit) return trailingBlockSelection(view, event);
   const $hit = view.state.doc.resolve(hit.pos);
   const candidates = new Set<number>();
   if (hit.inside >= 0) candidates.add(hit.inside);
@@ -196,11 +216,11 @@ function blockSelectionAtCoords(view: EditorView, event: MouseEvent) {
     );
     if (isBoundary($pos)) return sideSelection(view.state.doc, $pos.pos, edge);
   }
-  return null;
+  return trailingBlockSelection(view, event);
 }
 
 function deleteBlock(view: EditorView, from: number, to: number) {
-  const tr = view.state.tr.delete(from, to);
+  const tr = closeHistory(view.state.tr).delete(from, to);
   const $pos = tr.doc.resolve(Math.min(from, tr.doc.content.size));
   if (isBoundary($pos))
     tr.setSelection(
@@ -211,6 +231,8 @@ function deleteBlock(view: EditorView, from: number, to: number) {
       ),
     );
   view.dispatch(tr.scrollIntoView());
+  // Keep subsequent edits in their own undo step after whole-block removal.
+  view.dispatch(closeHistory(view.state.tr));
 }
 
 function updateBlockIndent(view: EditorView, pos: number, indent: number) {
@@ -370,7 +392,9 @@ export const BlockBoundaries = Extension.create({
               !(event.target instanceof Element) ||
               !surface?.contains(event.target) ||
               !view.dom.getClientRects().length ||
-              event.target.closest('button, input, select, textarea, a')
+              event.target.closest(
+                'button, input, select, textarea, a, [role="separator"]',
+              )
             )
               return;
             const selection = blockSelectionAtCoords(view, event);

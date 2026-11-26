@@ -161,6 +161,11 @@ for (const [tag, opening, closing] of inlineFormats) {
             (edge === 'closing' ? remaining : closing) +
             ' 后文',
         );
+        // Once the pair is broken, stale delimiter decorations must be removed
+        // so the remaining delimiter stays visible (strong degrades to italic).
+        await expect(editor.locator('.highlight-delimiter')).toHaveCount(
+          tag === 'strong' ? 2 : 0,
+        );
         await page.keyboard.press('ControlOrMeta+z');
         await expect(mark).toHaveText('测试');
       }
@@ -546,13 +551,15 @@ test('pasting a PNG replaces the saved delimiter selection in one undo step', as
   });
   const image = editor.locator('.node-inlineImage');
   await expect(image.locator('img')).toHaveAttribute('alt', 'delimiter.png');
-  // The image replaces the selected "u", splitting the "<u>" opener in two.
+  // The image replaces the selected "u", breaking the "<u>" opener and clearing
+  // its delimiter decorations so the surrounding literal text stays visible.
   expect(
     await image.evaluate((element) => [
       element.previousSibling?.textContent,
       element.nextSibling?.textContent,
     ]),
-  ).toEqual(['<', '>']);
+  ).toEqual(['前文<', '>下划线</u>后文']);
+  await expect(editor.locator('.highlight-delimiter')).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(image).toHaveCount(0);
   await expect(mark).toHaveText('下划线');
@@ -1209,4 +1216,37 @@ test('backward code selection preserves tabs, NBSP and literal Markdown fences i
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     source,
   );
+});
+
+test('wrapping and unwrapping inline code around a distant highlight updates highlight delimiters', async ({
+  page,
+}) => {
+  const editor = page.locator('.article-editor');
+  await ready(page, '`foo ==效果== bar`');
+  await expect(editor.locator('code')).toHaveText('foo ==效果== bar');
+  await expect(editor.locator('mark')).toHaveCount(0);
+
+  // Deleting the opening backtick far from `==` must reveal the `==效果==` highlight.
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    e.commands.setTextSelection(2);
+    e.view.focus();
+  });
+  await page.keyboard.press('Backspace');
+  await expect(editor.locator('code')).toHaveCount(0);
+  await expect(editor.locator('mark')).toHaveText('效果');
+  // The stray closing backtick must not keep a stale collapsed delimiter span.
+  await expect(editor.locator('.highlight-delimiter')).toHaveCount(2);
+
+  // Re-adding the opening backtick far from `==` must remove the highlight and
+  // its collapsed `==` delimiters so `==` stays visible inside inline code.
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    e.commands.setTextSelection(1);
+    e.view.focus();
+  });
+  await page.keyboard.type('`');
+  await expect(editor.locator('code')).toHaveText('foo ==效果== bar');
+  await expect(editor.locator('mark')).toHaveCount(0);
+  await expect(editor.locator('.highlight-delimiter')).toHaveCount(2);
 });

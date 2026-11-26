@@ -590,6 +590,129 @@ test('empty paragraph deletion returns to gap; repeated deletion selects, then r
     (await doc(page)).content.some((n: any) => n.type === 'codeBlock'),
   ).toBe(false);
 });
+for (const [type, markdown] of cursorBlocks)
+  test(`${type}: deleting trailing text then Backspace moves caret to block right edge, then selects and removes block`, async ({
+    page,
+  }) => {
+    await ready(page, markdown + '\n\n后文');
+    const paragraph = page.locator('.article-editor > p').last();
+    await paragraph.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    expect((await doc(page)).content.at(-1)).toMatchObject({
+      type: 'paragraph',
+    });
+    expect(await selection(page)).toMatchObject({ type: 'text' });
+
+    await page.keyboard.press('Backspace');
+    expect((await doc(page)).content.map((n: any) => n.type)).toEqual([type]);
+    expect(await selection(page)).toMatchObject({
+      type: 'blockCursor',
+      edge: 'right',
+    });
+    await expect(page.locator('.block-side-cursor')).toBeVisible();
+    const block = (await page.locator(blockSelectors[type]).boundingBox())!;
+    const caret = await bottomCaret(page, block);
+    expect(caret.x).toBeGreaterThan(block.x + block.width);
+
+    await page.keyboard.press('Backspace');
+    expect(await selection(page)).toMatchObject({ type: 'node' });
+    expect((await doc(page)).content.map((n: any) => n.type)).toEqual([type]);
+
+    await page.keyboard.press('Backspace');
+    expect((await doc(page)).content.some((n: any) => n.type === type)).toBe(
+      false,
+    );
+
+    await page.keyboard.press('ControlOrMeta+z');
+    expect((await doc(page)).content.map((n: any) => n.type)).toEqual([type]);
+  });
+test('codeBlock: holding Backspace from trailing empty paragraph stops at right-edge cursor without deleting the block', async ({
+  page,
+}) => {
+  await ready(page, blocks[0][1] + '\n\n后');
+  await page.locator('.article-editor > p').last().click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.down('Backspace');
+  await page.keyboard.down('Backspace');
+  await page.keyboard.down('Backspace');
+  await page.keyboard.up('Backspace');
+  expect((await doc(page)).content.map((n: any) => n.type)).toEqual([
+    'codeBlock',
+  ]);
+  expect(await selection(page)).toMatchObject({
+    type: 'blockCursor',
+    edge: 'right',
+  });
+});
+for (const [type, markdown] of cursorBlocks)
+  test(`${type}: clicking blank space below a trailing block places right-edge cursor and accepts prose`, async ({
+    page,
+  }) => {
+    await ready(page, markdown);
+    const before = await doc(page);
+    const box = (await page.locator(blockSelectors[type]).boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height + 60);
+    expect(await doc(page)).toEqual(before);
+    expect(await selection(page)).toMatchObject({
+      type: 'blockCursor',
+      edge: 'right',
+    });
+    await expect(page.locator('.block-side-cursor')).toBeVisible();
+    await page.keyboard.type('下方正文');
+    expect((await doc(page)).content).toMatchObject([
+      { type },
+      { type: 'paragraph', content: [{ type: 'text', text: '下方正文' }] },
+    ]);
+  });
+test('clearing selected text inside a lone heading, quote, or list preserves block structure', async ({
+  page,
+}) => {
+  for (const [markdown, expectedType] of [
+    ['# 标题', 'heading'],
+    ['> 引用', 'blockquote'],
+    ['- 列表', 'bulletList'],
+  ] as const) {
+    await ready(page, markdown);
+    await page.evaluate(() => {
+      const e = (window as any).__mojian.editor;
+      let from = 0;
+      let to = 0;
+      e.state.doc.descendants((node: any, pos: number) => {
+        if (node.isTextblock) {
+          from = pos + 1;
+          to = pos + 1 + node.content.size;
+        }
+      });
+      e.commands.setTextSelection({ from, to });
+      e.view.focus();
+    });
+    await page.keyboard.press('Backspace');
+    expect((await doc(page)).content.map((n: any) => n.type)).toEqual([
+      expectedType,
+    ]);
+  }
+});
+test('codeBlock: after deleting trailing empty paragraph to right-edge cursor, typing inserts a new paragraph', async ({
+  page,
+}) => {
+  await ready(page, blocks[0][1] + '\n\n后');
+  await page.locator('.article-editor > p').last().click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  expect(await selection(page)).toMatchObject({
+    type: 'blockCursor',
+    edge: 'right',
+  });
+  await page.keyboard.type('新内容');
+  expect((await doc(page)).content).toMatchObject([
+    { type: 'codeBlock' },
+    { type: 'paragraph', content: [{ type: 'text', text: '新内容' }] },
+  ]);
+});
 test('Chinese composition at a gap creates a normal paragraph', async ({
   page,
 }) => {

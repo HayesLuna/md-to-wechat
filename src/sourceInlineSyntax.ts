@@ -116,7 +116,7 @@ function decorate(doc: PMNode) {
   const decorations: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return;
-    decorations.push(...sourcePairDecorations(blockPairs(node, pos)));
+    decorations.push(...decorateBlock(node, pos));
     return false;
   });
   return DecorationSet.create(doc, decorations);
@@ -244,7 +244,6 @@ function update(tr: Transaction, previous: DecorationSet) {
     const existing = new Map(
       base
         .find(pos + 1, pos + 1 + node.content.size)
-        .filter((decoration) => decoration.spec.sourceInline)
         .map((decoration) => [identity(decoration), decoration]),
     );
     for (const decoration of decorateBlock(node, pos))

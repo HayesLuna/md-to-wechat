@@ -148,6 +148,7 @@ export function EditorPane({
     () => [
       MarkdownStarterKit.configure({
         gapcursor: false,
+        trailingNode: false,
         paragraph: false,
         heading: false,
         codeBlock: false,

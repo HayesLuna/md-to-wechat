@@ -340,12 +340,12 @@ export const TyporaHighlight = Mark.create({
           return false;
         const context = (doc: PMNode, from: number, to: number) =>
           doc.textBetween(
-            Math.max(0, from - 2),
-            Math.min(doc.content.size, to + 2),
+            Math.max(0, from - 4),
+            Math.min(doc.content.size, to + 4),
             '\n',
             '\ufffc',
           );
-        return !/[=\\\r\n\ufffc]/.test(
+        return !/[`*~<\\=\r\n\ufffc]/.test(
           context(before, step.from, step.to) +
             context(after, step.from, step.from + step.slice.size),
         );
@@ -387,7 +387,11 @@ export const TyporaHighlight = Mark.create({
       const remove: Decoration[] = [],
         add: Decoration[] = [];
       const identity = (decoration: Decoration) =>
-        `${decoration.from}:${decoration.to}:${decoration.spec.highlight ? 'content' : 'delimiter'}`;
+        `${decoration.from}:${decoration.to}:${
+          decoration.spec.highlight
+            ? `content:${decoration.spec.lead}:${decoration.spec.trail}`
+            : 'delimiter'
+        }`;
       for (const [pos, node] of blocks) {
         const existing = new Map(
           base
