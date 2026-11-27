@@ -50,12 +50,16 @@ async function selection(page: Page) {
     };
   });
 }
-async function prepared(page: Page) {
-  await page.waitForFunction(() => {
+async function prepared(page: Page, needsPreview = false) {
+  await page.waitForFunction((needsPreview) => {
     const m = (window as any).__mojian;
     const o = m.getOutput();
-    return o && o.key === JSON.stringify([m.getMarkdown(), m.getSettings()]);
-  });
+    return (
+      o &&
+      (!needsPreview || o.previewReady) &&
+      o.key === JSON.stringify([m.getMarkdown(), m.getSettings()])
+    );
+  }, needsPreview);
 }
 
 test('Chinese line shortcuts, composition guard, undo and literal symbols', async ({
@@ -633,13 +637,18 @@ test('rich clipboard unsupported has no writeText fallback and prepares fresh sn
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.locator('.toast')).toContainText('不支持富文本');
   expect(await page.evaluate(() => (window as any).__fallback)).toBe(0);
-  await setDoc(page, '最新版本');
-  await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
+  const copy = page.getByRole('button', { name: '复制到公众号', exact: true });
+  await copy.evaluate((button) => {
+    // Request a copy in the same turn as the edit, before rendering can finish.
+    window.__mojian!.setMarkdown('最新版本');
+    (button as HTMLButtonElement).click();
+  });
   await expect(page.locator('.toast')).toContainText('准备');
   await prepared(page);
   expect(
     await page.evaluate(() => (window as any).__mojian.getOutput().text),
   ).toContain('最新版本');
+  expect(await page.evaluate(() => (window as any).__fallback)).toBe(0);
 });
 
 test('drag image resize is one undoable action, preserve context selection, normal Markdown input and save failure retains draft', async ({
@@ -714,8 +723,8 @@ test('local placeholders and embedded diagrams are written in both clipboard for
     page,
     '# 含图片\n\n![缺失但保留位置](local-image:missing "width=30%")\n\n```mermaid\nflowchart LR\nA-->B\n```',
   );
-  await prepared(page);
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await prepared(page, true);
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('Mermaid 图形 1');
   await page
