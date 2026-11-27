@@ -25,9 +25,18 @@ const launchOptions = executablePath
       }
     : {};
 
-// Balance files using successful CI timings (2026-11-03), rather than test
-// counts: the old equal-count shards took 2.3, 2.2 and 5.2 minutes. New files
-// automatically join group 3; the groups remain disjoint and cover all tests.
+const perfFiles = ['performance', 'text-selection-performance'].map(
+  (name) => `**/${name}.spec.ts`,
+);
+const perfOnly = process.argv.some(
+  (arg) =>
+    arg === 'perf' ||
+    arg === '--project=perf' ||
+    /performance\.spec\.ts/.test(arg),
+);
+
+// Balance functional files across parallel CI shards while isolating CPU-bound
+// performance tests into their own single-worker `perf` project.
 const group1 = [
   'sharing',
   'draft-reorder',
@@ -52,17 +61,22 @@ const group2 = [
   'media-preview',
   'smoke',
   'optimization',
-  'json-layout',
 ].map((name) => `**/${name}.spec.ts`);
 
 export default defineConfig({
   testDir: './tests',
-  // Keep one worker per runner so performance tests never compete for CPU.
-  workers: 1,
+  testIgnore: ['**/unit/**'],
+  // Functional files run in parallel across workers; performance specs always
+  // stay on a single worker so timing assertions never compete for CPU.
+  workers: perfOnly ? 1 : process.env.CI ? 2 : 4,
   projects: [
     { name: '1', testMatch: group1 },
     { name: '2', testMatch: group2 },
-    { name: '3', testIgnore: [...group1, ...group2] },
+    {
+      name: '3',
+      testIgnore: [...group1, ...group2, ...perfFiles, '**/unit/**'],
+    },
+    { name: 'perf', testMatch: perfFiles },
   ],
   timeout: 30000,
   retries: 0,
@@ -78,7 +92,7 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -- --port ${Number(port)} --strictPort`,
     url: baseURL,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },
 });

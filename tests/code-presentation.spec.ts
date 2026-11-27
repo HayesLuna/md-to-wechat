@@ -1,10 +1,8 @@
-import { test, expect } from './fixtures';
-import { findCodeFolds } from '../src/codeFolding';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 const source =
   'function outer() {\n  const data = "{ brace in a string }";\n  if (data) {\n    console.log(data);\n  }\n}';
 async function ready(page: Page, text = source, language = 'javascript') {
-  await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     ({ text, language }) =>
@@ -19,37 +17,6 @@ const json = (page: Page) =>
   page.evaluate(() => (window as any).__mojian.editor.getJSON());
 const markdown = (page: Page) =>
   page.evaluate(() => (window as any).__mojian.editor.getMarkdown());
-
-test('fold analysis ignores braces in quoted strings and supports comments, JSON, indentation and tags', () => {
-  const regions = findCodeFolds(source, 'javascript');
-  expect(regions).toHaveLength(2);
-  expect(regions.map((r) => source.slice(r.from, r.to))).toContain(
-    '\n    console.log(data);\n  ',
-  );
-  expect(
-    findCodeFolds(
-      '/* comment\nsecond line */\nconst text = "{\\"}";',
-      'javascript',
-    ),
-  ).toHaveLength(1);
-  expect(
-    findCodeFolds('{\n  "key": [\n    "}",\n    "value"\n  ]\n}', 'json'),
-  ).toHaveLength(2);
-  expect(
-    findCodeFolds(
-      'def outer():\n    if value:\n        return value\n    return None\nnext_value = 1',
-      'python',
-    ),
-  ).toHaveLength(2);
-  expect(
-    findCodeFolds(
-      '<div>\n  <section>\n    <br>\n    text\n  </section>\n</div>',
-      'html',
-    ),
-  ).toHaveLength(2);
-  expect(findCodeFolds('const unfinished = {\n', 'javascript')).toEqual([]);
-  expect(findCodeFolds('x'.repeat(200001), 'javascript')).toEqual([]);
-});
 
 test('line numbers update with editing, use larger traffic lights and keep the native caret', async ({
   page,

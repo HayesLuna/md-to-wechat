@@ -1,7 +1,6 @@
-import { test, expect } from './fixtures';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 async function ready(page: Page, markdown: string) {
-  await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text),

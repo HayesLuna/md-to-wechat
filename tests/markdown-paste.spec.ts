@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 const sample = readFileSync(
@@ -6,7 +6,6 @@ const sample = readFileSync(
   'utf8',
 );
 async function ready(page: Page, text = '') {
-  await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text),
@@ -41,7 +40,7 @@ for (const level of [1, 2, 3, 4, 5, 6])
     await page.keyboard.type(prefix);
     await paste(page, ' 粘贴的**标题**\n\n后面的正文');
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的**标题**',
+      '粘贴的标题',
     );
     await expect(page.locator(`.article-editor h${level} strong`)).toHaveText(
       '标题',
@@ -51,14 +50,14 @@ for (const level of [1, 2, 3, 4, 5, 6])
     await expect(page.locator('.article-editor')).toHaveText(prefix);
     await page.keyboard.press('ControlOrMeta+Shift+z');
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的**标题**',
+      '粘贴的标题',
     );
     await page
       .getByRole('button', { name: 'Markdown 源码', exact: true })
       .click();
     await page.getByRole('button', { name: '所见即所得', exact: true }).click();
     await expect(page.locator(`.article-editor h${level}`)).toHaveText(
-      '粘贴的**标题**',
+      '粘贴的标题',
     );
   });
 

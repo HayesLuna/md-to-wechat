@@ -22,8 +22,7 @@ test('plain paragraphs insert a literal Tab at the caret, preserving marks, undo
     (window as any).__mojian.setMarkdown(
       '**1. 签注与日期**\n\n后面的段落\n\n```js\nconst value = 1;\n```',
     );
-    // The bold delimiters stay in the document, so the text starts after `**`.
-    e.commands.setTextSelection(6);
+    e.commands.setTextSelection(4);
     e.commands.focus();
   });
   const title = page.locator('.article-editor p').first();

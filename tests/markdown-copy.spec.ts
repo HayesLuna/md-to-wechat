@@ -1,7 +1,7 @@
-import { test, expect } from './fixtures';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 async function ready(page: Page, text: string) {
-  await page.goto('/');
+  if (page.url() === 'about:blank') await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text),
@@ -11,7 +11,7 @@ async function ready(page: Page, text: string) {
 async function copy(page: Page, type = 'copy') {
   return page.evaluate((type) => {
     const editor = (window as any).__mojian.editor;
-    editor.commands.focus(undefined, { scrollIntoView: false });
+    editor.view.focus();
     const data = new DataTransfer();
     editor.view.dom.dispatchEvent(
       new ClipboardEvent(type, {

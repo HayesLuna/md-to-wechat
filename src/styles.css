@@ -342,6 +342,7 @@ button.primary:hover {
   scroll-padding-top: 24px;
 }
 .editor-host {
+  position: relative;
   max-width: 900px;
   margin: auto;
   padding: 36px 44px 100px;
@@ -362,22 +363,9 @@ button.primary:hover {
   background: #fff3a3;
   color: inherit;
 }
-.article-editor .highlight-delimiter {
-  color: #95969f;
-  font-weight: 400;
-  font-style: normal;
-  text-decoration: none;
-}
 .article-editor::selection,
 .article-editor ::selection {
   background-color: var(--selection-background);
-}
-.article-editor .highlight-delimiter:not(.expanded) {
-  /* Keep the native caret full height while collapsing the syntax width. */
-  font-size: inherit;
-  font-family: monospace;
-  color: transparent;
-  letter-spacing: -1ch;
 }
 .article-editor h1,
 .article-editor h2 {
@@ -528,37 +516,25 @@ button.primary:hover {
   font-size: 13px;
   background: #f1f2f3;
   color: #63606c;
-  margin-inline-start: 4px;
+  margin-inline: 4px;
   padding: 3px 5px;
   border-radius: 3px;
   font-family: Consolas, Menlo, monospace;
 }
-.inline-mark-boundary-caret {
-  display: inline-block;
-  position: relative;
-  width: 0;
-  height: 1em;
-  pointer-events: none;
-}
-/* Hide the intermediate native caret while the mouse button is down. */
-.article-editor:focus:not(.inline-code-composing):is(
-    .inline-mark-click-pending,
-    .inline-syntax-range,
-    :has(.inline-mark-boundary-caret)
-  ) {
+.editor-host.has-boundary-caret .article-editor:focus {
   caret-color: transparent;
 }
-.article-editor:focus:not(.inline-code-composing)
-  .inline-mark-boundary-caret::after {
-  content: '';
+.mark-boundary-caret {
+  display: none;
   position: absolute;
-  left: 0;
-  bottom: -0.18em;
   width: 1px;
-  height: 1.15em;
   background: #252528;
-  transform: translateX(var(--inline-mark-caret-offset, 0px));
+  pointer-events: none;
   animation: editor-cursor-blink 1.1s steps(2, start) infinite;
+}
+.editor-host.has-boundary-caret:has(.article-editor:focus)
+  .mark-boundary-caret {
+  display: block;
 }
 .article-editor hr {
   border: 0;

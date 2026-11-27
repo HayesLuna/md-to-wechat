@@ -1,7 +1,6 @@
-import { test, expect } from './fixtures';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 async function ready(page: Page, markdown: string) {
-  await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text),
@@ -96,29 +95,23 @@ for (const [tag, opening, closing] of [
     page,
   }) => {
     const source = '前文' + opening + '测试中' + closing + '后文';
+    const text = '前文测试中后文';
     for (const atLineEnd of [false, true]) {
       await ready(page, source + '\n\n下一段正文');
       const paragraph = page.locator('.article-editor > p').first();
       const formatted = paragraph.locator(tag);
       const edge = await formatted.evaluate((element) => {
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const text = walker.nextNode()!;
+        const node = walker.nextNode()!;
         const range = document.createRange();
-        range.setStart(text, text.textContent!.length);
+        range.setStart(node, node.textContent!.length);
         range.collapse(false);
         const { x, y, height } = range.getBoundingClientRect();
         return { x: x - 2, y: y + height / 2 };
       });
       await page.mouse.click(edge.x, edge.y);
-      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
-        2,
-      );
       // Either the column right after the formatted text, or past the line end.
-      const target = await point(
-        page,
-        source,
-        atLineEnd ? source.length : 2 + opening.length + 3,
-      );
+      const target = await point(page, text, atLineEnd ? text.length : 5);
       const box = (await paragraph.boundingBox())!;
       await page.mouse.click(target.x + (atLineEnd ? 200 : 0), box.y - 1);
       await insertAt(page, target.pos);
@@ -126,144 +119,27 @@ for (const [tag, opening, closing] of [
   });
 }
 
-test('blank to the right of a trailing formatted span inserts outside it', async ({
-  page,
-}) => {
-  const source = '前文 `测试`';
-  await ready(page, source);
-  const inside = await point(page, source, 5);
-  await page.mouse.click(inside.x, (inside.top + inside.bottom) / 2);
-  const trailing = await point(page, source, source.length);
-  await page.mouse.click(trailing.x + 70, (trailing.top + trailing.bottom) / 2);
-  await page.keyboard.insertText('X');
-  expect(
-    await page.evaluate(() => (window as any).__mojian.editor.getMarkdown()),
-  ).toBe(source + 'X');
-});
-
-test('blank above the first code character keeps typing inside the span', async ({
+test('blank above formatted text places the caret at the clicked column', async ({
   page,
 }) => {
   await ready(page, '前文 `测试` 后文');
   const paragraph = page.locator('.article-editor > p');
   const code = paragraph.locator('code');
-  const textStart = () =>
-    code.evaluate((element) => {
-      const text = document
-        .createTreeWalker(element, NodeFilter.SHOW_TEXT)
-        .nextNode()!;
-      const range = document.createRange();
-      range.setStart(text, 0);
-      range.collapse(true);
-      const rect = range.getBoundingClientRect();
-      return { x: rect.x + 1, y: rect.y + rect.height / 2 };
-    });
-  const initial = await textStart();
-  await page.mouse.click(initial.x, initial.y);
-  await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-  const shown = await textStart();
+  const textStart = await code.evaluate((element) => {
+    const text = document
+      .createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      .nextNode()!;
+    const range = document.createRange();
+    range.setStart(text, 1);
+    range.collapse(true);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x, y: rect.y + rect.height / 2 };
+  });
   const box = (await paragraph.boundingBox())!;
-  await page.mouse.click(shown.x, box.y - 8);
+  await page.mouse.click(textStart.x, box.y - 8);
   await page.keyboard.insertText('新');
-  await expect(code).toHaveText('新测试');
+  await expect(code).toHaveText('测新试');
 });
-
-for (const [tag, opening, closing] of [
-  ['u', '<u>', '</u>'],
-  ['em', '*', '*'],
-] as const) {
-  test(`blank above the first and last ${tag} glyph can place the caret inside the format`, async ({
-    page,
-  }) => {
-    await ready(page, '前文' + opening + '下划线' + closing + '后文');
-    const paragraph = page.locator('.article-editor > p');
-    const format = paragraph.locator(tag);
-    for (const index of [0, 2]) {
-      await page.keyboard.press('Home');
-      await format.click();
-      await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(
-        2,
-      );
-      const x = await format.evaluate((element, index) => {
-        const text = document
-          .createTreeWalker(element, NodeFilter.SHOW_TEXT)
-          .nextNode()!;
-        const range = document.createRange();
-        range.setStart(text, index);
-        range.setEnd(text, index + 1);
-        const { left, width } = range.getBoundingClientRect();
-        return left + width * (index === 0 ? 0.28 : 0.73);
-      }, index);
-      const box = (await paragraph.boundingBox())!;
-      await page.mouse.click(x, box.y - 8);
-      await page.keyboard.insertText('X');
-      await expect(format).toHaveText(index === 0 ? 'X下划线' : '下划线X');
-      await page.keyboard.press('ControlOrMeta+z');
-      await expect(format).toHaveText('下划线');
-    }
-  });
-}
-
-test('dragging across a revealed underline keeps both delimiters expanded', async ({
-  page,
-}) => {
-  const source = '前文<u>下划线</u>后文';
-  await ready(page, source + '\n\n下一段正文');
-  const paragraph = page.locator('.article-editor > p').first();
-  const underline = paragraph.locator('u');
-  const selected = () =>
-    page.evaluate(() => {
-      const { doc, selection } = (window as any).__mojian.editor.state;
-      return doc.textBetween(selection.from, selection.to);
-    });
-  for (const [endOffset, expected] of [
-    [source.length, '线</u>后文'],
-    [0, '前文<u>下划'],
-  ] as const) {
-    await underline.click();
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-    const from = await point(page, source, 7);
-    const end = await point(page, source, endOffset);
-    const y = (from.top + from.bottom) / 2;
-    await page.mouse.move(from.x, y);
-    await page.mouse.down();
-    await page.mouse.move(end.x, y, { steps: 8 });
-    await expect.poll(selected).toBe(expected);
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-    await page.mouse.up();
-    await expect.poll(selected).toBe(expected);
-    await page.locator('.article-editor > p').last().click();
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
-  }
-});
-
-for (const [tag, syntax, text, selected, startAt] of [
-  ['u', '<u>下划线</u>', '前文<u>下划线</u>后文', '划线</u>后文', 6],
-  ['mark', '==下划线==', '前文==下划线==后文', '划线==后文', 5],
-] as const) {
-  test(`dragging from inside collapsed ${tag} keeps the original character as the anchor`, async ({
-    page,
-  }) => {
-    await ready(page, '前文' + syntax + '后文');
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(0);
-    const start = await point(page, text, startAt);
-    const y = (start.top + start.bottom) / 2;
-    await page.mouse.move(start.x, y);
-    await page.mouse.down();
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-    const end = await point(page, text, text.length);
-    await page.mouse.move(end.x + 8, y, { steps: 8 });
-    const selection = () =>
-      page.evaluate(() => {
-        const { doc, selection } = (window as any).__mojian.editor.state;
-        return doc.textBetween(selection.from, selection.to);
-      });
-    await expect.poll(selection).toBe(selected);
-    await page.mouse.up();
-    await expect.poll(selection).toBe(selected);
-    await expect(page.locator('.highlight-delimiter.expanded')).toHaveCount(2);
-  });
-}
 
 for (const edge of ['left', 'right'])
   test(`the ${edge} margin at a paragraph-gap midpoint focuses the lower line without losing the caret`, async ({
@@ -365,7 +241,7 @@ test('a click above an inline-formatted heading retains its code mark and insert
   page,
 }) => {
   await ready(page, '前面的正文\n\n## 带有**加粗文字**和 `inline` 的标题');
-  const text = '带有**加粗文字**和 `inline` 的标题',
+  const text = '带有加粗文字和 inline 的标题',
     at = await point(page, text, text.indexOf('inline') + 3);
   const heading = (await page.locator('.article-editor h2').boundingBox())!;
   await page.mouse.click(at.x, heading.y - 10);
@@ -575,9 +451,11 @@ for (const type of ['heading', 'code'] as const)
       e.commands.setTextSelection(1);
       e.view.focus();
       (window as any).__caretSequence = [];
-      e.on('selectionUpdate', () => {
+      const record = () => {
         (window as any).__caretSequence.push(e.state.selection.head);
-      });
+      };
+      (window as any).__caretRecord = record;
+      e.on('selectionUpdate', record);
     });
     await page.mouse.move(target.x, target.y);
     await page.mouse.down();
@@ -600,9 +478,13 @@ for (const type of ['heading', 'code'] as const)
       Array.from({ length: 3 }, () => ({ model: target.pos, dom: target.pos })),
     );
     await page.mouse.up();
-    expect(await page.evaluate(() => (window as any).__caretSequence)).toEqual([
-      target.pos,
-    ]);
+    const sequence = await page.evaluate(() => {
+      const e = (window as any).__mojian.editor;
+      if ((window as any).__caretRecord)
+        e.off('selectionUpdate', (window as any).__caretRecord);
+      return (window as any).__caretSequence;
+    });
+    expect(sequence).toEqual([target.pos]);
     await insertAt(page, target.pos);
   });
 
@@ -703,7 +585,9 @@ for (const [label, prefix] of [
     const line = '看到本地日志打印 `200` 空体，说明穿透路由已通。';
     const md = `${prefix}先试探穿透：\n  \`\`\`bash\n  curl -i https://example.com\n  \`\`\`\n  ${line}`;
     await ready(page, md);
-    await page.evaluate(() => (window as any).__mojian.editor.state.doc.check());
+    await page.evaluate(() =>
+      (window as any).__mojian.editor.state.doc.check(),
+    );
     const target = await page.evaluate(() => {
       const e = (window as any).__mojian.editor;
       let start = -1;
@@ -725,3 +609,60 @@ for (const [label, prefix] of [
     expect(saved).not.toContain('\\`200\\`');
   });
 }
+
+test('blank space above or below inline code edges projects vertically to the matching inside or outside side', async ({
+  page,
+}) => {
+  await ready(page, '第一行\n\n121112`12334521123`213aa67\n\n第三行`tail`尾');
+  const paragraphs = page.locator('.article-editor > p');
+  const p0 = (await paragraphs.nth(0).boundingBox())!;
+  const p1 = (await paragraphs.nth(1).boundingBox())!;
+  const p2 = (await paragraphs.nth(2).boundingBox())!;
+  const code1 = (await paragraphs.nth(1).locator('code').boundingBox())!;
+  const code2 = (await paragraphs.nth(2).locator('code').boundingBox())!;
+
+  const snapshot = () =>
+    page.evaluate(() => {
+      const e = (window as any).__mojian.editor;
+      return { pos: e.state.selection.from, code: e.isActive('code') };
+    });
+
+  const gapY = (p0.y + p0.height + p1.y) / 2;
+  const leadingY = p1.y + 1;
+  const belowLastY = p2.y + p2.height + 24;
+
+  // Clicking above line 2 (in the paragraph gap or top leading) projects down to line 2.
+  for (const y of [gapY, leadingY]) {
+    for (const [x, expected] of [
+      [code1.x - 2, { pos: 12, code: false }],
+      [code1.x + 2, { pos: 12, code: true }],
+      [code1.x + code1.width - 2, { pos: 23, code: true }],
+      [code1.x + code1.width + 2, { pos: 23, code: false }],
+    ] as const) {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      expect(await snapshot()).toEqual(expected);
+      await page.mouse.up();
+      expect(await snapshot()).toEqual(expected);
+    }
+  }
+
+  // Clicking below the last line projects up to the last line's inline code edges.
+  for (const [x, expected] of [
+    [code2.x - 2, { pos: 35, code: false }],
+    [code2.x + 2, { pos: 35, code: true }],
+    [code2.x + code2.width - 2, { pos: 39, code: true }],
+    [code2.x + code2.width + 2, { pos: 39, code: false }],
+  ] as const) {
+    await page.mouse.move(x, belowLastY);
+    await page.mouse.down();
+    expect(await snapshot()).toEqual(expected);
+    await page.mouse.up();
+    expect(await snapshot()).toEqual(expected);
+  }
+
+  // Typing after clicking above the inside-right edge inserts inside code.
+  await page.mouse.click(code1.x + code1.width - 2, gapY);
+  await page.keyboard.type('X');
+  await expect(paragraphs.nth(1).locator('code')).toHaveText('12334521123X');
+});

@@ -1,9 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Markdown } from '@tiptap/markdown';
-import {
-  parseHighlightMarkdown,
-  serializeHighlightMarkdown,
-} from './highlight';
+import { escapePlainHighlights } from './highlight';
 import { ArticleTableKit, ArticleTaskList } from './markdownBlocks';
 import {
   lowlight,
@@ -20,11 +17,12 @@ import {
   type EditorOptions,
   type JSONContent,
 } from '@tiptap/core';
-import { NodeSelection, Plugin } from '@tiptap/pm/state';
+import { EditorState, NodeSelection, Plugin } from '@tiptap/pm/state';
 import { copyImage } from './clipboard';
 import { closeHistory } from '@tiptap/pm/history';
-import { Fragment, Slice } from '@tiptap/pm/model';
+import { Slice } from '@tiptap/pm/model';
 import {
+  Highlight,
   InlineImage,
   SmartCode,
   CleanParagraph,
@@ -35,17 +33,6 @@ import {
   MarkdownStarterKit,
   normalizeListItemContent,
 } from './editorExtensions';
-import { TyporaHighlight, HighlightLiteral } from './sourceHighlight';
-import {
-  SourceInlineSyntax,
-  parseSourceInlineMarks,
-  prepareSourceInlineSerialize,
-  sourceInlineActive,
-} from './sourceInlineSyntax';
-import {
-  materializeSourceInlineMarks,
-  protectSourceInlineMarkdown,
-} from './sourceInlineMarkdown';
 import { safeURL, isImageName } from './outputUtils';
 import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
@@ -56,23 +43,19 @@ import {
 } from './markdownPaste';
 import { codeHighlightKey } from './codeHighlight';
 import { BlockBoundaries } from './blockBoundaries';
+import { MarkBoundaries } from './markBoundaries';
 import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
-const HighlightMarkdown = Markdown.extend({
+const SafeMarkdown = Markdown.extend({
   onBeforeCreate(event) {
     this.parent?.(event);
     const manager = this.editor.markdown!;
-    const parse = manager.parse.bind(manager);
-    manager.parse = (markdown) =>
-      parseSourceInlineMarks(parseHighlightMarkdown(markdown, parse));
     const serialize = manager.serialize.bind(manager);
     manager.serialize = (document) =>
-      serializeHighlightMarkdown(
-        prepareSourceInlineSerialize(document),
-        (doc) => protectSourceInlineMarkdown(doc, serialize),
-      );
+      escapePlainHighlights(document, serialize);
   },
 });
+
 function modifiedLink(event: MouseEvent, dom: HTMLElement) {
   if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return null;
   const link =
@@ -114,6 +97,16 @@ export function replaceDocument(editor: Editor, markdown: string) {
     .setContent(json, { emitUpdate: false })
     .run();
 }
+export function resetDocument(editor: Editor, markdown: string) {
+  replaceDocument(editor, markdown);
+  editor.view.updateState(
+    EditorState.create({
+      doc: editor.state.doc,
+      selection: editor.state.selection,
+      plugins: editor.state.plugins,
+    }),
+  );
+}
 export function EditorPane({
   initial,
   readOnly,
@@ -147,6 +140,7 @@ export function EditorPane({
   const plainPaste = useRef(false);
   const extensions = useMemo(
     () => [
+      Highlight,
       MarkdownStarterKit.configure({
         gapcursor: false,
         trailingNode: false,
@@ -163,10 +157,7 @@ export function EditorPane({
         },
       }),
       StructuredListItem,
-      TyporaHighlight,
-      HighlightLiteral,
-      SourceInlineSyntax,
-      HighlightMarkdown.configure({
+      SafeMarkdown.configure({
         markedOptions: { gfm: true, breaks: false },
       }),
       CleanParagraph,
@@ -187,6 +178,7 @@ export function EditorPane({
       StructuredTaskItem.configure({ nested: true }),
       EditingRules,
       BlockBoundaries,
+      MarkBoundaries,
       Extension.create({
         name: 'readOnlyGuard',
         addProseMirrorPlugins() {
@@ -209,23 +201,6 @@ export function EditorPane({
     () => ({
       clipboardTextSerializer: (slice) =>
         markdownSelection(editorRef.current, slice),
-      // Copy rich HTML from real marks: the document keeps source delimiters as
-      // text, so serializing it directly would emit literal `**` into the HTML.
-      transformCopied: (slice, view) => {
-        const materialized = materializeSourceInlineMarks({
-          type: 'doc',
-          content: slice.content.toJSON(),
-        });
-        if (!materialized.content) return slice;
-        const { schema } = view.state;
-        return new Slice(
-          Fragment.fromArray(
-            materialized.content.map((node) => schema.nodeFromJSON(node)),
-          ),
-          slice.openStart,
-          slice.openEnd,
-        );
-      },
       attributes: {
         class: 'article-editor',
         spellcheck: 'false',
@@ -316,7 +291,7 @@ export function EditorPane({
           editor &&
           !literal &&
           !editor.isActive('codeBlock') &&
-          !sourceInlineActive(editor, 'code') &&
+          !editor.isActive('code') &&
           html.includes('data-mojian-image') &&
           new DOMParser()
             .parseFromString(html, 'text/html')
@@ -341,11 +316,24 @@ export function EditorPane({
           props.current.onPasteImage(file);
           return true;
         }
+        // Preserve storedMarks (e.g. caret at inside-left of inline code) when
+        // pasting plain text into inline code; ProseMirror's default paste drops them.
+        if (
+          editor &&
+          !editor.isActive('codeBlock') &&
+          editor.isActive('code') &&
+          text
+        ) {
+          event.preventDefault();
+          editor.view.dispatch(
+            editor.state.tr.insertText(text.replace(/\r?\n/g, ' ')),
+          );
+          return true;
+        }
         if (
           !editor ||
           literal ||
           editor.isActive('codeBlock') ||
-          sourceInlineActive(editor, 'code') ||
           !shouldParseMarkdownPaste(text, html)
         )
           return false;

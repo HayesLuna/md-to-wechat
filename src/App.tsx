@@ -65,7 +65,7 @@ import { copyRich, copyText } from './clipboard';
 import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
 import { ArticlePreview } from './ArticlePreview';
-import { EditorPane, replaceDocument } from './EditorPane';
+import { EditorPane, replaceDocument, resetDocument } from './EditorPane';
 import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
@@ -477,7 +477,7 @@ export default function App() {
         getSettings: () => current.current.settings,
         getOutput: () => output,
         setMarkdown: (text: string) => {
-          if (editor) replaceDocument(editor, text);
+          if (editor) resetDocument(editor, text);
           changed(text);
         },
       },

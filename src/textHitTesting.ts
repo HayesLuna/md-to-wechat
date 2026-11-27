@@ -1,8 +1,5 @@
 import type { EditorView } from '@tiptap/pm/view';
 import { TextSelection } from '@tiptap/pm/state';
-import { CellSelection, cellAround, inSameTable } from '@tiptap/pm/tables';
-import { afterHighlightClosingSyntax } from './sourceHighlight';
-import { afterSourceClosingSyntax } from './sourceInlineSyntax';
 
 export type TextLine = {
   left: number;
@@ -24,26 +21,6 @@ export function textPointMatches(
     rect.bottom >= point.top &&
     Math.abs(rect.left - point.left) <= 16
   );
-}
-
-export function inlineTextAnchor(
-  view: EditorView,
-  target: Element,
-  point: { left: number; top: number },
-) {
-  const mark = target.closest('code, strong, em, s, u, mark');
-  if (!mark || !view.dom.contains(mark)) return;
-  // Revealing collapsed delimiters shifts layout. Capture the model position
-  // before the browser recomputes the drag origin against the expanded text.
-  const pos = view.posAtCoords(point)?.pos;
-  if (pos === undefined) return;
-  const { from, to } = view.state.selection;
-  if (from < pos && pos < to) return;
-  if (
-    pos > view.posAtDOM(mark, 0) &&
-    pos < view.posAtDOM(mark, mark.childNodes.length)
-  )
-    return { pos };
 }
 
 // Model positions are ordered by visual row inside an ordinary textblock.
@@ -240,11 +217,7 @@ export function ordinaryTextAtCoords(
   }
   const start = pos + 1,
     end = start + node.content.size;
-  let caret = Math.max(start, Math.min(end, hit));
-  if (point.left > line.right) {
-    caret = afterHighlightClosingSyntax(view.state, caret);
-    caret = afterSourceClosingSyntax(view.state, caret);
-  }
+  const caret = Math.max(start, Math.min(end, hit));
   const selection = TextSelection.create(view.state.doc, caret);
   return { selection, line };
 }
@@ -274,24 +247,7 @@ export function retainLineAffinity(
 export type TextHit = {
   selection: TextSelection;
   line: TextLine;
-  keepSyntax?: boolean;
 };
-
-export function tableTextAtCoords(
-  view: EditorView,
-  point: { left: number; top: number },
-): TextHit | null {
-  const target = view.dom.ownerDocument.elementFromPoint(point.left, point.top);
-  const cell = target?.closest('td,th');
-  if (!cell || !view.dom.contains(cell)) return null;
-  const pos = view.posAtCoords(point)?.pos;
-  if (pos === undefined || !view.state.doc.resolve(pos).parent.inlineContent)
-    return null;
-  return {
-    selection: TextSelection.create(view.state.doc, pos),
-    line: view.coordsAtPos(pos),
-  };
-}
 
 const gestures = new WeakMap<EditorView, () => void>();
 export function endTextSelection(view: EditorView) {
@@ -308,7 +264,6 @@ export function beginTextSelection(
   const doc = view.dom.ownerDocument,
     source = view.state.doc,
     anchor = target.selection.head;
-  const anchorCell = cellAround(target.selection.$head);
   const surface = view.dom.closest('.writing-scroll')!;
   const inner =
     event.target instanceof Element
@@ -370,16 +325,6 @@ export function beginTextSelection(
           }
         : null);
     if (!text) return;
-    if (anchorCell) {
-      const headCell = cellAround(text.selection.$head);
-      if (!headCell || !inSameTable(anchorCell, headCell)) return;
-      if (anchorCell.pos !== headCell.pos) {
-        const selection = new CellSelection(anchorCell, headCell);
-        if (!selection.eq(view.state.selection))
-          view.dispatch(view.state.tr.setSelection(selection));
-        return;
-      }
-    }
     apply(text, true);
   };
   // Native dragging already scrolls itself. This loop handles the gestures

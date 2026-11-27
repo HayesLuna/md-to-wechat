@@ -15,8 +15,6 @@ import {
   ordinaryTextAtCoords,
   beginTextSelection,
   endTextSelection,
-  inlineTextAnchor,
-  tableTextAtCoords,
   textPointMatches,
 } from './textHitTesting';
 import { placeCodeCaret } from './codeFolding';
@@ -442,31 +440,12 @@ export const BlockBoundaries = Extension.create({
             }
             if (activate(event)) return;
             const point = { left: event.clientX, top: event.clientY };
-            const inTable = !!event.target.closest('.tableWrapper');
+            if (event.target.closest('.tableWrapper, a')) return;
             // Non-editable inline wrappers can cover otherwise blank space.
             // Native dragging there drags the atom rather than selecting text.
             const inEditableContent =
               view.dom.contains(event.target) &&
               !event.target.closest('[contenteditable="false"]');
-            if (inEditableContent && !view.composing) {
-              const text = inlineTextAnchor(view, event.target, point);
-              if (text?.pos !== undefined) {
-                beginTextSelection(
-                  view,
-                  event,
-                  {
-                    selection: TextSelection.create(view.state.doc, text.pos),
-                    line: view.coordsAtPos(text.pos),
-                  },
-                  (point) =>
-                    inTable
-                      ? tableTextAtCoords(view, point)
-                      : ordinaryTextAtCoords(view, point),
-                );
-                return;
-              }
-            }
-            if (inTable || event.target.closest('a')) return;
             if (inEditableContent && textPointMatches(view, point)) return;
             const target = ordinaryTextAtCoords(view, point);
             if (!target) return;

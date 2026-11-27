@@ -1341,7 +1341,7 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
   await setDoc(page, '选中的中文 后面的文字');
   await page.evaluate(() => {
     const e = (window as any).__mojian.editor;
-    e.commands.setTextSelection({ from: 1, to: 7 });
+    e.commands.setTextSelection({ from: 1, to: 6 });
     e.commands.focus();
   });
   const before = await selection(page);
@@ -1355,9 +1355,7 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
     'font-synthesis',
     'style',
   );
-  // Delimiters are real characters, so the selection keeps the same text but
-  // shifts right by the inserted opener.
-  expect((await selection(page)).from).toBe(before.from + 1);
+  expect((await selection(page)).from).toBe(before.from);
   expect(
     await page.evaluate(() => {
       const { doc, selection } = (window as any).__mojian.editor.state;
@@ -1402,7 +1400,7 @@ test('toolbar italic preserves selected Chinese text, toggles and persists into 
   );
 });
 
-test('toolbar keeps formatting active for a selection that spans whole blocks', async ({
+test('toolbar applies formatting across a mixed selection spanning whole blocks', async ({
   page,
 }) => {
   await ready(page);
@@ -1420,9 +1418,10 @@ test('toolbar keeps formatting active for a selection that spans whole blocks', 
     e.commands.focus();
   });
   const bold = page.getByRole('button', { name: '粗体', exact: true });
-  // The plain first and last blocks must not hide the bold block between them.
-  await expect(bold).toHaveAttribute('aria-pressed', 'true');
+  await expect(bold).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('.article-editor strong')).toHaveText('中间加粗');
+  await bold.click();
+  await expect(bold).toHaveAttribute('aria-pressed', 'true');
   await bold.click();
   expect(await markdown(page)).toBe('第一段\n\n中间加粗\n\n第三段');
   await expect(bold).toHaveAttribute('aria-pressed', 'false');
@@ -1831,8 +1830,8 @@ test('quote Backspace joins preceding paragraph while empty Enter splits the quo
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(2);
   await expect(
     page.locator('.article-editor blockquote > p').first(),
-  ).toHaveText('第一段 **粗体**第二段');
-  expect((await selection(page)).from).toBe(12);
+  ).toHaveText('第一段 粗体第二段');
+  expect((await selection(page)).from).toBe(8);
   await expect(page.locator('.article-editor strong')).toHaveText('粗体');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(3);
@@ -1861,7 +1860,7 @@ test('quote Backspace joins preceding paragraph while empty Enter splits the quo
   await page.keyboard.press('Backspace');
   await expect(page.locator('.article-editor blockquote')).toHaveCount(1);
   await expect(page.locator('.article-editor blockquote > p')).toHaveCount(2);
-  expect((await selection(page)).from).toBe(15);
+  expect((await selection(page)).from).toBe(11);
   await setDoc(page, '> 上半段\n>\n> 下半段');
   await cursor(page, '下半段', 0);
   await page.keyboard.press('Enter');

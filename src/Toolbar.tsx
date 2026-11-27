@@ -1,7 +1,5 @@
 import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
-import { highlightActive, toggleSourceHighlight } from './sourceHighlight';
-import { sourceInlineActive, toggleSourceInline } from './sourceInlineSyntax';
 import {
   Bold,
   Italic,
@@ -43,16 +41,16 @@ export function Toolbar({
             heading: selected.isActive('heading')
               ? selected.getAttributes('heading').level
               : 0,
-            bold: sourceInlineActive(selected, 'bold'),
-            italic: sourceInlineActive(selected, 'italic'),
-            strike: sourceInlineActive(selected, 'strike'),
-            code: sourceInlineActive(selected, 'code'),
+            bold: selected.isActive('bold'),
+            italic: selected.isActive('italic'),
+            strike: selected.isActive('strike'),
+            code: selected.isActive('code'),
             quote: selected.isActive('blockquote'),
             bullet: selected.isActive('bulletList'),
             ordered: selected.isActive('orderedList'),
             task: selected.isActive('taskList'),
             block: selected.isActive('codeBlock'),
-            highlight: highlightActive(selected),
+            highlight: selected.isActive('highlight'),
           }
         : null,
   });
@@ -121,32 +119,32 @@ export function Toolbar({
       {button(
         '粗体',
         <Bold size={17} />,
-        action((e) => toggleSourceInline(e, 'bold')),
-        sourceInlineActive(editor, 'bold'),
+        action((e) => e.chain().focus().toggleBold().run()),
+        editor?.isActive('bold'),
       )}
       {button(
         '斜体',
         <Italic size={17} />,
-        action((e) => toggleSourceInline(e, 'italic')),
-        sourceInlineActive(editor, 'italic'),
+        action((e) => e.chain().focus().toggleItalic().run()),
+        editor?.isActive('italic'),
       )}
       {button(
         '删除线',
         <Strikethrough size={17} />,
-        action((e) => toggleSourceInline(e, 'strike')),
-        sourceInlineActive(editor, 'strike'),
+        action((e) => e.chain().focus().toggleStrike().run()),
+        editor?.isActive('strike'),
       )}
       {button(
         '高亮',
         <Highlighter size={17} />,
-        action(toggleSourceHighlight),
-        highlightActive(editor),
+        action((e) => e.chain().focus().toggleHighlight().run()),
+        editor?.isActive('highlight'),
       )}
       {button(
         '行内代码',
         <Code size={17} />,
-        action((e) => toggleSourceInline(e, 'code')),
-        sourceInlineActive(editor, 'code'),
+        action((e) => e.chain().focus().toggleCode().run()),
+        editor?.isActive('code'),
       )}
       {button('插入链接', <Link size={17} />, () => onOpen('link'))}
       <i />

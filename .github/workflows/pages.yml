@@ -18,13 +18,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    name: Tests (${{ matrix.group }}/3)
+    name: Tests (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3]
+        group: ['1', '2', '3', 'perf']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -95,6 +95,7 @@ jobs:
           name: npm-logs-build
           path: ~/.npm/_logs
           retention-days: 7
+      - run: npm run test:unit
       - run: npm run lint
       - run: npm run format:check
       - run: npm run build

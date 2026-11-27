@@ -1,6 +1,7 @@
 import {
   Extension,
   Mark,
+  markInputRule,
   wrappingInputRule,
   nodeInputRule,
   type Editor,
@@ -18,7 +19,7 @@ import {
   type Transaction,
 } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { Slice, type Node } from '@tiptap/pm/model';
+import { Slice, type MarkType, type Node } from '@tiptap/pm/model';
 import { ReplaceAroundStep } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { joinBackward } from '@tiptap/pm/commands';
@@ -40,28 +41,159 @@ import {
 } from './outputUtils';
 import { codeHighlightPlugin } from './codeHighlight';
 import { codeFoldingPlugin } from './codeFolding';
-import { isInlineSyntaxMark } from './inlineSyntaxEdges';
+import { highlightPairs, matchHighlight } from './highlight';
 import { underlineSpan } from './markdownUnderline';
 
-// Source-editable inline formats keep TipTap marks only for parse/paste
-// conversion. Paired delimiters live in the document; decorations render them.
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    highlight: {
+      toggleHighlight: () => ReturnType;
+    };
+  }
+}
+
+/**
+ * Function-based finder for paired inline Markdown syntax (e.g. `**`, `*`, `~~`,
+ * `==`, `++`). Avoids consuming the preceding character so typing immediately
+ * after Chinese text or punctuation works without requiring a leading space.
+ */
+function pairedMarkFinder(
+  delimiter: string,
+  options: { allowSingleDelimiter?: boolean } = {},
+) {
+  const ch = delimiter[0];
+  const esc = ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const open = esc.repeat(delimiter.length);
+  const body =
+    options.allowSingleDelimiter && delimiter.length === 2
+      ? `(?:[^${esc}]|${esc}(?!${esc}))+?`
+      : `[^${esc}]+`;
+  const regex = new RegExp(`${open}(?!\\s)(${body})(?<!\\s)${open}$`);
+  return (text: string) => {
+    const match = regex.exec(text);
+    if (!match) return null;
+    if (
+      match.index > 0 &&
+      (text[match.index - 1] === ch || text[match.index - 1] === '\\')
+    )
+      return null;
+    return {
+      index: match.index,
+      text: match[0],
+      replaceWith: match[1],
+    };
+  };
+}
+
+function codeSafeMarkInputRule(
+  find: Parameters<typeof markInputRule>[0]['find'],
+  type: MarkType,
+) {
+  const rule = markInputRule({ find, type });
+  const handler = rule.handler;
+  rule.handler = (props) => {
+    const code = props.state.schema.marks.code;
+    if (
+      code &&
+      (props.state.doc.rangeHasMark(props.range.from, props.range.to, code) ||
+        props.state.selection.$from.marks().some((mark) => mark.type === code))
+    )
+      return null;
+    return handler(props);
+  };
+  return rule;
+}
+
+export const Highlight = Mark.create({
+  name: 'highlight',
+  parseHTML: () => [{ tag: 'mark' }],
+  renderHTML: ({ HTMLAttributes }) => ['mark', HTMLAttributes, 0],
+  markdownTokenName: 'highlight',
+  markdownTokenizer: {
+    name: 'highlight',
+    level: 'inline',
+    start: (source) => {
+      if (!source.includes('==')) return -1;
+      return highlightPairs(source, 1)[0]?.from ?? -1;
+    },
+    tokenize(source, _tokens, lexer) {
+      const match = matchHighlight(source);
+      return match
+        ? {
+            type: 'highlight',
+            ...match,
+            tokens: lexer.inlineTokens(match.text),
+          }
+        : undefined;
+    },
+  },
+  parseMarkdown: (token, helpers) =>
+    helpers.applyMark('highlight', helpers.parseInline(token.tokens || [])),
+  renderMarkdown: (node, helpers) => `==${helpers.renderChildren(node)}==`,
+  addCommands() {
+    return {
+      toggleHighlight:
+        () =>
+        ({ commands }) =>
+          commands.toggleMark(this.name),
+    };
+  },
+  addKeyboardShortcuts() {
+    return {
+      'Mod-Shift-h': () => this.editor.commands.toggleHighlight(),
+    };
+  },
+  addInputRules() {
+    return [
+      codeSafeMarkInputRule(
+        pairedMarkFinder('==', { allowSingleDelimiter: true }),
+        this.type,
+      ),
+    ];
+  },
+});
+
 export const MarkdownStarterKit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() || []).map((extension) => {
-      const name = extension.name;
-      if (!(extension instanceof Mark) || !isInlineSyntaxMark(name))
-        return extension;
-
-      const mark = extension.extend({
-        // Typing leaves delimiter characters for the source scanner to pair.
-        addInputRules: () => [],
-      });
-      if (name === 'code')
-        return mark.extend({
+      if (!(extension instanceof Mark)) return extension;
+      if (extension.name === 'code')
+        return extension.extend({
           excludes: '',
+          exitable: false,
         });
-      if (name === 'underline')
-        return mark.extend({
+      if (extension.name === 'bold')
+        return extension.extend({
+          addInputRules() {
+            return [
+              codeSafeMarkInputRule(pairedMarkFinder('**'), this.type),
+              codeSafeMarkInputRule(
+                /(?:^|\s)(__(?!\s)([^_]+)(?<!\s)__)$/,
+                this.type,
+              ),
+            ];
+          },
+        });
+      if (extension.name === 'italic')
+        return extension.extend({
+          addInputRules() {
+            return [
+              codeSafeMarkInputRule(pairedMarkFinder('*'), this.type),
+              codeSafeMarkInputRule(
+                /(?:^|\s)(_(?!\s)([^_]+)(?<!\s)_)$/,
+                this.type,
+              ),
+            ];
+          },
+        });
+      if (extension.name === 'strike')
+        return extension.extend({
+          addInputRules() {
+            return [codeSafeMarkInputRule(pairedMarkFinder('~~'), this.type)];
+          },
+        });
+      if (extension.name === 'underline')
+        return extension.extend({
           renderMarkdown: (node, h) => `<u>${h.renderChildren(node)}</u>`,
           markdownTokenizer: {
             name: 'underline',
@@ -80,8 +212,27 @@ export const MarkdownStarterKit = StarterKit.extend({
               };
             },
           },
+          addInputRules() {
+            return [
+              codeSafeMarkInputRule(
+                pairedMarkFinder('++', { allowSingleDelimiter: true }),
+                this.type,
+              ),
+              codeSafeMarkInputRule((text: string) => {
+                const match = /<u>([^<\n]+)<\/u>$/i.exec(text);
+                if (!match) return null;
+                if (match.index > 0 && text[match.index - 1] === '\\')
+                  return null;
+                return {
+                  index: match.index,
+                  text: match[0],
+                  replaceWith: match[1],
+                };
+              }, this.type),
+            ];
+          },
         });
-      return mark;
+      return extension;
     });
   },
 });
@@ -137,7 +288,15 @@ export const StructuredTaskItem = TaskItem.extend({
 
 export const StructuredListItem = ListItem.extend({
   parseMarkdown(token, h) {
-    const parsed = this.parent?.(token, h) || [];
+    // Tight list items with blocks followed by text emit bare `text` tokens
+    // whose inline `tokens` are otherwise skipped by block-child parsing.
+    const tokens = token.tokens?.map((child) =>
+      child.type === 'text' && child.tokens?.length
+        ? { ...child, type: 'paragraph' }
+        : child,
+    );
+    const parsed =
+      this.parent?.(tokens ? { ...token, tokens } : token, h) || [];
     if (parsed && !Array.isArray(parsed))
       parsed.content = normalizeListItemContent(parsed.content);
     return parsed;

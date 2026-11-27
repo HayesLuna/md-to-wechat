@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { editorTest as test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { dragImageWidth } from './imageEditing';
 
@@ -16,7 +16,6 @@ async function ready(page: Page, markdown: string) {
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#ddd"/></svg>',
     }),
   );
-  await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text),
@@ -74,12 +73,17 @@ function expectInlineImageText(
   );
 }
 type Rect = { x: number; y: number; width: number; height: number };
-async function bottomCaret(page: Page, block: Rect) {
+async function bottomCaret(
+  page: Page,
+  target: Rect | ReturnType<Page['locator']>,
+) {
   let caret: Rect | null = null;
   await expect
     .poll(async () => {
+      const block =
+        'boundingBox' in target ? await target.boundingBox() : target;
       caret = await page.locator('.block-side-cursor').boundingBox();
-      return caret
+      return caret && block
         ? Math.max(
             Math.abs(caret.y + caret.height - (block.y + block.height)),
             Math.abs(caret.height - 18),
@@ -612,8 +616,9 @@ for (const [type, markdown] of cursorBlocks)
       edge: 'right',
     });
     await expect(page.locator('.block-side-cursor')).toBeVisible();
-    const block = (await page.locator(blockSelectors[type]).boundingBox())!;
-    const caret = await bottomCaret(page, block);
+    const target = page.locator(blockSelectors[type]);
+    const caret = await bottomCaret(page, target);
+    const block = (await target.boundingBox())!;
     expect(caret.x).toBeGreaterThan(block.x + block.width);
 
     await page.keyboard.press('Backspace');
