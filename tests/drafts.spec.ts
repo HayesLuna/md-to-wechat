@@ -380,38 +380,46 @@ test('deleting another draft does not advance the current editor past an unseen 
   await page
     .getByRole('button', { name: '删除 删除文章', exact: true })
     .click();
-  await page.evaluate(async () => {
+  const confirm = page.getByRole('button', { name: '确认删除', exact: true });
+  await confirm.evaluate(async (button) => {
     const s = await import('/src/storage.ts');
     const lib = await s.loadDrafts();
     const current = lib.drafts.find((d) => d.id === lib.activeId)!;
-    const original = IDBDatabase.prototype.transaction;
-    let writes = 0;
-    IDBDatabase.prototype.transaction = function (
-      ...args: Parameters<typeof original>
-    ) {
-      if (
-        args[1] === 'readwrite' &&
-        Array.isArray(args[0]) &&
-        args[0].includes('draft') &&
-        ++writes === 2
-      ) {
-        IDBDatabase.prototype.transaction = original;
-        // Queue another tab's write immediately before the deletion transaction.
-        const concurrent = original.call(this, ['draft'], 'readwrite');
-        concurrent.objectStore('draft').put(
-          {
-            ...current,
-            markdown: '# 并发更新的新稿',
-            title: '并发更新的新稿',
-            version: current.version + 100,
-          },
-          current.id,
-        );
-      }
-      return original.apply(this, args);
-    };
+    button.addEventListener(
+      'click',
+      () => {
+        const getAll = IDBObjectStore.prototype.getAll;
+        IDBObjectStore.prototype.getAll = function (
+          ...args: Parameters<typeof getAll>
+        ) {
+          const request = getAll.apply(this, args);
+          if (this.name === 'draftInfo') {
+            IDBObjectStore.prototype.getAll = getAll;
+            // Deletion reads the library after saving and before removing the
+            // draft. Queue the concurrent write before the removal transaction.
+            const concurrent = this.transaction.db.transaction(
+              'draft',
+              'readwrite',
+            );
+            concurrent.objectStore('draft').put(
+              {
+                ...current,
+                markdown: '# 并发更新的新稿',
+                title: '并发更新的新稿',
+                version: current.version + 100,
+              },
+              current.id,
+            );
+          }
+          return request;
+        };
+      },
+      { capture: true, once: true },
+    );
   });
-  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  // An ordinary save can finish while the delete confirmation is open.
+  await page.keyboard.press('ControlOrMeta+s');
+  await confirm.click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('.draft-list li')).toHaveCount(1);
   await page.keyboard.press('ControlOrMeta+s');
