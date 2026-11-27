@@ -329,49 +329,86 @@ test('backward code selection preserves tabs, NBSP and literal Markdown fences i
   );
 });
 
+test('arrow keys can insert inside or outside both edges of inline code', async ({
+  page,
+}) => {
+  await ready(page, '前`甲乙`后');
+  const editor = page.locator('.article-editor');
+  const formatted = editor.locator('code');
+  // Start outside left edge (pos 2: 前|甲乙后)
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(2));
+  await expect(editor).toBeFocused();
+  // ArrowRight steps inside left edge -> typing inserts before first char
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('A');
+  await expect(formatted).toHaveText('A甲乙');
+  // ArrowLeft twice: back to inside left edge, then outside left edge
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('B');
+  await expect(formatted).toHaveText('A甲乙');
+  await expect(editor).toHaveText('前BA甲乙后');
+  // Move to after last char inside (pos of '乙' + 1), type inside right edge
+  await page.evaluate(() => (window as any).__mojian.editor.commands.focus(6));
+  await page.keyboard.type('C');
+  await expect(formatted).toHaveText('A甲乙C');
+  // ArrowRight exits right edge -> typing inserts outside
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('D');
+  await expect(formatted).toHaveText('A甲乙C');
+  await expect(editor).toHaveText('前BA甲乙CD后');
+  // ArrowLeft from after 'D' back onto outside right edge, then ArrowLeft enters inside right edge
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('E');
+  await expect(formatted).toHaveText('A甲乙CE');
+});
+
 for (const [tag, opening, closing] of [
-  ['code', '`', '`'],
   ['strong', '**', '**'],
+  ['em', '*', '*'],
+  ['s', '~~', '~~'],
   ['mark', '==', '=='],
   ['u', '<u>', '</u>'],
 ] as const) {
-  test(`arrow keys can insert inside or outside both edges of ${tag}`, async ({
+  test(`text-style mark ${tag} stays plain before its left edge and continues formatting after its right edge`, async ({
     page,
   }) => {
-    await ready(page, `前${opening}甲乙${closing}后`);
     const editor = page.locator('.article-editor');
     const formatted = editor.locator(tag);
-    // Start outside left edge (pos 2: 前|甲乙后)
-    await page.evaluate(() =>
-      (window as any).__mojian.editor.commands.focus(2),
-    );
-    await expect(editor).toBeFocused();
-    // ArrowRight steps inside left edge -> typing inserts before first char
-    await page.keyboard.press('ArrowRight');
+
+    // Surrounded by plain text: clicking slightly inside or outside left edge
+    // both insert plain text; clicking slightly inside or outside right edge
+    // both continue the mark.
+    await ready(page, `前${opening}甲乙${closing}后`);
+    const box = (await formatted.boundingBox())!;
+    const y = box.y + box.height / 2;
+
+    await page.mouse.click(box.x + 2, y);
     await page.keyboard.type('A');
-    await expect(formatted).toHaveText('A甲乙');
-    // ArrowLeft twice: back to inside left edge, then outside left edge
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowLeft');
+    await expect(formatted).toHaveText('甲乙');
+    await expect(editor).toHaveText('前A甲乙后');
+
+    const boxAfterLeft = (await formatted.boundingBox())!;
+    await page.mouse.click(boxAfterLeft.x + boxAfterLeft.width + 2, y);
     await page.keyboard.type('B');
-    await expect(formatted).toHaveText('A甲乙');
-    await expect(editor).toHaveText('前BA甲乙后');
-    // Move to after last char inside (pos of '乙' + 1), type inside right edge
-    await page.evaluate(() =>
-      (window as any).__mojian.editor.commands.focus(6),
+    await expect(formatted).toHaveText('甲乙B');
+
+    // Paragraph-start formatted text: clicking before it still inserts plain.
+    await ready(page, `${opening}开头${closing}`);
+    const leadBox = (await formatted.boundingBox())!;
+    await page.mouse.click(leadBox.x + 2, leadBox.y + leadBox.height / 2);
+    await page.keyboard.type('P');
+    await expect(formatted).toHaveText('开头');
+    await expect(editor).toHaveText('P开头');
+
+    const endBox = (await formatted.boundingBox())!;
+    await page.mouse.click(
+      endBox.x + endBox.width + 20,
+      endBox.y + endBox.height / 2,
     );
-    await page.keyboard.type('C');
-    await expect(formatted).toHaveText('A甲乙C');
-    // ArrowRight exits right edge -> typing inserts outside
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.type('D');
-    await expect(formatted).toHaveText('A甲乙C');
-    await expect(editor).toHaveText('前BA甲乙CD后');
-    // ArrowLeft from after 'D' back onto outside right edge, then ArrowLeft enters inside right edge
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.type('E');
-    await expect(formatted).toHaveText('A甲乙CE');
+    await page.keyboard.type('Q');
+    await expect(formatted).toHaveText('开头Q');
   });
 }
 
@@ -658,4 +695,26 @@ test('dragging across inline code selects text smoothly from any starting edge o
     );
     expect(selected.length).toBeGreaterThanOrEqual(4);
   }
+});
+
+test('inline code boundary overlay stays hidden in read-only mode and adjacent bold gap exits code', async ({
+  page,
+}) => {
+  await ready(page, '`代码`**粗体**');
+  const code = page.locator('.article-editor code');
+  const strong = page.locator('.article-editor strong');
+  const overlay = page.locator('.editor-host .mark-boundary-caret');
+  const box = (await code.boundingBox())!;
+
+  // Click the 4px margin gap right after inline code before adjacent bold.
+  await page.mouse.click(box.x + box.width + 2, box.y + box.height / 2);
+  await expect(overlay).toBeVisible();
+  await page.keyboard.type('X');
+  await expect(code).toHaveText('代码');
+  await expect(strong).toHaveText('X粗体');
+
+  // Switching to read-only hides the boundary overlay even at an inline code edge.
+  await page.mouse.click(box.x + 2, box.y + box.height / 2);
+  await page.getByRole('switch', { name: '只读模式' }).click();
+  await expect(overlay).toBeHidden();
 });

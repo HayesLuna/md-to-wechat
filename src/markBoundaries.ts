@@ -8,15 +8,6 @@ import {
 } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
-const markTags: Record<string, string> = {
-  bold: 'strong',
-  italic: 'em',
-  strike: 's',
-  code: 'code',
-  underline: 'u',
-  highlight: 'mark',
-};
-
 const key = new PluginKey('mojian-mark-boundaries');
 
 function boundaryMarks(node: PMNode | null) {
@@ -39,14 +30,20 @@ function boundaryAt($pos: ResolvedPos) {
   return { before, after };
 }
 
-function markRectAtBoundary(
+function isCodeBoundary(
+  state: EditorState,
+  before: readonly Mark[],
+  after: readonly Mark[],
+) {
+  const code = state.schema.marks.code;
+  return !!code && !!code.isInSet(before) !== !!code.isInSet(after);
+}
+
+function codeRectAtBoundary(
   view: EditorView,
   $pos: ResolvedPos,
-  mark: Mark,
   side: -1 | 1,
 ): DOMRect | null {
-  const tag = markTags[mark.type.name];
-  if (!tag) return null;
   const adjacent = side === 1 ? $pos.nodeAfter : $pos.nodeBefore;
   if (!adjacent?.isText) return null;
   const step =
@@ -54,8 +51,8 @@ function markRectAtBoundary(
   const inside = view.domAtPos($pos.pos + side * step, -side);
   const el =
     inside.node instanceof Element
-      ? inside.node.closest(tag)
-      : inside.node.parentElement?.closest(tag);
+      ? inside.node.closest('code')
+      : inside.node.parentElement?.closest('code');
   if (!el || !view.dom.contains(el)) return null;
   const rects = Array.from(el.getClientRects()).filter((r) => r.width > 0);
   if (!rects.length) return null;
@@ -70,31 +67,32 @@ function resolvePointerMarks(
   before: readonly Mark[],
   after: readonly Mark[],
 ): readonly Mark[] | null {
+  // Non-code text styles (bold/italic/strike/highlight/underline) have no box
+  // margin, so both sides of an edge share the exact same pixel. Keep them
+  // deterministic: left edge stays plain (outside), right edge continues the
+  // mark (inside), matching standard rich-text editors.
+  if (!isCodeBoundary(view.state, before, after)) return before;
+
   const $pos = view.state.doc.resolve(pos);
-  const hitMark = (mark: Mark, side: -1 | 1) => {
-    const tag = markTags[mark.type.name];
-    if (!tag) return false;
-    if (target) {
-      const el = target.closest(tag);
-      if (el && view.dom.contains(el)) {
-        const start = view.posAtDOM(el, 0);
-        const end = view.posAtDOM(el, el.childNodes.length);
-        if (pos >= start && pos <= end) return true;
-      }
+  const code = view.state.schema.marks.code!;
+  const enteringCode = !!code.isInSet(after) && !code.isInSet(before);
+  const side: -1 | 1 = enteringCode ? 1 : -1;
+
+  let hitCode = false;
+  if (target) {
+    const el = target.closest('code');
+    if (el && view.dom.contains(el)) {
+      const start = view.posAtDOM(el, 0);
+      const end = view.posAtDOM(el, el.childNodes.length);
+      if (pos >= start && pos <= end) hitCode = true;
     }
-    if (clientX === null) return false;
-    const rect = markRectAtBoundary(view, $pos, mark, side);
-    return !!rect && clientX >= rect.left && clientX <= rect.right;
-  };
-  const entering = after.filter((mark) => !mark.isInSet(before));
-  const leaving = before.filter((mark) => !mark.isInSet(after));
-  const hitEntering = entering.some((mark) => hitMark(mark, 1));
-  const hitLeaving = leaving.some((mark) => hitMark(mark, -1));
-  if (entering.length && !leaving.length) return hitEntering ? after : before;
-  if (leaving.length && !entering.length) return hitLeaving ? before : after;
-  if (hitEntering && !hitLeaving) return after;
-  if (hitLeaving && !hitEntering) return before;
-  return null;
+  }
+  if (!hitCode && clientX !== null) {
+    const rect = codeRectAtBoundary(view, $pos, side);
+    hitCode = !!rect && clientX >= rect.left && clientX <= rect.right;
+  }
+
+  return enteringCode ? (hitCode ? after : before) : hitCode ? before : after;
 }
 
 function charStepBefore(text: string) {
@@ -137,7 +135,10 @@ function stepBoundary(view: EditorView, direction: -1 | 1) {
   if ($from.parent.type.spec.code) return null;
 
   const currentBoundary = boundaryAt($from);
-  if (currentBoundary) {
+  if (
+    currentBoundary &&
+    isCodeBoundary(state, currentBoundary.before, currentBoundary.after)
+  ) {
     const target =
       direction === 1 ? currentBoundary.after : currentBoundary.before;
     const current = synced
@@ -150,13 +151,16 @@ function stepBoundary(view: EditorView, direction: -1 | 1) {
     }
   }
 
-  // Step synchronously onto an adjacent mark boundary so rapid arrow keys
-  // never race with async browser selectionchange updates.
+  // Step synchronously onto an adjacent inline code boundary so rapid arrow
+  // keys never race with async browser selectionchange updates.
   if (direction === -1 && $from.nodeBefore?.isText) {
     const step = charStepBefore($from.nodeBefore.text!);
     const prevPos = $from.pos - step;
     const prevBoundary = boundaryAt(state.doc.resolve(prevPos));
-    if (prevBoundary)
+    if (
+      prevBoundary &&
+      isCodeBoundary(state, prevBoundary.before, prevBoundary.after)
+    )
       return state.tr
         .setSelection(TextSelection.create(state.doc, prevPos))
         .setStoredMarks(prevBoundary.after);
@@ -166,7 +170,10 @@ function stepBoundary(view: EditorView, direction: -1 | 1) {
     const step = charStepAfter($from.nodeAfter.text!);
     const nextPos = $from.pos + step;
     const nextBoundary = boundaryAt(state.doc.resolve(nextPos));
-    if (nextBoundary)
+    if (
+      nextBoundary &&
+      isCodeBoundary(state, nextBoundary.before, nextBoundary.after)
+    )
       return state.tr
         .setSelection(TextSelection.create(state.doc, nextPos))
         .setStoredMarks(nextBoundary.before);
@@ -224,12 +231,13 @@ function boundaryDomPoint(
  * when typing goes outside.
  */
 function syncBoundaryCaret(view: EditorView) {
-  if (!view.hasFocus() || view.composing) return;
+  if (!view.editable || !view.hasFocus() || view.composing) return;
   const { selection } = view.state;
   if (!selection.empty || !(selection instanceof TextSelection)) return;
   const $from = selection.$from;
   const boundary = boundaryAt($from);
-  if (!boundary) return;
+  if (!boundary || !isCodeBoundary(view.state, boundary.before, boundary.after))
+    return;
 
   const current = activeMarks(view.state);
   const side: -1 | 1 | 0 = Mark.sameSet(current, boundary.after)
@@ -263,7 +271,7 @@ function syncBoundaryCaret(view: EditorView) {
 function boundaryCaretRect(
   view: EditorView,
 ): { left: number; top: number; height: number } | null {
-  if (view.composing) return null;
+  if (!view.editable || view.composing) return null;
   const { state } = view;
   const { selection } = state;
   if (!selection.empty || !(selection instanceof TextSelection)) return null;
@@ -302,11 +310,8 @@ function boundaryCaretRect(
     }
   }
 
-  const codeMark = beforeCode ?? afterCode;
   const codeSide: -1 | 1 = beforeCode ? -1 : 1;
-  const codeRect = codeMark
-    ? markRectAtBoundary(view, $from, codeMark, codeSide)
-    : null;
+  const codeRect = codeRectAtBoundary(view, $from, codeSide);
   if (!codeRect) return null;
   const left = side === 1 ? codeRect.right + 4 : codeRect.left - 4;
   return {
@@ -424,7 +429,11 @@ export const MarkBoundaries = Extension.create({
             }
             if (pos === null) return;
             const boundary = boundaryAt(view.state.doc.resolve(pos));
-            if (!boundary) return;
+            if (
+              !boundary ||
+              !isCodeBoundary(view.state, boundary.before, boundary.after)
+            )
+              return;
             const desired = resolvePointerMarks(
               view,
               pos,
@@ -453,6 +462,7 @@ export const MarkBoundaries = Extension.create({
               event.target instanceof Element ? event.target : null;
             if (
               !target ||
+              !view.editable ||
               target.closest('button,input,select,textarea,[role="separator"]')
             )
               return;
@@ -544,12 +554,18 @@ export const MarkBoundaries = Extension.create({
             pointerTarget = null;
             pointerX = null;
           }
-          if (!moved || !target || !editorView) return null;
+          if (!moved) return null;
           const { selection } = newState;
           if (!selection.empty || !(selection instanceof TextSelection))
             return null;
           const boundary = boundaryAt(selection.$from);
           if (!boundary) return null;
+          if (!isCodeBoundary(newState, boundary.before, boundary.after)) {
+            return Mark.sameSet(activeMarks(newState), boundary.before)
+              ? null
+              : newState.tr.setStoredMarks(boundary.before);
+          }
+          if (!target || !editorView) return null;
           const desired = resolvePointerMarks(
             editorView,
             selection.from,
