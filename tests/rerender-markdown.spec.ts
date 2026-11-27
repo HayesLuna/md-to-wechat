@@ -301,3 +301,195 @@ test('rerender handles multi-block selections and disables in read-only and sour
     .click();
   await expect(rerenderBtn).toBeDisabled();
 });
+
+test('rerendering text within and across existing structures keeps their markers out of the text', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  const button = page.getByRole('button', { name: '重新渲染', exact: true });
+  const before = await page.evaluate(() => {
+    const app = (window as any).__mojian;
+    app.setMarkdown(
+      '4. 第一项\n5. 第二项\n\n- 无序项\n\n- [x] 任务\n\n> 引用\n\n## 标题\n\n| 列名 |\n| --- |\n| 单元格 |',
+    );
+    const { editor } = app;
+    const raw = new Map([
+      ['第一项', '**保留** 第一项 **有序**'],
+      ['第二项', '**第二项**'],
+      ['无序项', '**无序项**'],
+      ['任务', '**任务**'],
+      ['引用', '**引用**'],
+      ['标题', '**标题**'],
+      ['单元格', '**单元格** *保留*'],
+    ]);
+    const changes: { from: number; to: number; text: string }[] = [];
+    editor.state.doc.descendants((node: any, pos: number) => {
+      const text = node.isText && raw.get(node.text);
+      if (text) changes.push({ from: pos, to: pos + node.nodeSize, text });
+    });
+    const tr = editor.state.tr;
+    for (const change of changes.reverse())
+      tr.insertText(change.text, change.from, change.to);
+    editor.view.dispatch(tr);
+    const second = editor.state.doc.firstChild.child(1).firstChild;
+    const secondStart = editor.state.doc.firstChild.firstChild.nodeSize + 3;
+    editor.commands.setTextSelection({
+      from: secondStart,
+      to: secondStart + second.content.size,
+    });
+    return editor.getJSON();
+  });
+
+  await button.click();
+  const article = page.locator('.article-editor');
+  await expect(article.locator('ol')).toHaveAttribute('start', '4');
+  await expect(article.locator('ol > li')).toHaveText([
+    '**保留** 第一项 **有序**',
+    '第二项',
+  ]);
+  await expect(article.locator('ol > li').nth(1).locator('strong')).toHaveText(
+    '第二项',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+
+  await page.evaluate(() => {
+    const { editor } = (window as any).__mojian;
+    let from = 0;
+    let to = 0;
+    editor.state.doc.descendants((node: any, pos: number) => {
+      if (!node.isText) return;
+      if (node.text.includes('**有序**'))
+        from = pos + node.text.indexOf('**有序**');
+      if (node.text.includes('**单元格**')) to = pos + '**单元格**'.length;
+    });
+    editor.commands.setTextSelection({ from, to });
+  });
+  await button.click();
+  await expect(article.locator('ol')).toHaveAttribute('start', '4');
+  await expect(article.locator('ol > li')).toHaveText([
+    '**保留** 第一项 有序',
+    '第二项',
+  ]);
+  await expect(
+    article.locator('ul:not([data-type]) > li > p > strong'),
+  ).toHaveText('无序项');
+  await expect(article.locator('ul[data-type=taskList] input')).toBeChecked();
+  await expect(article.locator('ul[data-type=taskList] strong')).toHaveText(
+    '任务',
+  );
+  await expect(article.locator('blockquote strong')).toHaveText('引用');
+  await expect(article.locator('h2 strong')).toHaveText('标题');
+  await expect(article.locator('td')).toHaveText('单元格 *保留*');
+  await expect(article.locator('td strong')).toHaveText('单元格');
+
+  await button.click();
+  await expect(page.locator('.toast')).toContainText('没有需要重新渲染');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(
+    await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
+  ).toEqual(before);
+});
+
+test('rerendering complete nested paragraphs can create blocks without replacing the container', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  const before = await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.commands.setContent({
+      type: 'doc',
+      content: [
+        {
+          type: 'blockquote',
+          content: ['## 引用内标题', '- 引用内项目一', '- 引用内项目二'].map(
+            (text) => ({
+              type: 'paragraph',
+              content: [{ type: 'text', text }],
+            }),
+          ),
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: '引用之外' }] },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    return editor.getJSON();
+  });
+
+  const button = page.getByRole('button', { name: '重新渲染', exact: true });
+  await button.click();
+  const quote = page.locator('.article-editor blockquote');
+  await expect(quote.locator('h2')).toHaveText('引用内标题');
+  await expect(quote.locator('ul li')).toHaveText([
+    '引用内项目一',
+    '引用内项目二',
+  ]);
+  await expect(page.locator('.article-editor > p')).toHaveText('引用之外');
+  await button.click();
+  await expect(page.locator('.toast')).toContainText('没有需要重新渲染');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await page.evaluate(() => window.__mojian!.editor!.getJSON())).toEqual(
+    before,
+  );
+});
+
+test('rerendering list items inserts the required paragraph before converted blocks', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  const before = await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    const paragraph = (text: string) => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text }],
+    });
+    editor.commands.setContent({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 5 },
+          content: [
+            {
+              type: 'listItem',
+              content: [paragraph('## 小标题'), paragraph('- 子项目')],
+            },
+          ],
+        },
+        {
+          type: 'taskList',
+          content: [
+            {
+              type: 'taskItem',
+              attrs: { checked: true },
+              content: [paragraph('> 任务引用'), paragraph('## 任务标题')],
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(3);
+    return editor.getJSON();
+  });
+
+  const button = page.getByRole('button', { name: '重新渲染', exact: true });
+  const article = page.locator('.article-editor');
+  await button.click();
+  const list = article.locator('ol[start="5"] > li');
+  await expect(list.locator(':scope > p:first-child')).toHaveText('');
+  await expect(list.locator('h2')).toHaveText('小标题');
+  await expect(list.locator('ul li')).toHaveText('子项目');
+  const task = article.locator('ul[data-type="taskList"] > li');
+  await expect(task.locator('input')).toBeChecked();
+  await expect(task.locator('blockquote')).toHaveText('任务引用');
+  await expect(task.locator('h2')).toHaveText('任务标题');
+
+  await button.click();
+  await expect(page.locator('.toast')).toContainText('没有需要重新渲染');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await page.evaluate(() => window.__mojian!.editor!.getJSON())).toEqual(
+    before,
+  );
+});

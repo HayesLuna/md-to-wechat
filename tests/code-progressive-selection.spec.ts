@@ -89,7 +89,8 @@ for (const key of ['Control+a', 'Meta+a'])
       const full = await copy(page);
       expect(full).toContain('前面的正文');
       expect(full).toContain('后面的正文');
-      expect(full).toContain(fenced);
+      expect(full).toContain(source);
+      expect(full).not.toContain(fenced);
       await page.keyboard.press(key);
       expect((await selection(page)).type).toBe('all');
       expect(

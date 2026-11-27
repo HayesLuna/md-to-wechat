@@ -68,6 +68,7 @@ import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument, resetDocument } from './EditorPane';
 import { rerenderMarkdown } from './rerenderMarkdown';
+import { markdownSelection } from './markdownClipboard';
 import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
@@ -959,8 +960,11 @@ export default function App() {
     event.preventDefault();
     const hit = e.view.posAtCoords({ left: event.clientX, top: event.clientY });
     if (hit) {
-      const s = e.state.selection;
-      if (s.empty || hit.pos < s.from || hit.pos > s.to) {
+      const selection = e.state.selection;
+      const insideSelection = selection.ranges.some(
+        ({ $from, $to }) => hit.pos >= $from.pos && hit.pos <= $to.pos,
+      );
+      if (selection.empty || !insideSelection) {
         const image = (event.target as Element).closest('.image-node');
         if (image) {
           const pos = e.view.posAtDOM(image, 0);
@@ -1116,10 +1120,11 @@ export default function App() {
       setModal({ type: 'assets' });
     else void doCopy();
   };
-  const copySource = () =>
-    void copyText(readCurrent().markdown)
+  const copyMarkdown = (text: string) =>
+    void copyText(text)
       .then(() => notify('已复制 Markdown 源码'))
       .catch(() => notify('Markdown 复制失败，请检查浏览器剪贴板权限。'));
+  const copySource = () => copyMarkdown(readCurrent().markdown);
   const jump = (index: number) => {
     if (mode === 'source') {
       const line = headingList[index].line;
@@ -1849,6 +1854,18 @@ export default function App() {
           className="floating-menu context-menu"
           style={{ left: context.x, top: context.y }}
         >
+          {editor && !editor.state.selection.empty && (
+            <button
+              onClick={() => {
+                copyMarkdown(
+                  markdownSelection(editor, editor.state.selection.content()),
+                );
+                setContext(null);
+              }}
+            >
+              复制选中内容的 Markdown 源码
+            </button>
+          )}
           <button onClick={() => open('link')}>插入链接</button>
           <button onClick={() => open('table')}>插入 3×3 表格</button>
           <button onClick={() => open('image')}>插入图片</button>

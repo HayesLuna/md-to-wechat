@@ -265,8 +265,10 @@ for (const prefix of ['- ', '1. ', '- [ ] '])
       );
       return d.getData('text/plain');
     });
-    expect(copied).toContain('&#9;');
-    expect(copied).not.toContain('literal-tab');
+    expect(copied).toBe('前面加粗\t后面');
+    expect(
+      await page.evaluate(() => (window as any).__mojian.getMarkdown()),
+    ).toContain('&#9;');
     await page
       .getByRole('button', { name: 'Markdown 源码', exact: true })
       .click();

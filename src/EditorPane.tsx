@@ -34,8 +34,13 @@ import {
   normalizeListItemContent,
 } from './editorExtensions';
 import { safeURL, isImageName } from './outputUtils';
-import { markdownSelection, copyTaskMarkdown } from './markdownClipboard';
 import {
+  copyRichSelection,
+  markdownSelection,
+  plainTextSelection,
+} from './markdownClipboard';
+import {
+  fitCopiedListItemHTML,
   shouldParseMarkdownPaste,
   normalizeTaskClipboardHTML,
   centerUnalignedPastedTables,
@@ -209,16 +214,26 @@ export function EditorPane({
   // parent render. Handlers read refs, so the view options can stay stable.
   const editorProps = useMemo<NonNullable<EditorOptions['editorProps']>>(
     () => ({
-      clipboardTextSerializer: (slice) =>
-        markdownSelection(editorRef.current, slice),
+      clipboardTextSerializer: (slice, view) => {
+        const selection = view.state.selection;
+        // The framed code-block stage explicitly selects the fenced source.
+        return selection instanceof NodeSelection &&
+          selection.node.type.name === 'codeBlock'
+          ? markdownSelection(editorRef.current, slice)
+          : plainTextSelection(slice);
+      },
       attributes: {
         class: 'article-editor',
         spellcheck: 'false',
         'aria-label': '所见即所得正文',
       },
-      transformPastedHTML: (html) =>
+      transformPastedHTML: (html, view) =>
         DOMPurify.sanitize(
-          normalizePastedTableHTML(normalizeTaskClipboardHTML(html)),
+          normalizePastedTableHTML(
+            normalizeTaskClipboardHTML(
+              fitCopiedListItemHTML(html, view.state.selection),
+            ),
+          ),
           {
             FORBID_TAGS: ['svg', 'script', 'style', 'iframe'],
             FORBID_ATTR: ['style'],
@@ -234,10 +249,12 @@ export function EditorPane({
             !isImageName(selection.node.type.name) ||
             !event.clipboardData
           )
-            return copyTaskMarkdown(editor, event);
+            return copyRichSelection(view, event);
           // Always finish the native copy, including when Async Clipboard is
           // unavailable or denied. PNG is an optional enhancement of this copy.
-          const { dom, text } = view.serializeForClipboard(selection.content());
+          const slice = selection.content();
+          const { dom } = view.serializeForClipboard(slice);
+          const text = markdownSelection(editor, slice);
           dom.querySelector('img')?.setAttribute('data-mojian-image', 'true');
           event.clipboardData.clearData();
           event.clipboardData.setData('text/plain', text);
@@ -257,7 +274,7 @@ export function EditorPane({
             });
           return true;
         },
-        cut: (_view, event) => copyTaskMarkdown(editorRef.current, event, true),
+        cut: (view, event) => copyRichSelection(view, event, true),
         keydown: (_view, event) => {
           plainPaste.current = !!(
             (event.ctrlKey || event.metaKey) &&

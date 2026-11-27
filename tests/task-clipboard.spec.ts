@@ -68,7 +68,7 @@ test('Typora rich task HTML preserves states, nesting and undo on paste', async 
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await checkTasks(page);
 });
-test('native task copy writes Markdown without incompatible HTML; paste roundtrip preserves all tasks', async ({
+test('native task copy writes clean text and rich HTML; paste roundtrip preserves all tasks', async ({
   page,
   context,
 }) => {
@@ -81,14 +81,31 @@ test('native task copy writes Markdown without incompatible HTML; paste roundtri
   const data = await page.evaluate(async () => {
     const item = (await navigator.clipboard.read())[0];
     return {
-      types: item.types,
+      html: await (await item.getType('text/html')).text(),
       text: await (await item.getType('text/plain')).text(),
     };
   });
-  expect(data.text).toContain('- [x] 嵌套任务');
-  expect(data.types).not.toContain('text/html');
+  expect(data.text).toContain('嵌套任务');
+  expect(data.text).not.toMatch(/\[[ x]\]/);
+  const structure = await page.evaluate((html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return [...doc.querySelectorAll('li[data-type="taskItem"]')].map(
+      (item) => ({
+        firstChild: item.firstElementChild?.tagName,
+        checked: item.querySelector<HTMLInputElement>(
+          ':scope > div > p:first-child > input[type="checkbox"]',
+        )?.checked,
+      }),
+    );
+  }, data.html);
+  expect(structure).toEqual(
+    [false, true, false, true, false].map((checked) => ({
+      firstChild: 'DIV',
+      checked,
+    })),
+  );
   await page.evaluate(() => (window as any).__mojian.setMarkdown(''));
-  await paste(page, '', data.text);
+  await paste(page, data.html, data.text);
   await checkTasks(page);
 });
 test('mixed ordinary bullets and tasks remain separate and nested checkboxes do not mark their parent', async ({
@@ -119,7 +136,7 @@ test('mixed ordinary bullets and tasks remain separate and nested checkboxes do 
       ),
   ).toEqual([true, false]);
 });
-test('task cut preserves Markdown clipboard and can be undone', async ({
+test('task cut provides plain text and rich HTML and can be undone', async ({
   page,
 }) => {
   await ready(page, markdown);
@@ -142,23 +159,25 @@ test('task cut preserves Markdown clipboard and can be undone', async ({
       html: data.getData('text/html'),
     };
   });
-  expect(data.text).toContain('- [x] 嵌套任务');
-  expect(data.html).toBe('');
+  expect(data.text).toContain('嵌套任务');
+  expect(data.text).not.toMatch(/\[[ x]\]/);
+  expect(data.html).toContain('data-checked="true"');
   await expect(page.locator('.article-editor input')).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+z');
   expect(
     await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
   ).toEqual(before);
 });
-test('partial task selection keeps the task marker and inline formatting', async ({
+test('partial task selection keeps structure in HTML and supports explicit Markdown copy', async ({
   page,
+  context,
 }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await ready(page, '- [x] 已完成 **加粗内容**\n- [ ] 未完成');
   await page.evaluate(() => {
     const e = (window as any).__mojian.editor;
     let from = -1;
     e.state.doc.descendants((n: any, p: number) => {
-      // Inline source keeps its delimiters in one text node.
       if (n.isText && n.text?.includes('加粗内容'))
         from = p + n.text.indexOf('加粗内容');
     });
@@ -178,8 +197,23 @@ test('partial task selection keeps the task marker and inline formatting', async
       html: data.getData('text/html'),
     };
   });
-  expect(data.text.trim()).toBe('- [x] **粗内**');
-  expect(data.html).toBe('');
+  expect(data.text).toBe('粗内');
+  expect(data.html).toContain('data-checked="true"');
+  expect(data.html).toContain('<strong>粗内</strong>');
+
+  const point = await page.evaluate(() => {
+    const { view, state } = (window as any).__mojian.editor;
+    const left = view.coordsAtPos(state.selection.from);
+    const right = view.coordsAtPos(state.selection.to);
+    return { x: (left.left + right.left) / 2, y: (left.top + left.bottom) / 2 };
+  });
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page
+    .getByRole('button', { name: '复制选中内容的 Markdown 源码' })
+    .click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    '- [x] **粗内**',
+  );
 });
 test('read-only task selection can copy but cannot cut or change clipboard data', async ({
   page,
@@ -219,7 +253,8 @@ test('read-only task selection can copy but cannot cut or change clipboard data'
   expect(result.after).toEqual(result.before);
   expect(result.cutPrevented).toBe(true);
   expect(result.clipboard).toBe('原剪贴板');
-  expect(result.copy).toContain('- [x] 嵌套任务');
+  expect(result.copy).toContain('嵌套任务');
+  expect(result.copy).not.toMatch(/\[[ x]\]/);
 });
 for (const nativeWrapper of [false, true])
   test(`nested task HTML preserves parent content with ${nativeWrapper ? 'editor label/div wrappers' : 'a child div only'}`, async ({
@@ -260,3 +295,39 @@ for (const nativeWrapper of [false, true])
       await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
     ).toEqual(before);
   });
+
+test('copying a whole task item pastes its checked state without a leading blank paragraph', async ({
+  page,
+}) => {
+  await ready(page, '- [ ] 其他任务\n- [x] 选中任务');
+  const copied = await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'taskItem' && node.attrs.checked)
+        editor.commands.setNodeSelection(pos);
+    });
+    const data = new DataTransfer();
+    editor.view.dom.dispatchEvent(
+      new ClipboardEvent('copy', {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    return {
+      html: data.getData('text/html'),
+      text: data.getData('text/plain'),
+    };
+  });
+  expect(copied.text).toBe('选中任务');
+  expect(copied.html).toContain('<ul data-type="taskList"');
+  await page.evaluate(() => window.__mojian!.setMarkdown(''));
+  await paste(page, copied.html, copied.text);
+  await expect(page.locator('.article-editor > p')).toHaveCount(0);
+  await expect(
+    page.locator('.article-editor input[type=checkbox]'),
+  ).toBeChecked();
+  expect(await page.evaluate(() => window.__mojian!.getMarkdown())).toBe(
+    '- [x] 选中任务',
+  );
+});

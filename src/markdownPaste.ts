@@ -1,4 +1,35 @@
 import type { JSONContent } from '@tiptap/core';
+import type { Selection } from '@tiptap/pm/state';
+
+export function fitCopiedListItemHTML(html: string, selection: Selection) {
+  if (!html.includes('data-mojian-list-item')) return html;
+  const { $from, $to } = selection;
+  for (let depth = $from.sharedDepth($to.pos); depth > 0; depth--) {
+    const type = $from.node(depth).type.name;
+    if (!['bulletList', 'orderedList', 'taskList'].includes(type)) continue;
+
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const list = doc.body.firstElementChild;
+    const item = list?.firstElementChild;
+    if (
+      doc.body.childElementCount === 1 &&
+      list?.matches(
+        'ol[data-mojian-list-item="true"],ul[data-mojian-list-item="true"]',
+      ) &&
+      list.childElementCount === 1 &&
+      item?.tagName === 'LI' &&
+      (item.getAttribute('data-type') === 'taskItem') === (type === 'taskList')
+    ) {
+      // Inside a compatible list, insert a sibling item as before. Elsewhere,
+      // keep the wrapper so the item retains its type and starting number.
+      item.setAttribute('data-pm-slice', '0 0 []');
+      list.replaceWith(item);
+      return doc.body.innerHTML;
+    }
+    break;
+  }
+  return html;
+}
 
 // Prefer structured rich text. Plain-text and plain HTML wrappers may carry
 // Markdown source from Typora, which needs the Markdown parser instead.

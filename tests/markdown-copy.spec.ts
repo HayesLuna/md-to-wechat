@@ -471,7 +471,7 @@ for (const mode of ['editor', 'preview', 'read-only'])
     expect(errors).toEqual([]);
   });
 
-test('WYSIWYG copy writes Markdown text and retains native rich HTML for a full selection', async ({
+test('WYSIWYG copy writes clean text and semantic HTML for a full selection', async ({
   page,
   context,
 }) => {
@@ -495,21 +495,20 @@ test('WYSIWYG copy writes Markdown text and retains native rich HTML for a full 
       html: await (await item.getType('text/html')).text(),
     };
   });
-  for (const part of [
-    '# 标题',
-    '**加粗**',
-    '*斜体*',
-    '[链接](https://example.com)',
-    '- 项目一',
-    '嵌套项目',
-    '1. 有序项',
-    '> 引用',
-    '| 名称',
-    '```js',
-    'const value = 1;',
-  ])
-    expect(data.text).toContain(part);
-  expect(data.text).toMatch(/:-{3,}:/);
+  expect(data.text).toBe(
+    '标题\n\n正文 加粗 和 斜体、链接\n\n项目一\n嵌套项目\n\n有序项\n\n引用\n\n名称\t值\n表格内容\t123\n\nconst value = 1;',
+  );
+  // A regular text field uses the very same clipboard's plain representation.
+  await page.evaluate(() => {
+    const field = document.createElement('textarea');
+    field.setAttribute('aria-label', '纯文本粘贴测试');
+    document.body.prepend(field);
+    field.focus();
+  });
+  await page.keyboard.press('ControlOrMeta+v');
+  const field = page.getByRole('textbox', { name: '纯文本粘贴测试' });
+  await expect(field).toHaveValue(data.text);
+  await field.evaluate((node) => node.remove());
   for (const tag of ['<h1', '<strong', '<ul', '<ol', '<table', '<pre'])
     expect(data.html).toContain(tag);
   expect(
@@ -524,20 +523,28 @@ test('partial selections copy only selected text while retaining heading, list a
     '## 大纲标题\n\n普通 **加粗文字** 段落\n\n- 第一项目\n- 第二项目\n\n```js\nconst first = 1;\nconst second = 2;\n```',
   );
   await selectText(page, '加粗文字', 1, 3);
-  expect((await copy(page)).text.trim()).toBe('**粗文**');
+  expect(await copy(page)).toMatchObject({
+    text: '粗文',
+    html: expect.stringContaining('<strong>粗文</strong>'),
+  });
   await selectText(page, '大纲标题', 0, 2);
-  expect((await copy(page)).text.trim()).toBe('## 大纲');
+  expect(await copy(page)).toMatchObject({
+    text: '大纲',
+    html: expect.stringMatching(/<h2[^>]*>大纲<\/h2>/),
+  });
   await selectText(page, '第二项目');
   const list = await copy(page);
-  expect(list.text).toContain('- 第二项目');
-  expect(list.text).not.toContain('第一项目');
+  expect(list.text).toBe('第二项目');
+  expect(list.html).toContain('<ul');
+  expect(list.html).toContain('<li');
+  expect(list.html).not.toContain('第一项目');
   await selectText(page, 'const second = 2;');
   const code = await copy(page);
   expect(code.text).toBe('const second = 2;');
   expect(code.text).not.toContain('```');
   expect(code.text).not.toContain('const first');
 });
-test('selected tables copy GFM alignment and cut keeps Markdown and undo behavior', async ({
+test('selected tables copy as tab-separated text and aligned HTML, and cut can be undone', async ({
   page,
 }) => {
   await ready(
@@ -553,13 +560,14 @@ test('selected tables copy GFM alignment and cut keeps Markdown and undo behavio
     editor.commands.setNodeSelection(pos);
   });
   const table = await copy(page);
-  expect(table.text).toContain('| 名称');
-  expect(table.text).toContain(':---:');
-  expect(table.text).toContain('---:');
+  expect(table.text).toBe('名称\t数值\n项目\t123');
+  expect(table.html).toContain('text-align: center');
+  expect(table.html).toContain('text-align: right');
   expect(table.html).toContain('<table');
   await selectText(page, '剪切文字');
   const cut = await copy(page, 'cut');
-  expect(cut.text.trim()).toBe('**剪切文字**');
+  expect(cut.text).toBe('剪切文字');
+  expect(cut.html).toContain('<strong>剪切文字</strong>');
   await expect(page.locator('.article-editor')).not.toContainText('剪切文字');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('.article-editor')).toContainText('剪切文字');
@@ -605,14 +613,124 @@ test('copied prose uses ordinary spaces while intentional code and source NBSP r
     (window as any).__mojian.editor.getJSON(),
   );
   const result = await copy(page);
-  expect(result.text).toContain('## 标题 文字');
+  expect(result.text).toContain('标题 文字');
   expect(result.text).toContain('普通  空格');
-  expect(result.text).toContain('**加粗 文字**');
-  expect(result.text).toContain('`inline\u00a0code`');
+  expect(result.text).toContain('加粗 文字');
+  expect(result.text).toContain('inline\u00a0code');
   expect(result.text).toContain('code\u00a0space');
   expect(result.text).toContain('nbsp;');
   expect(result.text.match(/\u00a0/g)).toHaveLength(2);
   expect(
     await page.evaluate(() => (window as any).__mojian.editor.getJSON()),
   ).toEqual(before);
+});
+
+test('copying from the middle of a nested ordered list preserves both starting numbers', async ({
+  page,
+}) => {
+  await ready(
+    page,
+    '4. 前一项\n5. 父项\n   7. 第一子项\n   8. 第二子项\n   9. 第三子项',
+  );
+  await selectText(page, '第二子项');
+  const copied = await copy(page);
+  expect(copied.text).toBe('第二子项');
+  expect(copied.html).toMatch(/<ol start="5"[^>]*>.*<ol start="8"/);
+  expect(copied.html).not.toContain('第一子项');
+
+  const point = await page.evaluate(() => {
+    const { view, state } = window.__mojian!.editor!;
+    const rect = view.coordsAtPos(state.selection.from + 1);
+    return { x: rect.left, y: (rect.top + rect.bottom) / 2 };
+  });
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page
+    .getByRole('button', { name: '复制选中内容的 Markdown 源码' })
+    .click();
+  const markdown = await page.evaluate(() => navigator.clipboard.readText());
+  expect(markdown).toMatch(/^5\.\s*\n\s+8\. 第二子项$/);
+  await ready(page, markdown);
+  await expect(page.locator('.article-editor > ol')).toHaveAttribute(
+    'start',
+    '5',
+  );
+  await expect(page.locator('.article-editor ol ol')).toHaveAttribute(
+    'start',
+    '8',
+  );
+});
+
+test('right-clicking a selected table cell preserves the rectangular selection for Markdown copy', async ({
+  page,
+}) => {
+  await ready(
+    page,
+    '| 标题一 | 标题二 | 标题三 |\n| --- | --- | --- |\n| 左上 | 右上 | 未选一 |\n| 左下 | 右下 | 未选二 |',
+  );
+  const selection = await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    const cells: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'tableCell') cells.push(pos);
+    });
+    editor.commands.setCellSelection({
+      anchorCell: cells[0],
+      headCell: cells[4],
+    });
+    return editor.state.selection.toJSON();
+  });
+  await page.getByRole('cell', { name: '左上' }).click({ button: 'right' });
+  expect(
+    await page.evaluate(() =>
+      window.__mojian!.editor!.state.selection.toJSON(),
+    ),
+  ).toEqual(selection);
+  await page
+    .getByRole('button', { name: '复制选中内容的 Markdown 源码' })
+    .click();
+  const markdown = await page.evaluate(() => navigator.clipboard.readText());
+  expect(markdown).toMatch(/\| 左上\s*\| 右上\s*\|/);
+  expect(markdown).toMatch(/\| 左下\s*\| 右下\s*\|/);
+  expect(markdown).not.toMatch(/未选|标题/);
+});
+
+test('whole ordered item selection keeps its number in both HTML and Markdown', async ({
+  page,
+}) => {
+  await ready(page, '4. 第一项\n5. 第二项\n6. 第三项');
+  await selectText(page, '第二项', 1, 1);
+  await page.locator('.article-editor').evaluate((element) => {
+    (element as HTMLElement).focus();
+  });
+  await page.keyboard.press('ControlOrMeta+a');
+  const copied = await copy(page);
+  expect(copied.text).toBe('第二项');
+  expect(copied.html).toMatch(
+    /<ol start="5"[^>]*><li><p>第二项<\/p><\/li><\/ol>/,
+  );
+
+  await page.getByText('第二项', { exact: true }).click({ button: 'right' });
+  await page
+    .getByRole('button', { name: '复制选中内容的 Markdown 源码' })
+    .click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    '5. 第二项',
+  );
+
+  const paste = () =>
+    page.evaluate((html) => {
+      const editor = window.__mojian!.editor!;
+      editor.commands.focus('end');
+      editor.view.pasteHTML(html);
+    }, copied.html);
+  await ready(page, '');
+  await paste();
+  await expect(page.locator('.article-editor > ol[start="5"] > li')).toHaveText(
+    '第二项',
+  );
+  await ready(page, '10. 已有项');
+  await paste();
+  await expect(
+    page.locator('.article-editor > ol[start="10"] > li'),
+  ).toHaveText(['已有项', '第二项']);
 });

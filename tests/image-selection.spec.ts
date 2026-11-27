@@ -96,9 +96,12 @@ for (const width of [1440, 390])
       shadow: 'none',
     });
     const copy = await clipboard(page, 'copy');
-    expect(copy.text).toContain('![独立图]');
-    expect(copy.text).toContain('![同行图]');
-    expect(copy.text).not.toContain('范围外图');
+    expect(copy.text).toBe(
+      '前文选择开始\n\n独立图\n\n中间 同行图 文字\n\n后文选择结束',
+    );
+    expect(copy.html).toContain('alt="独立图"');
+    expect(copy.html).toContain('alt="同行图"');
+    expect(copy.html).not.toContain('范围外图');
     expect(copy.html).not.toContain('image-range-selected');
     expect(
       await page.evaluate(() => window.__mojian!.editor!.getJSON()),

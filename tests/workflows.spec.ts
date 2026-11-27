@@ -2125,8 +2125,16 @@ for (const key of ['Control+a', 'Meta+a'])
       await cursor(page, '内层第二段');
       await page.keyboard.press(key);
       await page.keyboard.press('ControlOrMeta+c');
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-        '> 内层第一段\n>\n> 内层第二段',
+      const copied = await page.evaluate(async () => {
+        const [item] = await navigator.clipboard.read();
+        return {
+          text: await (await item.getType('text/plain')).text(),
+          html: await (await item.getType('text/html')).text(),
+        };
+      });
+      expect(copied.text).toBe('内层第一段\n内层第二段');
+      expect(copied.html).toMatch(
+        /<blockquote[^>]*><p>内层第一段<\/p><p>内层第二段<\/p><\/blockquote>/,
       );
       expect(await markdown(page)).toBe(original);
     });

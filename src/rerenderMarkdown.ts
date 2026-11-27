@@ -313,22 +313,170 @@ function dispatchRerender(editor: Editor, tr: Transaction) {
   editor.view.dispatch(tr);
 }
 
-function rerenderWholeDocument(editor: Editor): RerenderResult {
-  const oldDoc = editor.state.doc;
-  const raw = serializeDocRaw(editor, oldDoc.toJSON());
-  const parsed = parseRawMarkdown(editor, raw);
-  const nextDoc = editor.schema.nodeFromJSON(parsed);
-  if (nextDoc.eq(oldDoc)) return { changed: false, scoped: false };
-  const oldPos = editor.state.selection.from;
-  const tr = editor.state.tr.replaceWith(
-    0,
-    oldDoc.content.size,
-    nextDoc.content,
+function applyInlineRerender(
+  editor: Editor,
+  tr: Transaction,
+  from: number,
+  to: number,
+) {
+  const content = tr.doc.slice(from, to).content;
+  const raw = serializeDocRaw(editor, {
+    type: 'paragraph',
+    content: content.toJSON() as JSONContent[],
+  });
+  const parsed = parseInlineRaw(editor, raw);
+  if (!parsed) return;
+  const next = Fragment.fromArray(
+    parsed.map((node) => editor.schema.nodeFromJSON(node)),
   );
-  const clamped = Math.min(oldPos, tr.doc.content.size);
-  tr.setSelection(TextSelection.near(tr.doc.resolve(clamped)));
+  if (!next.eq(content)) tr.replaceWith(from, to, next);
+}
+
+type ParagraphRange = {
+  start: number;
+  end: number;
+  from: number;
+  to: number;
+};
+
+function applyParagraphRerender(
+  editor: Editor,
+  tr: Transaction,
+  { start, end, from, to }: ParagraphRange,
+) {
+  const partialStart = from > start + 1;
+  const partialEnd = to < end - 1;
+  if (
+    (partialStart || partialEnd) &&
+    tr.doc.resolve(from).sameParent(tr.doc.resolve(to))
+  ) {
+    applyInlineRerender(editor, tr, from, to);
+    return;
+  }
+
+  const targetFrom = partialStart ? from : start;
+  const targetTo = partialEnd ? to : end;
+  const selected = tr.doc.slice(targetFrom, targetTo);
+  let raw = serializeDocRaw(editor, {
+    type: 'doc',
+    content: selected.content.toJSON() as JSONContent[],
+  });
+  const startToken = partialStart ? uniqueSentinel(raw, 'MOJIANSTART') : '';
+  const endToken = partialEnd
+    ? uniqueSentinel(raw + startToken, 'MOJIANEND')
+    : '';
+  if (startToken) raw = `${startToken} ${raw}`;
+  if (endToken) raw = `${raw} ${endToken}`;
+
+  const parsed = parseRawMarkdown(editor, raw);
+  if (!parsed.content?.length) return;
+  const first = parsed.content[0];
+  const last = parsed.content[parsed.content.length - 1];
+  if (
+    startToken &&
+    (first.type !== 'paragraph' ||
+      !stripLeadingSentinel(first.content, `${startToken} `))
+  )
+    return;
+  if (
+    endToken &&
+    (last.type !== 'paragraph' ||
+      !stripTrailingSentinel(last.content, ` ${endToken}`))
+  )
+    return;
+
+  const next = new Slice(
+    editor.schema.nodeFromJSON(parsed).content,
+    Number(partialStart),
+    Number(partialEnd),
+  );
+  if (next.eq(selected)) return;
+  const $start = tr.doc.resolve(start);
+  if ($start.depth === 0) {
+    tr.replaceRange(targetFrom, targetTo, next);
+    return;
+  }
+
+  // Nested ranges contain whole paragraphs. Keep replacement inside their
+  // parent, including when a list item requires a leading paragraph.
+  const $end = tr.doc.resolve(end);
+  const parent = $start.parent;
+  const firstIndex = $start.index();
+  const paragraph = editor.schema.nodes.paragraph;
+  const replacement =
+    firstIndex === 0 &&
+    ['listItem', 'taskItem'].includes(parent.type.name) &&
+    next.content.firstChild?.type !== paragraph
+      ? Fragment.from(paragraph.create()).append(next.content)
+      : next.content;
+  if (parent.canReplace(firstIndex, $end.index(), replacement)) {
+    tr.replaceWith(start, end, replacement);
+    return;
+  }
+  let pos = end;
+  for (let i = selected.content.childCount - 1; i >= 0; i--) {
+    const child = selected.content.child(i);
+    pos -= child.nodeSize;
+    if (child.content.size)
+      applyInlineRerender(editor, tr, pos + 1, pos + child.nodeSize - 1);
+  }
+}
+
+function rerenderRange(
+  editor: Editor,
+  from: number,
+  to: number,
+  scoped: boolean,
+): RerenderResult {
+  const { state } = editor;
+  const ranges: (ParagraphRange | { from: number; to: number })[] = [];
+  let paragraphs: ParagraphRange | undefined;
+  state.doc.nodesBetween(from, to, (node, pos, parent) => {
+    if (node.type.spec.code) return false;
+    if (!node.isTextblock) return true;
+    const start = Math.max(from, pos + 1);
+    const end = Math.min(to, pos + node.nodeSize - 1);
+    const whole = start === pos + 1 && end === pos + node.nodeSize - 1;
+    if (node.type.name === 'paragraph' && (parent === state.doc || whole)) {
+      if (paragraphs?.end === pos) {
+        paragraphs.end = pos + node.nodeSize;
+        paragraphs.to = end;
+      } else {
+        paragraphs = {
+          start: pos,
+          end: pos + node.nodeSize,
+          from: start,
+          to: end,
+        };
+        ranges.push(paragraphs);
+      }
+    } else if (start < end) {
+      // A clipped paragraph in an existing container can change inline only.
+      ranges.push({ from: start, to: end });
+    }
+    return false;
+  });
+
+  const tr = state.tr;
+  for (const range of ranges.reverse()) {
+    if ('start' in range) applyParagraphRerender(editor, tr, range);
+    else applyInlineRerender(editor, tr, range.from, range.to);
+  }
+  if (tr.doc.eq(state.doc)) return { changed: false, scoped };
+  if (scoped) {
+    const anchor = tr.doc.resolve(tr.mapping.map(from, -1));
+    const head = tr.doc.resolve(tr.mapping.map(to, 1));
+    tr.setSelection(TextSelection.between(anchor, head));
+  } else if (state.selection.empty) {
+    const oldPos = state.selection.from;
+    const mapped = tr.mapping.mapResult(oldPos);
+    const pos = mapped.deletedAcross
+      ? Math.min(oldPos, tr.doc.content.size)
+      : mapped.pos;
+    tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
+  }
   dispatchRerender(editor, tr);
-  return { changed: true, scoped: false };
+  return { changed: true, scoped };
 }
 
 function applyCellRerender(
@@ -370,10 +518,8 @@ function rerenderSelection(editor: Editor): RerenderResult {
   const { state, schema } = editor;
   const { selection } = state;
 
-  if (selection instanceof AllSelection) {
-    const result = rerenderWholeDocument(editor);
-    return { ...result, scoped: false };
-  }
+  if (selection instanceof AllSelection)
+    return rerenderRange(editor, 0, state.doc.content.size, false);
 
   if (selection instanceof CellSelection) {
     const cellPositions: number[] = [];
@@ -398,175 +544,26 @@ function rerenderSelection(editor: Editor): RerenderResult {
       });
       return rerenderCells(editor, cells);
     }
-    return { changed: false, scoped: true };
+    return rerenderRange(editor, selection.from, selection.to, true);
   }
 
   const { from, to, $from, $to } = selection;
-
-  if ($from.sameParent($to)) {
-    if ($from.parent.type.spec.code)
-      return { changed: false, scoped: true, reason: 'code' };
-    if (
-      schema.marks.code &&
-      isOnlyCodeSelected(state.doc, from, to, schema.marks.code.name)
-    )
-      return { changed: false, scoped: true, reason: 'code' };
-
-    const sliceJson = selection.content().content.toJSON() as JSONContent[];
-    const raw = serializeDocRaw(editor, { type: 'doc', content: sliceJson });
-    const fullParagraph =
-      $from.parent.type.name === 'paragraph' &&
-      $from.parentOffset === 0 &&
-      $to.parentOffset === $to.parent.content.size;
-
-    if (fullParagraph) {
-      const parsed = parseRawMarkdown(editor, raw);
-      const parsedDoc = schema.nodeFromJSON(parsed);
-      const singleParagraph =
-        parsedDoc.childCount === 1 &&
-        parsedDoc.firstChild?.type.name === 'paragraph';
-      if (!singleParagraph) {
-        const blockFrom = $from.before();
-        const blockTo = $from.after();
-        const tr = state.tr.replaceRange(
-          blockFrom,
-          blockTo,
-          new Slice(parsedDoc.content, 0, 0),
-        );
-        if (!tr.doc.eq(state.doc)) {
-          const mappedTo = tr.mapping.map(blockTo);
-          tr.setSelection(
-            TextSelection.between(
-              tr.doc.resolve(Math.min(blockFrom, tr.doc.content.size)),
-              tr.doc.resolve(Math.min(mappedTo, tr.doc.content.size)),
-            ),
-          );
-          dispatchRerender(editor, tr);
-          return { changed: true, scoped: true };
-        }
-        return { changed: false, scoped: true };
-      }
-    }
-
-    const inlineNodes = parseInlineRaw(editor, raw);
-    if (!inlineNodes) return { changed: false, scoped: true };
-    const fragment = Fragment.fromArray(
-      inlineNodes.map((node) => schema.nodeFromJSON(node)),
-    );
-    const tr = state.tr.replaceWith(from, to, fragment);
-    if (tr.doc.eq(state.doc)) return { changed: false, scoped: true };
-    const newTo = from + fragment.size;
-    tr.setSelection(
-      TextSelection.create(
-        tr.doc,
-        Math.min(from, tr.doc.content.size),
-        Math.min(newTo, tr.doc.content.size),
-      ),
-    );
-    dispatchRerender(editor, tr);
-    return { changed: true, scoped: true };
-  }
-
-  // Multi-block selection spanning multiple siblings or containers.
-  const partialStart = $from.parentOffset > 0;
-  const partialEnd = $to.parentOffset < $to.parent.content.size;
   if (
-    (partialStart && $from.parent.type.spec.code) ||
-    (partialEnd && $to.parent.type.spec.code)
+    $from.sameParent($to) &&
+    ($from.parent.type.spec.code ||
+      (schema.marks.code &&
+        isOnlyCodeSelected(state.doc, from, to, schema.marks.code.name)))
   )
     return { changed: false, scoped: true, reason: 'code' };
 
-  const slice = selection.content();
-  const sliceBlocks = ((slice.content.toJSON() as JSONContent[]) || []).map(
-    (block) => ({ ...block }),
-  );
-  if (!sliceBlocks.length) return { changed: false, scoped: true };
-
-  // Partial selections inside a heading will merge their inline content back
-  // into that heading, so avoid serializing a leading `# ` marker.
-  if (partialStart && sliceBlocks[0].type === 'heading')
-    sliceBlocks[0] = { type: 'paragraph', content: sliceBlocks[0].content };
-  if (partialEnd && sliceBlocks[sliceBlocks.length - 1].type === 'heading')
-    sliceBlocks[sliceBlocks.length - 1] = {
-      type: 'paragraph',
-      content: sliceBlocks[sliceBlocks.length - 1].content,
-    };
-
-  const sameBlockParent =
-    $from.depth === $to.depth &&
-    $from.depth >= 1 &&
-    $from.node(-1) === $to.node(-1);
-
-  let raw = serializeDocRaw(editor, { type: 'doc', content: sliceBlocks });
-  const startSentinel = partialStart
-    ? uniqueSentinel(raw, 'MOJIANSTART')
-    : null;
-  const endSentinel = partialEnd
-    ? uniqueSentinel(raw + (startSentinel || ''), 'MOJIANEND')
-    : null;
-  if (startSentinel) raw = `${startSentinel} ${raw}`;
-  if (endSentinel) raw = `${raw} ${endSentinel}`;
-
-  const parsed = parseRawMarkdown(editor, raw);
-  if (!parsed.content?.length) return { changed: false, scoped: true };
-
-  if (startSentinel) {
-    const first = parsed.content[0];
-    if (
-      first.type !== 'paragraph' ||
-      !stripLeadingSentinel(first.content, `${startSentinel} `)
-    )
-      return { changed: false, scoped: true };
-  }
-  if (endSentinel) {
-    const last = parsed.content[parsed.content.length - 1];
-    if (
-      last.type !== 'paragraph' ||
-      !stripTrailingSentinel(last.content, ` ${endSentinel}`)
-    )
-      return { changed: false, scoped: true };
-  }
-
-  const parsedDoc = schema.nodeFromJSON(parsed);
-  const replaceStartBlock = sameBlockParent && !partialStart;
-  const replaceEndBlock = sameBlockParent && !partialEnd;
-  const targetFrom = replaceStartBlock ? $from.before() : from;
-  const targetTo = replaceEndBlock ? $to.after() : to;
-  const openStart =
-    !replaceStartBlock &&
-    parsedDoc.firstChild?.isTextblock &&
-    !parsedDoc.firstChild.type.spec.code
-      ? 1
-      : 0;
-  const openEnd =
-    !replaceEndBlock &&
-    parsedDoc.lastChild?.isTextblock &&
-    !parsedDoc.lastChild.type.spec.code
-      ? 1
-      : 0;
-
-  const tr = state.tr.replaceRange(
-    targetFrom,
-    targetTo,
-    new Slice(parsedDoc.content, openStart, openEnd),
-  );
-  if (tr.doc.eq(state.doc)) return { changed: false, scoped: true };
-
-  const mappedTo = tr.mapping.map(targetTo);
-  tr.setSelection(
-    TextSelection.between(
-      tr.doc.resolve(Math.min(targetFrom, tr.doc.content.size)),
-      tr.doc.resolve(Math.min(mappedTo, tr.doc.content.size)),
-    ),
-  );
-  dispatchRerender(editor, tr);
-  return { changed: true, scoped: true };
+  return rerenderRange(editor, from, to, true);
 }
 
 export function rerenderMarkdown(editor: Editor | null): RerenderResult {
   if (!editor || editor.isDestroyed || !editor.isEditable || !editor.markdown)
     return { changed: false, scoped: false };
   const { selection } = editor.state;
-  if (selection.empty) return rerenderWholeDocument(editor);
+  if (selection.empty)
+    return rerenderRange(editor, 0, editor.state.doc.content.size, false);
   return rerenderSelection(editor);
 }
