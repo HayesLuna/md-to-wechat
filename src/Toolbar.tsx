@@ -1,5 +1,8 @@
 import { useEditorState } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
+import { closeHistory } from '@tiptap/pm/history';
+import { Fragment } from '@tiptap/pm/model';
+import { NodeSelection, type EditorState } from '@tiptap/pm/state';
 import {
   Bold,
   Italic,
@@ -7,6 +10,7 @@ import {
   Strikethrough,
   Highlighter,
   Code,
+  Eraser,
   Link,
   Quote,
   List,
@@ -20,6 +24,54 @@ import {
   Redo2,
   MoreHorizontal,
 } from 'lucide-react';
+
+function hasSelectedText({ doc, selection }: EditorState) {
+  if (selection.empty || selection instanceof NodeSelection) return false;
+  let containsText = false;
+  for (const { $from, $to } of selection.ranges) {
+    if ($from.pos === $to.pos) continue;
+    doc.nodesBetween($from.pos, $to.pos, (node) => {
+      containsText ||= node.isText;
+      return !containsText;
+    });
+    if (containsText) return true;
+  }
+  return false;
+}
+
+function clearTextFormatting(editor: Editor) {
+  if (!editor.isEditable || !hasSelectedText(editor.state)) return;
+  editor
+    .chain()
+    .focus()
+    .command(({ tr }) => {
+      const { doc, selection } = tr;
+      for (const { $from, $to } of selection.ranges) {
+        if ($from.pos === $to.pos) continue;
+        doc.nodesBetween($from.pos, $to.pos, (block, pos) => {
+          if (!block.isTextblock) return true;
+          const start = pos + 1;
+          const from = Math.max($from.pos, start);
+          const to = Math.min($to.pos, pos + block.nodeSize - 1);
+          if (from >= to) return false;
+          const original = block.content.cut(from - start, to - start);
+          const nodes = original.content.map((node) =>
+            node.isText && node.marks.length ? node.mark([]) : node,
+          );
+          const plain = Fragment.fromArray(nodes);
+          if (!plain.eq(original)) tr.replaceWith(from, to, plain);
+          return false;
+        });
+      }
+      if (tr.docChanged) {
+        tr.setSelection(selection.getBookmark().resolve(tr.doc));
+        closeHistory(tr);
+      }
+      return true;
+    })
+    .run();
+}
+
 export type Operation = 'link' | 'image' | 'table' | 'more';
 export function Toolbar({
   editor,
@@ -34,7 +86,7 @@ export function Toolbar({
   readOnly: boolean;
   onCopySource: () => void;
 }) {
-  useEditorState({
+  const formatState = useEditorState({
     editor,
     selector: ({ editor: selected }) =>
       selected
@@ -53,6 +105,7 @@ export function Toolbar({
             task: selected.isActive('taskList'),
             block: selected.isActive('codeBlock'),
             highlight: selected.isActive('highlight'),
+            hasSelectedText: hasSelectedText(selected.state),
           }
         : null,
   });
@@ -74,9 +127,10 @@ export function Toolbar({
     icon: React.ReactNode,
     fn: () => void,
     active?: boolean,
+    disabled = false,
   ) => (
     <button
-      disabled={readOnly && title !== '更多操作'}
+      disabled={disabled || (readOnly && title !== '更多操作')}
       key={title}
       type="button"
       title={title}
@@ -153,6 +207,13 @@ export function Toolbar({
         <Code size={17} />,
         action((e) => e.chain().focus().toggleCode().run()),
         editor?.isActive('code'),
+      )}
+      {button(
+        '清除格式',
+        <Eraser size={17} />,
+        action(clearTextFormatting),
+        undefined,
+        !formatState?.hasSelectedText,
       )}
       {button('插入链接', <Link size={17} />, () => onOpen('link'))}
       <i />

@@ -493,3 +493,77 @@ test('rerendering list items inserts the required paragraph before converted blo
     before,
   );
 });
+
+test('rerendering keeps the viewport when the caret is off screen', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.commands.setContent({
+      type: 'doc',
+      content: Array.from({ length: 90 }, (_, index) => ({
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: index === 0 ? '## 开头标题' : `正文 ${index}` },
+        ],
+      })),
+    });
+    editor.commands.focus('end');
+  });
+  const article = page.locator('.article-editor');
+  await expect(article).toBeFocused();
+  const button = page.getByRole('button', { name: '重新渲染', exact: true });
+  await button.focus();
+  const scroller = page.locator('.writing-scroll');
+  await scroller.evaluate((element) => {
+    element.scrollTop = 90;
+  });
+
+  await button.press('Enter');
+
+  await expect(article.locator('h2')).toHaveText('开头标题');
+  await expect(article).toBeFocused();
+  // Wait for Tiptap's deferred focus and any associated scrolling.
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(done)),
+      ),
+  );
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(90);
+});
+
+test('whole-document rerender keeps the caret in the same paragraph after earlier delimiters disappear', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__mojian?.editor);
+  await page.evaluate(() => {
+    const editor = window.__mojian!.editor!;
+    editor.commands.setContent({
+      type: 'doc',
+      content: Array.from({ length: 80 }, (_, index) => ({
+        type: 'paragraph',
+        content: [{ type: 'text', text: `**项目 ${index}**` }],
+      })),
+    });
+    editor.state.doc.descendants((node, pos) => {
+      if (node.text === '**项目 40**')
+        editor.commands.setTextSelection(pos + 4);
+    });
+    editor.view.focus();
+  });
+  await page.getByRole('button', { name: '重新渲染', exact: true }).click();
+  await expect(page.locator('.article-editor strong')).toHaveCount(80);
+  expect(
+    await page.evaluate(() => {
+      const { $from } = window.__mojian!.editor!.state.selection;
+      return {
+        paragraph: $from.parent.textContent,
+        offset: $from.parentOffset,
+      };
+    }),
+  ).toEqual({ paragraph: '项目 40', offset: 2 });
+});

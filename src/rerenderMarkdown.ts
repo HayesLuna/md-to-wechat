@@ -313,6 +313,25 @@ function dispatchRerender(editor: Editor, tr: Transaction) {
   editor.view.dispatch(tr);
 }
 
+function blockText(content: Fragment) {
+  return content
+    .textBetween(0, content.size, '', '\ufffc')
+    .replace(/\u00a0/g, ' ');
+}
+
+// Markdown rendering mostly removes source delimiters. Count the characters
+// that survive before the caret instead of counting the removed delimiters.
+function mapTextOffset(before: string, after: string, offset: number) {
+  let consumed = 0;
+  let position = 0;
+  for (let i = 0; i < before.length && consumed < after.length; i++) {
+    if (before[i] !== after[consumed]) continue;
+    consumed++;
+    if (i < offset) position++;
+  }
+  return consumed === after.length ? position : Math.min(offset, after.length);
+}
+
 function applyInlineRerender(
   editor: Editor,
   tr: Transaction,
@@ -329,7 +348,72 @@ function applyInlineRerender(
   const next = Fragment.fromArray(
     parsed.map((node) => editor.schema.nodeFromJSON(node)),
   );
-  if (!next.eq(content)) tr.replaceWith(from, to, next);
+  if (next.eq(content)) return;
+  const caret = tr.selection.empty ? tr.selection.from : -1;
+  tr.replaceWith(from, to, next);
+  if (caret >= from && caret <= to) {
+    const offset = mapTextOffset(
+      blockText(content),
+      blockText(next),
+      caret - from,
+    );
+    tr.setSelection(TextSelection.create(tr.doc, from + offset));
+  }
+}
+
+function replaceRenderedParagraphs(
+  tr: Transaction,
+  from: number,
+  to: number,
+  previous: Fragment,
+  rendered: Fragment,
+) {
+  let caret: number | undefined;
+  const selection = tr.selection;
+  if (
+    selection.empty &&
+    selection.$from.parent.isTextblock &&
+    selection.from > from &&
+    selection.from < to
+  ) {
+    const start = tr.doc.resolve(from);
+    const paragraphIndex = selection.$from.index(start.depth) - start.index();
+    const original = blockText(selection.$from.parent.content);
+    const blocks: { node: ProseMirrorNode; pos: number }[] = [];
+    rendered.descendants((node, pos) => {
+      if (!node.isTextblock) return true;
+      blocks.push({ node, pos });
+      return false;
+    });
+    let corresponding = blocks[Math.min(paragraphIndex, blocks.length - 1)];
+    if (blocks.length !== previous.childCount) {
+      // A table or fenced block can change how many textblocks the range has.
+      // Prefer a block containing the original paragraph's surviving text.
+      let distance = Infinity;
+      blocks.forEach((block, i) => {
+        const text = blockText(block.node.content);
+        const proximity = Math.abs(i - paragraphIndex);
+        if (
+          text &&
+          (text.includes(original) || original.includes(text)) &&
+          proximity < distance
+        ) {
+          corresponding = block;
+          distance = proximity;
+        }
+      });
+    }
+    if (corresponding) {
+      const offset = mapTextOffset(
+        original,
+        blockText(corresponding.node.content),
+        selection.$from.parentOffset,
+      );
+      caret = from + corresponding.pos + 1 + offset;
+    }
+  }
+  tr.replaceWith(from, to, rendered);
+  if (caret !== undefined) tr.setSelection(TextSelection.create(tr.doc, caret));
 }
 
 type ParagraphRange = {
@@ -393,7 +477,9 @@ function applyParagraphRerender(
   if (next.eq(selected)) return;
   const $start = tr.doc.resolve(start);
   if ($start.depth === 0) {
-    tr.replaceRange(targetFrom, targetTo, next);
+    if (partialStart || partialEnd) tr.replaceRange(targetFrom, targetTo, next);
+    else
+      replaceRenderedParagraphs(tr, start, end, selected.content, next.content);
     return;
   }
 
@@ -410,7 +496,7 @@ function applyParagraphRerender(
       ? Fragment.from(paragraph.create()).append(next.content)
       : next.content;
   if (parent.canReplace(firstIndex, $end.index(), replacement)) {
-    tr.replaceWith(start, end, replacement);
+    replaceRenderedParagraphs(tr, start, end, selected.content, replacement);
     return;
   }
   let pos = end;
@@ -467,13 +553,6 @@ function rerenderRange(
     const anchor = tr.doc.resolve(tr.mapping.map(from, -1));
     const head = tr.doc.resolve(tr.mapping.map(to, 1));
     tr.setSelection(TextSelection.between(anchor, head));
-  } else if (state.selection.empty) {
-    const oldPos = state.selection.from;
-    const mapped = tr.mapping.mapResult(oldPos);
-    const pos = mapped.deletedAcross
-      ? Math.min(oldPos, tr.doc.content.size)
-      : mapped.pos;
-    tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
   }
   dispatchRerender(editor, tr);
   return { changed: true, scoped };

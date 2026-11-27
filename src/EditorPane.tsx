@@ -1,6 +1,7 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Markdown } from '@tiptap/markdown';
 import { escapePlainHighlights } from './highlight';
+import { preserveLiteralMarkdown } from './markdownLiteral';
 import { ArticleTableKit, ArticleTaskList } from './markdownBlocks';
 import {
   lowlight,
@@ -65,6 +66,16 @@ const SafeMarkdown = Markdown.extend({
     this.parent?.(event);
     const manager = this.editor.markdown!;
     const serialize = manager.serialize.bind(manager);
+    const encoder = manager as unknown as {
+      encodeTextForMarkdown: (
+        text: string,
+        node: JSONContent,
+        parent?: JSONContent,
+      ) => string;
+    };
+    const encode = encoder.encodeTextForMarkdown.bind(manager);
+    encoder.encodeTextForMarkdown = (text, node, parent) =>
+      preserveLiteralMarkdown(encode(text, node, parent), node, parent);
     baseSerializers.set(this.editor, serialize);
     manager.serialize = (document) =>
       escapePlainHighlights(document, serialize);

@@ -1475,7 +1475,7 @@ export default function App() {
                   if (!editor || readOnly || mode !== 'wysiwyg') return;
                   const scroll = writingScroll.current?.scrollTop ?? 0;
                   const result = rerenderMarkdown(editor);
-                  editor.commands.focus();
+                  editor.commands.focus(undefined, { scrollIntoView: false });
                   if (writingScroll.current)
                     writingScroll.current.scrollTop = scroll;
                   if (result.changed) {
