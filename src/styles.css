@@ -254,6 +254,9 @@ button.primary:hover {
   transform: translateX(10px);
 }
 @media (max-width: 380px) {
+  .app .workspace {
+    padding: 0 4px;
+  }
   .app .pane-tabs {
     padding: 0 4px;
     gap: 2px;
@@ -262,7 +265,7 @@ button.primary:hover {
     gap: 2px;
   }
   .app .mode-tabs {
-    gap: 6px;
+    gap: 5px;
   }
   .app .mode-tabs button {
     font-size: 11px;
@@ -273,7 +276,7 @@ button.primary:hover {
   }
   .app .pane-actions button,
   .app .pane-actions > .preview-trigger {
-    padding: 4px;
+    padding: 3px;
     background: transparent;
   }
   .app .sidebar-launch,
@@ -2808,12 +2811,13 @@ button.primary:hover {
     background: #202b3b66;
   }
 }
-@container (max-width:600px) {
+@container (max-width: 600px) {
   .pane-tabs {
-    padding: 0 10px;
+    padding: 0 6px;
+    gap: 4px;
   }
   .mode-tabs {
-    gap: 14px;
+    gap: 8px;
   }
   .mode-tabs button {
     font-size: 12px;
@@ -2822,10 +2826,37 @@ button.primary:hover {
     gap: 0;
   }
   .pane-actions button {
-    padding: 6px;
+    padding: 5px;
   }
   .pane-actions span {
     display: none;
+  }
+}
+@container (max-width: 360px) {
+  .pane-tabs {
+    padding: 0 4px;
+    gap: 2px;
+  }
+  .editor-mode-switches {
+    gap: 2px;
+  }
+  .mode-tabs {
+    gap: 5px;
+  }
+  .mode-tabs button {
+    font-size: 11px;
+    padding: 0 1px;
+  }
+  .pane-actions button,
+  .pane-actions > .preview-trigger {
+    padding: 3px;
+    background: transparent;
+  }
+  .sidebar-launch,
+  .pane-actions > .outline-launch {
+    width: 24px;
+    height: 24px;
+    padding: 3px;
   }
 }
 

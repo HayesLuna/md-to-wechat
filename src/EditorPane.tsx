@@ -46,11 +46,21 @@ import { BlockBoundaries } from './blockBoundaries';
 import { MarkBoundaries } from './markBoundaries';
 import { cancelEditorMarkdown, scheduleEditorMarkdown } from './editorMarkdown';
 
+const baseSerializers = new WeakMap<
+  Editor,
+  (document: JSONContent) => string
+>();
+
+export function getBaseMarkdownSerializer(editor: Editor) {
+  return baseSerializers.get(editor);
+}
+
 const SafeMarkdown = Markdown.extend({
   onBeforeCreate(event) {
     this.parent?.(event);
     const manager = this.editor.markdown!;
     const serialize = manager.serialize.bind(manager);
+    baseSerializers.set(this.editor, serialize);
     manager.serialize = (document) =>
       escapePlainHighlights(document, serialize);
   },

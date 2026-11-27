@@ -33,6 +33,7 @@ import {
   AlertCircle,
   Trash2,
   RotateCcw,
+  RefreshCw,
   HelpCircle,
   Share2,
   Settings2,
@@ -66,6 +67,7 @@ import { copyRich, copyText } from './clipboard';
 import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
 import { EditorPane, replaceDocument, resetDocument } from './EditorPane';
+import { rerenderMarkdown } from './rerenderMarkdown';
 import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
@@ -1447,6 +1449,46 @@ export default function App() {
               </div>
             </div>
             <div className="pane-actions">
+              <button
+                type="button"
+                className="rerender-trigger"
+                aria-label="重新渲染"
+                title={
+                  mode === 'source'
+                    ? '切换到所见即所得后可重新渲染'
+                    : readOnly
+                      ? '只读模式下不可重新渲染'
+                      : '重新渲染（无选区渲染整篇，有选区仅渲染选中内容）'
+                }
+                disabled={
+                  readOnly || mode === 'source' || switching || processing
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setContext(null);
+                  setMenu(false);
+                  if (!editor || readOnly || mode !== 'wysiwyg') return;
+                  const scroll = writingScroll.current?.scrollTop ?? 0;
+                  const result = rerenderMarkdown(editor);
+                  editor.commands.focus();
+                  if (writingScroll.current)
+                    writingScroll.current.scrollTop = scroll;
+                  if (result.changed) {
+                    notify(
+                      result.scoped
+                        ? '已重新渲染选中内容'
+                        : '已重新渲染整篇文档',
+                    );
+                  } else if (result.reason === 'code') {
+                    notify('代码块或行内代码内不做重新渲染');
+                  } else {
+                    notify('当前没有需要重新渲染的 Markdown 语法');
+                  }
+                }}
+              >
+                <RefreshCw size={15} />
+                <span>重新渲染</span>
+              </button>
               <button
                 className={`read-only-toggle ${readOnly ? 'active' : ''}`}
                 role="switch"
