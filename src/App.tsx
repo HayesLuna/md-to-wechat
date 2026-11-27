@@ -1756,7 +1756,6 @@ export default function App() {
                 headings={headingList}
                 activeHeading={activeHeading}
                 onHeading={jump}
-                onClose={() => setOutlineOpen(false)}
               />
             )}
           </div>

@@ -1,5 +1,4 @@
 import { useMemo, type CSSProperties } from 'react';
-import { X } from 'lucide-react';
 import { useSidebarResize } from './useSidebarResize';
 
 type HeadingItem = { text: string; level: number; line: number };
@@ -15,12 +14,10 @@ export function OutlineSidebar({
   headings,
   activeHeading,
   onHeading,
-  onClose,
 }: {
   headings: HeadingItem[];
   activeHeading: number;
   onHeading: (index: number) => void;
-  onClose: () => void;
 }) {
   const { width, resizing, sidebar, handleProps } = useSidebarResize({
     side: 'right',
@@ -40,16 +37,6 @@ export function OutlineSidebar({
       <div className="sidebar-resize-handle" {...handleProps} />
       <header className="sidebar-header outline-header">
         <span className="outline-tab">大纲</span>
-        <div className="outline-header-actions">
-          <button
-            type="button"
-            aria-label="收起大纲"
-            title="收起大纲"
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </div>
       </header>
       <div
         id="outline-content"

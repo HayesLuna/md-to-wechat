@@ -5,7 +5,7 @@ import {
   type PointerEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, Plus, Files } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { DraftRow, type DraftRowActions } from './DraftRow';
 import { useSidebarResize } from './useSidebarResize';
 import type { DraftSummary } from './storage';
@@ -342,7 +342,6 @@ export function DraftsSidebar({
     >
       <header className="sidebar-header">
         <span className="sidebar-heading">
-          <Files size={15} />
           <span className="sidebar-title">草稿</span>
           <span className="sidebar-badge">{total}</span>
         </span>

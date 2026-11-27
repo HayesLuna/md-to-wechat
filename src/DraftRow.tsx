@@ -46,7 +46,7 @@ export const DraftRow = memo(function DraftRow({
         onPointerCancel={(event) => actions.current?.pointerUp(event, false)}
         onLostPointerCapture={() => actions.current?.cancel()}
       >
-        <GripVertical size={14} />
+        <GripVertical size={15} />
       </span>
       <button
         className="draft-select"

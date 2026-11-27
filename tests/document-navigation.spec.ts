@@ -24,12 +24,33 @@ test('desktop shows drafts on the left and outline on the right with independent
   const outlineBox = await outline.boundingBox();
   expect(draftsBox!.y).toBe(toolbar!.y);
   expect(outlineBox!.y).toBe(toolbar!.y);
-  expect((await drafts.locator('.sidebar-header').boundingBox())!.height).toBe(
-    toolbar!.height,
-  );
-  expect((await outline.locator('.sidebar-header').boundingBox())!.height).toBe(
-    toolbar!.height,
-  );
+  const draftsHeaderBox = await drafts.locator('.sidebar-header').boundingBox();
+  const draftsHeadingBox = await drafts
+    .locator('.sidebar-heading')
+    .boundingBox();
+  const outlineHeaderBox = await outline
+    .locator('.sidebar-header')
+    .boundingBox();
+  const outlineTabBox = await outline.locator('.outline-tab').boundingBox();
+  expect(draftsHeaderBox!.height).toBe(toolbar!.height);
+  expect(outlineHeaderBox!.height).toBe(toolbar!.height);
+  expect(
+    Math.abs(
+      draftsHeadingBox!.x +
+        draftsHeadingBox!.width / 2 -
+        (draftsHeaderBox!.x + draftsHeaderBox!.width / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(
+      outlineTabBox!.x +
+        outlineTabBox!.width / 2 -
+        (outlineHeaderBox!.x + outlineHeaderBox!.width / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  await expect(
+    outline.getByRole('button', { name: '收起大纲', exact: true }),
+  ).toHaveCount(0);
   expect(toolbar!.x).toBeGreaterThanOrEqual(
     draftsBox!.x + draftsBox!.width - 1,
   );
@@ -83,7 +104,7 @@ test('desktop shows drafts on the left and outline on the right with independent
       .boundingBox(),
   ).toEqual(modePosition);
 
-  await page.getByRole('button', { name: '收起大纲', exact: true }).click();
+  await page.getByRole('button', { name: '折叠大纲', exact: true }).click();
   await expect(outline).toHaveCount(0);
   const minimap = page.getByRole('navigation', { name: '大纲缩略导航' });
   await expect(minimap).toBeVisible();
