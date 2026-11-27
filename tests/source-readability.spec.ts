@@ -23,7 +23,16 @@ test('source soft-wraps long paragraphs and URLs without changing text; outline 
       await source.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
     ).toBe(true);
     await expect(source).toHaveValue(text);
-    await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+    if (width <= 800) {
+      await expect(
+        page.getByRole('complementary', { name: '文章大纲' }),
+      ).toHaveCount(0);
+      await page.getByRole('button', { name: '展开大纲', exact: true }).click();
+    } else {
+      await expect(
+        page.getByRole('complementary', { name: '文章大纲' }),
+      ).toBeVisible();
+    }
     await page
       .locator('.sidebar-outline button')
       .filter({ hasText: '目标标题' })
@@ -140,6 +149,7 @@ test('Mermaid uses blue in editor, previews and SVG export while preserving sour
     'fill',
     'rgb(232, 242, 255)',
   );
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   const exported = page.waitForEvent('download');
   await page
     .locator('.mermaid-editor-preview')
@@ -194,6 +204,7 @@ test('long sequence diagrams stay compact and sequence numbers are readable in a
   await expect(
     page.locator('.preview-paper .sequenceNumber').first(),
   ).toHaveCSS('fill', 'rgb(255, 255, 255)');
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   const download = page.waitForEvent('download');
   await page
     .locator('.mermaid-editor-preview')

@@ -80,8 +80,6 @@ test('typing with 200 drafts does not repeatedly format every draft date', async
   });
   await page.goto('/');
   await page.waitForFunction(() => !!window.__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   await expect(page.locator('.draft-list > li')).toHaveCount(200);
   await expect(page.locator('.save-indicator')).toContainText('已保存');
   await page.evaluate(() => {

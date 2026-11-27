@@ -1,14 +1,12 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   type CSSProperties,
   type PointerEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, Files } from 'lucide-react';
 import { DraftRow, type DraftRowActions } from './DraftRow';
-import { DraftListIcon, OutlineIcon } from './NavigationIcons';
 import { useSidebarResize } from './useSidebarResize';
 import type { DraftSummary } from './storage';
 
@@ -19,9 +17,7 @@ type DraftPosition = {
   element: HTMLLIElement;
 };
 
-export function DocumentSidebar({
-  tab,
-  onTab,
+export function DraftsSidebar({
   searching,
   onSearchToggle,
   query,
@@ -35,12 +31,7 @@ export function DocumentSidebar({
   onRename,
   onDelete,
   onReorder,
-  headings,
-  activeHeading,
-  onHeading,
 }: {
-  tab: 'drafts' | 'outline';
-  onTab: (tab: 'drafts' | 'outline') => void;
   searching: boolean;
   onSearchToggle: () => void;
   query: string;
@@ -54,14 +45,15 @@ export function DocumentSidebar({
   onRename: (draft: DraftSummary) => void;
   onDelete: (draft: DraftSummary) => void;
   onReorder: (id: string, targetId: string, side: 'before' | 'after') => void;
-  headings: { text: string; level: number; line: number }[];
-  activeHeading: number;
-  onHeading: (index: number) => void;
 }) {
-  const { width, resizing, sidebar, handleProps } = useSidebarResize();
+  const { width, resizing, sidebar, handleProps } = useSidebarResize({
+    side: 'left',
+    storageKey: 'mojian-drafts-width',
+    defaultWidth: 244,
+    ariaLabel: '调整草稿栏宽度',
+  });
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const canReorder =
-    tab === 'drafts' && !busy && !normalizedQuery && drafts.length > 1;
+  const canReorder = !busy && !normalizedQuery && drafts.length > 1;
   const scrollArea = useRef<HTMLDivElement>(null);
   const settleFrame = useRef<number | null>(null);
   const pointerSession = useRef<{
@@ -264,7 +256,7 @@ export function DocumentSidebar({
     };
     area.addEventListener('touchmove', preventDragScroll, { passive: false });
     return () => area.removeEventListener('touchmove', preventDragScroll);
-  }, [tab]);
+  }, []);
   useEffect(
     () => () => {
       finishPointer(false);
@@ -340,127 +332,78 @@ export function DocumentSidebar({
     rename: onRename,
     delete: onDelete,
   };
-  const visibleHeadings = useMemo(
-    () =>
-      headings
-        .map((h, index) => ({ h, index }))
-        .filter(({ h }) =>
-          h.text.toLocaleLowerCase().includes(normalizedQuery),
-        ),
-    [headings, normalizedQuery],
-  );
-  const base = useMemo(
-    () =>
-      headings.reduce(
-        (level, h) => Math.min(level, h.level),
-        headings[0]?.level ?? 1,
-      ),
-    [headings],
-  );
   return (
     <aside
       ref={sidebar}
-      id="document-sidebar"
-      className={`document-sidebar ${resizing ? 'resizing' : ''}`}
+      id="drafts-sidebar"
+      className={`document-sidebar drafts-sidebar ${resizing ? 'resizing' : ''}`}
       style={{ '--sidebar-width': `${width}px` } as CSSProperties}
-      aria-label="文章导航"
+      aria-label="草稿箱"
     >
       <header className="sidebar-header">
-        <button
-          aria-label={tab === 'outline' ? '切换到草稿' : '切换到大纲'}
-          title={tab === 'outline' ? '切换到草稿' : '切换到大纲'}
-          aria-controls="sidebar-content"
-          onClick={() => onTab(tab === 'outline' ? 'drafts' : 'outline')}
-        >
-          {tab === 'outline' ? (
-            <OutlineIcon size={16} />
-          ) : (
-            <DraftListIcon size={18} />
-          )}
-        </button>
-        <span className="sidebar-title">
-          {tab === 'outline' ? '大纲' : '草稿'}
+        <span className="sidebar-heading">
+          <Files size={15} />
+          <span className="sidebar-title">草稿</span>
+          <span className="sidebar-badge">{total}</span>
         </span>
         <button
-          aria-label={tab === 'drafts' ? '搜索草稿' : '搜索大纲'}
-          title="搜索"
+          className={searching ? 'active' : ''}
+          aria-label="搜索草稿"
+          title="搜索草稿"
           aria-expanded={searching}
           onClick={onSearchToggle}
         >
-          <Search size={16} />
+          <Search size={15} />
         </button>
       </header>
       {searching && (
         <div className="sidebar-search">
           <input
             autoFocus
-            aria-label={tab === 'drafts' ? '搜索草稿标题' : '搜索大纲标题'}
-            placeholder={tab === 'drafts' ? '搜索草稿…' : '搜索标题…'}
+            aria-label="搜索草稿标题"
+            placeholder="搜索草稿…"
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
         </div>
       )}
       <div
-        id="sidebar-content"
+        id="drafts-content"
         role="region"
-        aria-label={tab === 'drafts' ? '草稿箱' : '文章大纲'}
-        className={`sidebar-content ${tab === 'drafts' ? 'sidebar-drafts' : 'sidebar-outline'}`}
+        aria-label="草稿列表"
+        className="sidebar-content sidebar-drafts"
       >
-        {tab === 'drafts' ? (
-          <>
-            <div className="sidebar-draft-count">
-              {total} 篇草稿
-              {!!normalizedQuery && total > 1 && (
-                <span>清空搜索后可调整顺序</span>
-              )}
-            </div>
-            <div className="sidebar-draft-scroll" ref={scrollArea}>
-              <ul className="draft-list">
-                {drafts.map((d) => (
-                  <DraftRow
-                    key={d.id}
-                    draft={d}
-                    active={d.id === activeId}
-                    busy={busy}
-                    canReorder={canReorder}
-                    searching={!!normalizedQuery}
-                    actions={rowActions}
-                  />
-                ))}
-              </ul>
-              {!drafts.length && (
-                <p className="sidebar-empty">没有找到匹配的草稿</p>
-              )}
-            </div>
-            <div className="sidebar-draft-tools">
-              <button className="primary" disabled={busy} onClick={onCreate}>
-                <Plus size={18} />
-                新建文章
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {visibleHeadings.map(({ h, index }) => (
-              <button
-                key={index}
-                className={index === activeHeading ? 'current' : ''}
-                aria-current={index === activeHeading ? 'location' : undefined}
-                style={{ paddingLeft: 16 + (h.level - base) * 14 }}
-                onClick={() => onHeading(index)}
-              >
-                {h.text || '无标题'}
-              </button>
-            ))}
-            {!headings.length && (
-              <p className="sidebar-empty">添加标题后，这里会显示文章大纲</p>
-            )}
-            {!!headings.length && !visibleHeadings.length && (
-              <p className="sidebar-empty">没有找到匹配的标题</p>
-            )}
-          </>
+        {!!normalizedQuery && total > 1 && (
+          <div className="sidebar-draft-count">清空搜索后可调整顺序</div>
         )}
+        <div className="sidebar-draft-scroll" ref={scrollArea}>
+          <ul className="draft-list">
+            {drafts.map((d) => (
+              <DraftRow
+                key={d.id}
+                draft={d}
+                active={d.id === activeId}
+                busy={busy}
+                canReorder={canReorder}
+                searching={!!normalizedQuery}
+                actions={rowActions}
+              />
+            ))}
+          </ul>
+          {!drafts.length && (
+            <p className="sidebar-empty">没有找到匹配的草稿</p>
+          )}
+        </div>
+        <div className="sidebar-draft-tools">
+          <button
+            className="draft-create-button"
+            disabled={busy}
+            onClick={onCreate}
+          >
+            <Plus size={16} />
+            新建文章
+          </button>
+        </div>
       </div>
       <div className="sidebar-resize-handle" {...handleProps} />
     </aside>

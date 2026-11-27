@@ -15,14 +15,12 @@ test('heading tabs do not leak into outline labels, draft titles or export names
   await page.keyboard.press('Tab');
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-indicator')).toContainText('已保存');
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   await expect(page.locator('.sidebar-outline>button')).toHaveText([
     '标题',
     '小节',
   ]);
   await page.locator('.sidebar-outline>button').first().click();
   await expect(page.locator('.article-editor')).toBeFocused();
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText('标题');
   await page.getByRole('button', { name: '搜索草稿' }).click();
   await page.getByRole('textbox', { name: '搜索草稿标题' }).fill('标题');
@@ -35,12 +33,10 @@ test('heading tabs do not leak into outline labels, draft titles or export names
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
   expect(await page.locator('.article-editor h1').textContent()).toBe('\t标题');
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   await expect(page.locator('.sidebar-outline>button')).toHaveText([
     '标题',
     '小节',
   ]);
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText('标题');
 });
 
@@ -56,7 +52,6 @@ test('formatted heading labels use visible text and ignore headings inside fence
   );
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-indicator')).toContainText('已保存');
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   await expect(page.locator('.sidebar-outline>button')).toHaveText([
     '真实标题 链接 代码',
     '字面 &#9;',
@@ -69,7 +64,6 @@ test('formatted heading labels use visible text and ignore headings inside fence
           .textContent,
     ),
   ).toBe('字面 &#9;');
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText(
     '真实标题 链接 代码',
   );
@@ -85,8 +79,6 @@ test('formatted heading labels use visible text and ignore headings inside fence
   );
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText(
     '自定义 &#9; 名称',
   );
@@ -126,8 +118,6 @@ test('loading existing automatic draft labels repairs escaped tabs without chang
   expect(await page.locator('.article-editor h1').textContent()).toBe(
     '\t旧标题',
   );
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await expect(page.locator('.draft-select strong')).toHaveText('旧标题');
 });
 

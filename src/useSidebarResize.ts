@@ -2,32 +2,50 @@ import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
-const DEFAULT_WIDTH = 258;
-const STORAGE_KEY = 'mojian-sidebar-width';
 
-function initialWidth() {
+function initialWidth(storageKey: string, defaultWidth: number) {
   try {
-    const saved = Number(localStorage.getItem(STORAGE_KEY));
-    return saved >= MIN_WIDTH && saved <= MAX_WIDTH ? saved : DEFAULT_WIDTH;
+    const saved = Number(localStorage.getItem(storageKey));
+    return saved >= MIN_WIDTH && saved <= MAX_WIDTH ? saved : defaultWidth;
   } catch {
-    return DEFAULT_WIDTH;
+    return defaultWidth;
   }
 }
 
-export function useSidebarResize() {
-  const [width, setWidth] = useState(initialWidth);
+export function useSidebarResize({
+  side,
+  storageKey,
+  defaultWidth = 240,
+  ariaLabel = '调整侧栏宽度',
+}: {
+  side: 'left' | 'right';
+  storageKey: string;
+  defaultWidth?: number;
+  ariaLabel?: string;
+}) {
+  const [width, setWidth] = useState(() =>
+    initialWidth(storageKey, defaultWidth),
+  );
   const [resizing, setResizing] = useState(false);
   const sidebar = useRef<HTMLElement>(null);
   const currentWidth = useRef(width);
   const drag = useRef<{ x: number; width: number; max: number } | null>(null);
 
   const maxWidth = () => {
-    const available =
-      sidebar.current?.parentElement?.getBoundingClientRect().width ?? 800;
-    return Math.max(
-      MIN_WIDTH,
-      Math.min(MAX_WIDTH, available - (available <= 600 ? 40 : 320)),
-    );
+    const parent = sidebar.current?.parentElement;
+    const available = parent?.getBoundingClientRect().width ?? 800;
+    if (window.matchMedia('(max-width:800px)').matches || available <= 680) {
+      return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, available - 40));
+    }
+    let others = 0;
+    if (parent) {
+      for (const el of parent.querySelectorAll<HTMLElement>(
+        '.document-sidebar',
+      )) {
+        if (el !== sidebar.current) others += el.getBoundingClientRect().width;
+      }
+    }
+    return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, available - others - 320));
   };
   const resize = (next: number, max: number) => {
     const value = Math.round(Math.max(MIN_WIDTH, Math.min(max, next)));
@@ -39,7 +57,7 @@ export function useSidebarResize() {
     drag.current = null;
     setResizing(false);
     try {
-      localStorage.setItem(STORAGE_KEY, String(currentWidth.current));
+      localStorage.setItem(storageKey, String(currentWidth.current));
     } catch {
       // Resizing still works when browser storage is unavailable.
     }
@@ -48,7 +66,7 @@ export function useSidebarResize() {
   const handleProps = {
     role: 'separator' as const,
     tabIndex: 0,
-    'aria-label': '调整侧栏宽度',
+    'aria-label': ariaLabel,
     'aria-orientation': 'vertical' as const,
     'aria-valuemin': MIN_WIDTH,
     'aria-valuemax': MAX_WIDTH,
@@ -66,7 +84,10 @@ export function useSidebarResize() {
     },
     onPointerMove(event: PointerEvent<HTMLDivElement>) {
       const start = drag.current;
-      if (start) resize(start.width + event.clientX - start.x, start.max);
+      if (!start) return;
+      const delta =
+        side === 'left' ? event.clientX - start.x : start.x - event.clientX;
+      resize(start.width + delta, start.max);
     },
     onPointerUp(event: PointerEvent<HTMLDivElement>) {
       if (!drag.current) return;
@@ -82,12 +103,20 @@ export function useSidebarResize() {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
         return;
       event.preventDefault();
+      const step =
+        event.key === 'ArrowRight'
+          ? side === 'left'
+            ? 10
+            : -10
+          : side === 'left'
+            ? -10
+            : 10;
       resize(
         event.key === 'Home'
           ? MIN_WIDTH
           : event.key === 'End'
             ? MAX_WIDTH
-            : currentWidth.current + (event.key === 'ArrowRight' ? 10 : -10),
+            : currentWidth.current + step,
         maxWidth(),
       );
       finish();

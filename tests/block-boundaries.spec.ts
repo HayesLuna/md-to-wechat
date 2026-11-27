@@ -274,6 +274,7 @@ test('code block: Tab at the left side indents the whole block, while text still
   expect(
     await page.evaluate(() => window.__mojian!.getOutput()!.html),
   ).toContain('padding-left: min(24px, 40%)');
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await page.evaluate(
     (markdown) => window.__mojian!.setMarkdown(markdown),
     blocks[1][1] + '\n\n' + blocks[0][1],
@@ -387,6 +388,7 @@ test('mixed image paragraphs keep text on the same line, wrap naturally, and pre
   );
   const output = await page.evaluate(() => window.__mojian!.getOutput()!.html);
   expect(output).toContain('display: inline-block');
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await page.evaluate(() =>
     window.__mojian!.editor!.chain().selectAll().focus().run(),
   );

@@ -25,8 +25,8 @@ async function seed(page: Page, includeD = false) {
   }, includeD);
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+  if (!(await page.getByRole('complementary', { name: '草稿箱' }).isVisible()))
+    await page.getByRole('button', { name: '展开草稿', exact: true }).click();
 }
 
 const titles = (page: Page) =>
@@ -86,8 +86,6 @@ test('drag order survives refresh; new drafts join the top without switching art
 
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   await expect.poll(() => titles(page)).toEqual(['B', 'A', 'C']);
   await page.locator('.draft-select').filter({ hasText: 'A' }).click();
   await expect(page.locator('.article-editor h1')).toHaveText('A');
@@ -248,8 +246,6 @@ test('failed reorder keeps the original order and explains the failure', async (
   await expect.poll(() => titles(page)).toEqual(['C', 'B', 'A']);
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   await expect.poll(() => titles(page)).toEqual(['C', 'B', 'A']);
 });
 
@@ -304,8 +300,6 @@ test('a later drag preserves the visible order when the first queued write fails
   await expect(page.locator('.article-editor h1')).toHaveText('D');
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   await expect.poll(() => titles(page)).toEqual(['C', 'B', 'D', 'A']);
 });
 
@@ -488,8 +482,7 @@ test('a quick vertical swipe beginning on a touch handle scrolls the list', asyn
     });
     await page.reload();
     await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-    await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-    await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+    await page.getByRole('button', { name: '展开草稿', exact: true }).click();
     const handle = await page
       .locator('[data-draft-id="extra-27"] .draft-drag-handle')
       .boundingBox();
@@ -543,8 +536,6 @@ test('dragging near the list edge scrolls long draft libraries', async ({
   });
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   const handle = await page
     .locator('[data-draft-id="extra-27"] .draft-drag-handle')
     .boundingBox();

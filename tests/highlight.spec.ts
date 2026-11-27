@@ -170,9 +170,9 @@ test('highlights work in headings, lists and tables on mobile without leaking in
     return { before, after: editor.getJSON() };
   });
   expect(roundtrip.after).toEqual(roundtrip.before);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  await page.getByRole('button', { name: '展开大纲', exact: true }).click();
   await expect(page.locator('.sidebar-outline>button')).toHaveText('高亮标题');
-  await page.getByRole('button', { name: '折叠侧栏', exact: true }).click();
+  await page.getByRole('button', { name: '折叠大纲', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );

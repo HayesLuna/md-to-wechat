@@ -51,14 +51,12 @@ export const DraftRow = memo(function DraftRow({
       <button
         className="draft-select"
         aria-current={active ? 'page' : undefined}
+        title={d.title}
         disabled={busy}
         onClick={() => actions.current?.select(d)}
       >
         <strong>{d.title}</strong>
-        <small>
-          {savedAt}
-          {active ? ' · 当前文章' : ''}
-        </small>
+        <small>{savedAt}</small>
       </button>
       <div className="draft-actions">
         <button

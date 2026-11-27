@@ -7,8 +7,8 @@ async function emptyOrigin(page: Page) {
   await page.goto('/draft-order-seed');
 }
 async function openDrafts(page: Page) {
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+  if (!(await page.getByRole('complementary', { name: '草稿箱' }).isVisible()))
+    await page.getByRole('button', { name: '展开草稿', exact: true }).click();
 }
 const titles = (page: Page) =>
   page.locator('.draft-select strong').allTextContents();

@@ -62,6 +62,24 @@ test('underline round-trips as Typora syntax and is rendered in publication prev
     '下划线',
     '旧下划线',
   ]);
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
+  await page.evaluate(() => {
+    const e = (window as any).__mojian.editor;
+    e.commands.setContent(e.markdown.parse('普通文字'));
+    e.commands.setTextSelection({ from: 1, to: 5 });
+    e.commands.focus();
+  });
+  const underlineBtn = page.getByRole('button', {
+    name: '下划线',
+    exact: true,
+  });
+  await expect(underlineBtn).toHaveAttribute('aria-pressed', 'false');
+  await underlineBtn.click();
+  await expect(underlineBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(editor.locator('u')).toHaveText('普通文字');
+  await underlineBtn.click();
+  await expect(underlineBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(editor.locator('u')).toHaveCount(0);
 });
 
 test('an underlined link round-trips when its title contains a closing underline tag', async ({

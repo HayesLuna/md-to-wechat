@@ -240,6 +240,7 @@ test('clipboard has actual HTML and plain formats, and refusal never falls back'
     '# 标题\n\n文字 & 中文\n\n3. **粗体**和[外链](https://example.com)\n   - 子列表\n\n| A | B |\n| --- | --- |\n| 字 | 2 |\n\n```java\n/* comment\n multiline */\n\t  a\n\n  b\n```',
   );
   await prepared(page);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.locator('.toast')).toContainText('已复制排版内容');
   const clip = await page.evaluate(async () => {
@@ -309,10 +310,9 @@ test('copy retries a failed article render without changing the document', async
       return create(tag, options);
     }) as typeof document.createElement;
   });
-  const copy = page.getByRole('button', { name: '复制到公众号', exact: true });
-  await copy.click();
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.waitForFunction(() => (window as any).__renderFailed === true);
-  await copy.click();
+  await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.locator('.toast')).toContainText(
     'temporary render failure',
   );
@@ -336,7 +336,6 @@ test('outline duplicates and code exclusions, full screen and Esc layering; mobi
       Array(12).fill('段落\n\n').join('') +
       '## 重复\n\n```\n# 假标题\n```',
   );
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   expect(await page.locator('.sidebar-outline>button').count()).toBe(2);
   await page.locator('.sidebar-outline>button').nth(1).click();
   expect((await selection(page)).from).toBeGreaterThan(20);
@@ -353,12 +352,17 @@ test('outline duplicates and code exclusions, full screen and Esc layering; mobi
   await expect(page.locator('.app')).not.toHaveClass(/fullscreen/);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
-  await expect(page.locator('.writing-pane')).toBeHidden();
+  await expect(
+    page.getByRole('dialog', { name: '公众号预览', exact: true }),
+  ).toBeVisible();
   await expect(page.locator('.preview-pane')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
   await page.getByRole('button', { name: '关闭预览', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '公众号预览', exact: true }),
+  ).toHaveCount(0);
   await expect(page.locator('.writing-pane')).toBeVisible();
 });
 
@@ -420,6 +424,7 @@ test('context menu retargets outside selection and stays in viewport', async ({
     .toBeLessThanOrEqual(592);
   await page.keyboard.press('Escape');
   // With enough vertical room, the right edge of a flipped menu meets the pointer.
+  await page.getByRole('button', { name: '折叠大纲', exact: true }).click();
   const narrowBounds = (await page.locator('.article-editor').boundingBox())!;
   const rightClick = Math.floor(narrowBounds.x + narrowBounds.width - 10);
   actual = await check(rightClick, 300);
@@ -537,9 +542,11 @@ test('local image async bookmark maps with edits, percent survives roundtrip/rel
   await expect(page.locator('.image-box img')).toBeVisible();
   expect(await markdown(page)).toContain('width=45%');
   await prepared(page);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('本地测试.png');
   await page.getByRole('button', { name: '返回写作', exact: true }).click();
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await setDoc(page, '![丢失资源](local-image:missing-resource "width=25%")');
   await expect(page.locator('.missing-image')).toContainText('本地图片缺失');
   await prepared(page);
@@ -622,6 +629,7 @@ test('rich clipboard unsupported has no writeText fallback and prepares fresh sn
       },
     });
   });
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.locator('.toast')).toContainText('不支持富文本');
   expect(await page.evaluate(() => (window as any).__fallback)).toBe(0);
@@ -707,6 +715,7 @@ test('local placeholders and embedded diagrams are written in both clipboard for
     '# 含图片\n\n![缺失但保留位置](local-image:missing "width=30%")\n\n```mermaid\nflowchart LR\nA-->B\n```',
   );
   await prepared(page);
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('Mermaid 图形 1');
   await page
@@ -967,7 +976,9 @@ test('WeChat typography uses explicit pixel line heights in lists and inline mar
     '30px',
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator('.writing-pane')).toBeHidden();
+  await expect(
+    page.getByRole('dialog', { name: '公众号预览', exact: true }),
+  ).toBeVisible();
   await expect(page.locator('.preview-paper li strong').first()).toHaveCSS(
     'display',
     'inline',

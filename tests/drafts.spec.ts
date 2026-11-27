@@ -17,16 +17,8 @@ async function content(page: Page) {
   return page.evaluate(() => (window as any).__mojian.getMarkdown());
 }
 async function box(page: Page) {
-  if (
-    !(await page.getByRole('complementary', { name: '文章导航' }).isVisible())
-  )
-    await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  if (
-    await page
-      .getByRole('button', { name: '切换到草稿', exact: true })
-      .isVisible()
-  )
-    await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
+  if (!(await page.getByRole('complementary', { name: '草稿箱' }).isVisible()))
+    await page.getByRole('button', { name: '展开草稿', exact: true }).click();
   if (
     !(await page
       .getByRole('textbox', { name: '搜索草稿标题', exact: true })
@@ -34,7 +26,7 @@ async function box(page: Page) {
   )
     await page.getByRole('button', { name: '搜索草稿', exact: true }).click();
   await expect(
-    page.getByRole('region', { name: '草稿箱', exact: true }),
+    page.getByRole('complementary', { name: '草稿箱', exact: true }),
   ).toBeVisible();
 }
 
@@ -198,7 +190,9 @@ test('failed save blocks switching and creation, preserving current content', as
   await expect(page.locator('.toast')).toContainText(/操作未完成|保存失败/);
   await expect(page.locator('.draft-list li')).toHaveCount(1);
   await expect.poll(() => content(page)).toContain('尚未保存的正文');
-  await expect(page.getByRole('region', { name: '草稿箱' })).toBeVisible();
+  await expect(
+    page.getByRole('complementary', { name: '草稿箱' }),
+  ).toBeVisible();
 });
 
 test('Mermaid editor switches diagram/code while article preview shows diagrams only; mobile drawer fits', async ({

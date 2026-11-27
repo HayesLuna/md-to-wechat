@@ -127,8 +127,6 @@ test('read-only is saved per article across reload, draft switching and renaming
     'contenteditable',
     'false',
   );
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
   await page
     .getByRole('button', { name: '重命名 锁定文章', exact: true })
     .click();
@@ -231,14 +229,19 @@ test('read-only changes during pending preview preserve the render and copy resu
   );
   await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await loading;
-  const toggle = page.getByRole('switch', { name: '只读模式' });
-  await toggle.click();
-  await expect(toggle).toBeChecked();
   release();
   await expect(page.locator('.preview-paper:not(.preparing)')).toContainText(
     '排版期间锁定',
   );
   await expect(page.locator('.preview-header')).not.toContainText('准备排版');
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
+  const toggle = page.getByRole('switch', { name: '只读模式' });
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(page.locator('.preview-paper:not(.preparing)')).toContainText(
+    '排版期间锁定',
+  );
   await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))

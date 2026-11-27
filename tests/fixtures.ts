@@ -95,11 +95,15 @@ export const editorTest = test.extend<
     },
     { scope: 'worker' },
   ],
-  context: async ({ sharedEditorContext, browser, hasTouch }, use) => {
+  context: async (
+    { sharedEditorContext, browser, hasTouch, isMobile, viewport },
+    use,
+  ) => {
     if (hasTouch) {
       const touchContext = await browser.newContext({
-        viewport: { width: 1440, height: 1000 },
+        viewport: viewport ?? { width: 1440, height: 1000 },
         hasTouch: true,
+        isMobile,
         permissions: ['clipboard-read', 'clipboard-write'],
       });
       await use(touchContext);

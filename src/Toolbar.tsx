@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core';
 import {
   Bold,
   Italic,
+  Underline,
   Strikethrough,
   Highlighter,
   Code,
@@ -43,6 +44,7 @@ export function Toolbar({
               : 0,
             bold: selected.isActive('bold'),
             italic: selected.isActive('italic'),
+            underline: selected.isActive('underline'),
             strike: selected.isActive('strike'),
             code: selected.isActive('code'),
             quote: selected.isActive('blockquote'),
@@ -127,6 +129,12 @@ export function Toolbar({
         <Italic size={17} />,
         action((e) => e.chain().focus().toggleItalic().run()),
         editor?.isActive('italic'),
+      )}
+      {button(
+        '下划线',
+        <Underline size={17} />,
+        action((e) => e.chain().focus().toggleUnderline().run()),
+        editor?.isActive('underline'),
       )}
       {button(
         '删除线',

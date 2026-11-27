@@ -121,6 +121,7 @@ test('user fare-date Gantt inside a numbered list renders in editor and preview'
   await expect(page.locator('[data-mermaid-block] svg')).toContainText(
     '固定运价与销售时间轴',
   );
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await page.locator('.diagram').click();
   const dialog = page.getByRole('region', { name: '图表预览' });
   await expect(dialog.locator('img')).toBeVisible();

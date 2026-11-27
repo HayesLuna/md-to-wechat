@@ -1,36 +1,41 @@
 import { test, expect } from './fixtures';
 
-test('left navigation shares drafts and outline, preserves collapse and supports indexed heading jumps', async ({
+test('desktop shows drafts on the left and outline on the right with independent collapse and heading jumps', async ({
   page,
 }) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  const sidebar = page.getByRole('complementary', { name: '文章导航' });
-  await expect(sidebar).toHaveCount(0);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  await expect(sidebar).toBeVisible();
-  await expect(sidebar.locator('.sidebar-title')).toHaveText('大纲');
+  const drafts = page.getByRole('complementary', { name: '草稿箱' });
+  const outline = page.getByRole('complementary', { name: '文章大纲' });
+  await expect(drafts).toBeVisible();
+  await expect(outline).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(
-    page.locator('.writing-pane .writing-body .document-sidebar'),
+    page.locator('.writing-pane .writing-body .drafts-sidebar'),
   ).toHaveCount(1);
+  await expect(
+    page.locator('.writing-pane .writing-body .outline-sidebar'),
+  ).toHaveCount(1);
+
   const toolbar = await page
     .getByRole('toolbar', { name: '正文格式' })
     .boundingBox();
-  const navigation = await sidebar.boundingBox();
-  expect(navigation!.y).toBe(toolbar!.y);
-  expect((await sidebar.locator('.sidebar-header').boundingBox())!.height).toBe(
+  const draftsBox = await drafts.boundingBox();
+  const outlineBox = await outline.boundingBox();
+  expect(draftsBox!.y).toBe(toolbar!.y);
+  expect(outlineBox!.y).toBe(toolbar!.y);
+  expect((await drafts.locator('.sidebar-header').boundingBox())!.height).toBe(
+    toolbar!.height,
+  );
+  expect((await outline.locator('.sidebar-header').boundingBox())!.height).toBe(
     toolbar!.height,
   );
   expect(toolbar!.x).toBeGreaterThanOrEqual(
-    navigation!.x + navigation!.width - 1,
+    draftsBox!.x + draftsBox!.width - 1,
   );
+  expect(outlineBox!.x).toBeGreaterThanOrEqual(toolbar!.x + toolbar!.width - 1);
   await expect(page.locator('.writing-content > .toolbar')).toHaveCount(1);
-  await page.getByRole('button', { name: '切换到草稿' }).focus();
-  await page.keyboard.press('Enter');
-  await expect(sidebar.locator('.sidebar-title')).toHaveText('草稿');
-  await page.keyboard.press('Space');
-  await expect(sidebar.locator('.sidebar-title')).toHaveText('大纲');
+
   await page.evaluate(() =>
     (window as any).__mojian.setMarkdown(
       '# 文章标题\n\n开头正文\n\n## 重复标题\n\n中间正文\n\n### 嵌套标题\n\n更多正文\n\n## 重复标题\n\n末尾正文',
@@ -55,104 +60,192 @@ test('left navigation shares drafts and outline, preserves collapse and supports
       () => (window as any).__mojian.editor.state.selection.from,
     ),
   ).toBeGreaterThan(35);
-  await page.getByRole('button', { name: '搜索大纲', exact: true }).click();
-  await page.getByRole('textbox', { name: '搜索大纲标题' }).fill('嵌套');
-  await expect(headings).toHaveText(['嵌套标题']);
-  await headings.click();
-  await expect(headings).toHaveAttribute('aria-current', 'location');
-  await page.getByRole('button', { name: '切换到草稿', exact: true }).click();
-  await expect(page.getByRole('region', { name: '草稿箱' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '搜索大纲', exact: true }),
+  ).toHaveCount(0);
+
   await expect(page.getByRole('button', { name: '新建文章' })).toBeVisible();
   const before = await page.evaluate(() =>
     (window as any).__mojian.getMarkdown(),
   );
-  const toggle = page.locator('.sidebar-launch');
-  const openPosition = await toggle.boundingBox();
+  const draftsToggle = page.locator('.drafts-launch');
+  const openPosition = await draftsToggle.boundingBox();
   const modePosition = await page
     .getByRole('button', { name: '所见即所得', exact: true })
     .boundingBox();
-  await page.getByRole('button', { name: '折叠侧栏' }).click();
-  await expect(sidebar).toHaveCount(0);
-  expect(await toggle.boundingBox()).toEqual(openPosition);
+  await page.getByRole('button', { name: '折叠草稿', exact: true }).click();
+  await expect(drafts).toHaveCount(0);
+  await expect(outline).toBeVisible();
+  expect(await draftsToggle.boundingBox()).toEqual(openPosition);
   expect(
     await page
       .getByRole('button', { name: '所见即所得', exact: true })
       .boundingBox(),
   ).toEqual(modePosition);
-  await page.getByRole('button', { name: '展开侧栏' }).click();
-  expect(await toggle.boundingBox()).toEqual(openPosition);
-  await expect(sidebar.locator('.sidebar-title')).toHaveText('草稿');
+
+  await page.getByRole('button', { name: '收起大纲', exact: true }).click();
+  await expect(outline).toHaveCount(0);
+  const minimap = page.getByRole('navigation', { name: '大纲缩略导航' });
+  await expect(minimap).toBeVisible();
+  const nestedBar = minimap.getByRole('button', {
+    name: '嵌套标题',
+    exact: true,
+  });
+  await nestedBar.hover();
+  await expect(nestedBar.locator('.outline-minimap-tip')).toHaveCSS(
+    'opacity',
+    '1',
+  );
+  await expect(outline).toHaveCount(0);
+  await nestedBar.click();
+  await expect(outline).toHaveCount(0);
+  await expect(nestedBar).toHaveAttribute('aria-current', 'location');
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mojian.editor.state.selection.$from.parent
+          .textContent,
+    ),
+  ).toBe('嵌套标题');
+
+  await page.getByRole('button', { name: '展开草稿', exact: true }).click();
+  await expect(drafts).toBeVisible();
+  await page.getByRole('button', { name: '展开大纲', exact: true }).click();
+  await expect(outline).toBeVisible();
+  await expect(minimap).toHaveCount(0);
   expect(
     await page.evaluate(() => (window as any).__mojian.getMarkdown()),
   ).toBe(before);
+
   await page.getByRole('button', { name: '新建文章' }).click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__mojian.getMarkdown()))
     .toBe('');
-  await expect(sidebar).toBeVisible();
+  await expect(drafts).toBeVisible();
   await expect(page.locator('.draft-list li')).toHaveCount(2);
+
   await page.getByRole('button', { name: '全屏写作', exact: true }).click();
-  await expect(sidebar).toHaveCount(0);
+  await expect(drafts).toHaveCount(0);
+  await expect(outline).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(sidebar).toBeVisible();
+  await expect(drafts).toBeVisible();
+  await expect(outline).toBeVisible();
+});
+
+test('wechat preview opens as a centered modal dialog and closes via Esc, backdrop, or close button', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__mojian?.editor);
+  await page.evaluate(() =>
+    (window as any).__mojian.setMarkdown('# 弹窗预览\n\n预览正文段落'),
+  );
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '公众号预览', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.preview-paper')).toContainText('弹窗预览');
+
+  // Desktop modal places settings on the left and scrollable preview paper on the right.
+  const settingsBox = await dialog
+    .locator('.preview-settings-column')
+    .boundingBox();
+  const paperBox = await dialog.locator('.preview-paper').boundingBox();
+  expect(paperBox!.x).toBeGreaterThanOrEqual(
+    settingsBox!.x + settingsBox!.width - 1,
+  );
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  // Clicking the backdrop closes the preview modal.
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await page
+    .locator('.preview-dialog-backdrop')
+    .click({ position: { x: 8, y: 8 } });
+  await expect(dialog).toHaveCount(0);
+
+  // Close button also closes the preview modal.
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '关闭预览', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 });
 
 for (const width of [390, 586])
-  test(`narrow ${width}px navigation keeps its toggle fixed and returns to the article`, async ({
+  test(`narrow ${width}px navigation opens drafts on the left and outline on the right as mutually exclusive drawers`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/');
     await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-    const copyBounds = await page.locator('.copy-main').boundingBox();
     const actions = page.locator('.header-actions > button:visible');
-    await expect(actions).toHaveCount(5);
+    await expect(actions).toHaveCount(4);
+    const firstBounds = await actions.first().boundingBox();
+    let lastBounds = firstBounds;
     for (const action of await actions.all()) {
       const bounds = await action.boundingBox();
-      expect(Math.abs(bounds!.width - copyBounds!.width)).toBeLessThan(1);
+      expect(Math.abs(bounds!.width - firstBounds!.width)).toBeLessThan(1);
       expect(bounds!.height).toBe(40);
       await expect(action.locator('span')).toBeHidden();
+      lastBounds = bounds;
     }
-    expect(copyBounds!.x + copyBounds!.width).toBeCloseTo(width - 14, 0);
+    expect(lastBounds!.x + lastBounds!.width).toBeCloseTo(width - 14, 0);
     await page.evaluate(() =>
       (window as any).__mojian.setMarkdown(
         '# 标题\n\n正文\n\n## 目标标题\n\n更多正文',
       ),
     );
-    const sidebar = page.getByRole('complementary', { name: '文章导航' });
-    const toggle = page.locator('.sidebar-launch');
-    const position = await toggle.boundingBox();
-    await expect(sidebar).toHaveCount(0);
-    await page.getByRole('button', { name: '展开侧栏' }).click();
-    await expect(sidebar).toBeVisible();
-    expect(await toggle.boundingBox()).toEqual(position);
-    const bounds = await sidebar.boundingBox();
+    const drafts = page.getByRole('complementary', { name: '草稿箱' });
+    const outline = page.getByRole('complementary', { name: '文章大纲' });
+    const draftsToggle = page.locator('.drafts-launch');
+    const position = await draftsToggle.boundingBox();
+    await expect(drafts).toHaveCount(0);
+    await expect(outline).toHaveCount(0);
+
+    await page.getByRole('button', { name: '展开草稿' }).click();
+    await expect(drafts).toBeVisible();
+    await expect(outline).toHaveCount(0);
+    expect(await draftsToggle.boundingBox()).toEqual(position);
+    const draftsBounds = await drafts.boundingBox();
     const body = await page.locator('.writing-body').boundingBox();
-    expect(bounds!.x).toBe(body!.x);
-    expect(bounds!.y).toBe(body!.y);
-    expect(bounds!.width).toBeLessThan(width);
+    expect(draftsBounds!.x).toBe(body!.x);
+    expect(draftsBounds!.y).toBe(body!.y);
+    expect(draftsBounds!.width).toBeLessThan(width);
     expect(
-      (await sidebar.locator('.sidebar-header').boundingBox())!.height,
+      (await drafts.locator('.sidebar-header').boundingBox())!.height,
     ).toBe(
       (await page.getByRole('toolbar', { name: '正文格式' }).boundingBox())!
         .height,
     );
-    await page
-      .getByRole('region', { name: '文章大纲' })
+
+    // Opening outline on narrow screens replaces drafts drawer and anchors right.
+    await page.getByRole('button', { name: '展开大纲' }).click();
+    await expect(outline).toBeVisible();
+    await expect(drafts).toHaveCount(0);
+    const outlineBounds = await outline.boundingBox();
+    expect(outlineBounds!.x + outlineBounds!.width).toBeCloseTo(
+      body!.x + body!.width,
+      1,
+    );
+    expect(outlineBounds!.y).toBe(body!.y);
+
+    await outline
       .getByRole('button', { name: '目标标题', exact: true })
       .click();
-    await expect(sidebar).toHaveCount(0);
+    await expect(outline).toHaveCount(0);
     await expect(page.locator('.article-editor')).toBeFocused();
-    await page.getByRole('button', { name: '展开侧栏' }).click();
+
+    await page.getByRole('button', { name: '展开大纲' }).click();
     await page.keyboard.press('Escape');
-    await expect(sidebar).toHaveCount(0);
-    expect(await toggle.boundingBox()).toEqual(position);
+    await expect(outline).toHaveCount(0);
+    expect(await draftsToggle.boundingBox()).toEqual(position);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBe(width);
   });
 
-test('long outlines scroll independently and preserve heading targets after filtering', async ({
+test('long outlines scroll independently and jump to distant headings', async ({
   page,
 }) => {
   await page.goto('/');
@@ -167,7 +260,6 @@ test('long outlines scroll independently and preserve heading targets after filt
         ).join(''),
     ),
   );
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   const outline = page.locator('.sidebar-outline');
   await expect(outline.locator('button')).toHaveCount(201);
   expect(
@@ -184,9 +276,6 @@ test('long outlines scroll independently and preserve heading targets after filt
     )
     .toBe('小节 100');
   expect(await outline.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  await page.getByRole('button', { name: '搜索大纲', exact: true }).click();
-  await page.getByRole('textbox', { name: '搜索大纲标题' }).fill('章节 99');
-  await expect(outline.locator('button')).toHaveText(['章节 99']);
   await outline.getByRole('button', { name: '章节 99', exact: true }).click();
   await expect
     .poll(() =>
@@ -202,39 +291,52 @@ test('long outlines scroll independently and preserve heading targets after filt
   );
 });
 
-test('sidebar dragging shares width between outline and drafts and restores it after reload', async ({
+test('drafts and outline sidebars resize independently and restore widths after reload', async ({
   page,
 }) => {
   await page.goto('/');
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  const sidebar = page.getByRole('complementary', { name: '文章导航' });
-  const handle = page.getByRole('separator', { name: '调整侧栏宽度' });
-  const initial = await sidebar.boundingBox();
-  const grip = await handle.boundingBox();
-  await page.mouse.move(grip!.x + 3, grip!.y + 80);
+  const drafts = page.getByRole('complementary', { name: '草稿箱' });
+  const outline = page.getByRole('complementary', { name: '文章大纲' });
+  const draftsHandle = page.getByRole('separator', { name: '调整草稿栏宽度' });
+  const outlineHandle = page.getByRole('separator', { name: '调整大纲栏宽度' });
+
+  const initialDrafts = await drafts.boundingBox();
+  const draftsGrip = await draftsHandle.boundingBox();
+  await page.mouse.move(draftsGrip!.x + 3, draftsGrip!.y + 80);
   await page.mouse.down();
-  await page.mouse.move(grip!.x + 103, grip!.y + 80, { steps: 5 });
+  await page.mouse.move(draftsGrip!.x + 83, draftsGrip!.y + 80, { steps: 5 });
   await page.mouse.up();
   await expect
-    .poll(async () => (await sidebar.boundingBox())!.width)
-    .toBe(initial!.width + 100);
-  await page.getByRole('button', { name: '切换到草稿' }).click();
-  expect((await sidebar.boundingBox())!.width).toBe(initial!.width + 100);
+    .poll(async () => (await drafts.boundingBox())!.width)
+    .toBe(initialDrafts!.width + 80);
+
+  const initialOutline = await outline.boundingBox();
+  const outlineGrip = await outlineHandle.boundingBox();
+  await page.mouse.move(outlineGrip!.x + 3, outlineGrip!.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(outlineGrip!.x - 67, outlineGrip!.y + 80, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await outline.boundingBox())!.width)
+    .toBe(initialOutline!.width + 70);
+
   await page.reload();
   await page.waitForFunction(() => !!(window as any).__mojian?.editor);
-  await expect(sidebar).toHaveCount(0);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  expect((await sidebar.boundingBox())!.width).toBe(initial!.width + 100);
-  await handle.focus();
+  expect((await drafts.boundingBox())!.width).toBe(initialDrafts!.width + 80);
+  expect((await outline.boundingBox())!.width).toBe(initialOutline!.width + 70);
+
+  await draftsHandle.focus();
   await page.keyboard.press('Home');
-  expect((await sidebar.boundingBox())!.width).toBe(180);
+  expect((await drafts.boundingBox())!.width).toBe(180);
   await page.keyboard.press('End');
-  expect((await sidebar.boundingBox())!.width).toBe(480);
+  expect((await drafts.boundingBox())!.width).toBe(480);
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(sidebar).toHaveCount(0);
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
-  expect((await sidebar.boundingBox())!.width).toBeLessThanOrEqual(350);
+  await expect(drafts).toHaveCount(0);
+  await expect(outline).toHaveCount(0);
+  await page.getByRole('button', { name: '展开草稿', exact: true }).click();
+  expect((await drafts.boundingBox())!.width).toBeLessThanOrEqual(350);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
@@ -248,7 +350,6 @@ test('outline depth is relative to the first heading level when an article start
   await page.evaluate(() =>
     (window as any).__mojian.setMarkdown('## 章节\n\n### 小节\n\n## 下一章'),
   );
-  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   const headings = page.locator('.sidebar-outline>button');
   await expect(headings).toHaveText(['章节', '小节', '下一章']);
   expect(

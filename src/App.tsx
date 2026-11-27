@@ -15,10 +15,9 @@ import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import {
   Upload,
   Download,
-  Copy,
   CheckCircle2,
   Loader2,
-  PanelRight,
+  Eye,
   Maximize2,
   Minimize2,
   X,
@@ -26,6 +25,8 @@ import {
   LockKeyhole,
   PanelLeftOpen,
   PanelLeftClose,
+  PanelRightOpen,
+  PanelRightClose,
   FileText,
   ImagePlus,
   ExternalLink,
@@ -64,14 +65,14 @@ import { headings } from './headings';
 import { copyRich, copyText } from './clipboard';
 import { localImageAssets } from './localAssets';
 import { downloadDiagram } from './mermaid';
-import { ArticlePreview } from './ArticlePreview';
 import { EditorPane, replaceDocument, resetDocument } from './EditorPane';
 import { useDraftSession } from './useDraftSession';
 import { clearEmptyBlockParagraph } from './blockBoundaries';
 import { Toolbar, type Operation } from './Toolbar';
-import { SettingsPanel } from './SettingsPanel';
 import { Dialog, DialogLoading } from './Dialog';
-import { DocumentSidebar } from './DocumentSidebar';
+import { DraftsSidebar } from './DraftsSidebar';
+import { OutlineSidebar, OutlineMinimap } from './OutlineSidebar';
+import { PreviewDialog } from './PreviewDialog';
 const MediaPreview = lazy(() =>
   import('./MediaPreview').then((module) => ({ default: module.MediaPreview })),
 );
@@ -182,17 +183,21 @@ export default function App() {
   const reorderTicket = useRef(0);
   const reorderPending = useRef(0);
   const lastSavedOrder = useRef<string[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<'drafts' | 'outline'>('outline');
-  const [sidebarSearch, setSidebarSearch] = useState(false);
-  const [outlineQuery, setOutlineQuery] = useState('');
+  const [draftsOpen, setDraftsOpen] = useState(() => window.innerWidth >= 1024);
+  const [outlineOpen, setOutlineOpen] = useState(
+    () => window.innerWidth >= 1024,
+  );
+  const [draftsSearch, setDraftsSearch] = useState(false);
   const [activeHeading, setActiveHeading] = useState(0);
   const [query, setQuery] = useState('');
   const [renameTitle, setRenameTitle] = useState('');
   useEffect(() => {
     const screen = window.matchMedia('(max-width:800px)');
     const change = (e: MediaQueryListEvent) => {
-      if (e.matches) setSidebarOpen(false);
+      if (e.matches) {
+        setDraftsOpen(false);
+        setOutlineOpen(false);
+      }
     };
     screen.addEventListener('change', change);
     return () => screen.removeEventListener('change', change);
@@ -383,12 +388,16 @@ export default function App() {
         } else if (modal) {
           e.preventDefault();
           closeModal();
+        } else if (preview) {
+          e.preventDefault();
+          setPreview(false);
         } else if (
-          sidebarOpen &&
+          (draftsOpen || outlineOpen) &&
           window.matchMedia('(max-width:800px)').matches
         ) {
           e.preventDefault();
-          setSidebarOpen(false);
+          setDraftsOpen(false);
+          setOutlineOpen(false);
         } else if (context) {
           e.preventDefault();
           setContext(null);
@@ -422,7 +431,9 @@ export default function App() {
   }, [
     media,
     modal,
-    sidebarOpen,
+    preview,
+    draftsOpen,
+    outlineOpen,
     context,
     menu,
     fullscreen,
@@ -489,7 +500,6 @@ export default function App() {
     setEditor(null);
     resetOutput();
     setActiveHeading(0);
-    setOutlineQuery('');
     setContext(null);
     setMenu(false);
   };
@@ -563,7 +573,7 @@ export default function App() {
         setDrafts(library.drafts);
         activateDraft(latest);
       }
-      if (window.matchMedia('(max-width:800px)').matches) setSidebarOpen(false);
+      if (window.matchMedia('(max-width:800px)').matches) setDraftsOpen(false);
     });
   const createDraft = () =>
     void draftOperation(async () => {
@@ -573,7 +583,7 @@ export default function App() {
       setDrafts((items) => [summarizeDraft(d), ...items]);
       activateDraft(d);
       setQuery('');
-      if (window.matchMedia('(max-width:800px)').matches) setSidebarOpen(false);
+      if (window.matchMedia('(max-width:800px)').matches) setDraftsOpen(false);
     });
   const renameDraft = () => {
     if (modal?.type !== 'rename' || !renameTitle.trim()) return;
@@ -1129,7 +1139,35 @@ export default function App() {
       editor.commands.focus(undefined, { scrollIntoView: false });
     }
     setActiveHeading(index);
-    if (window.matchMedia('(max-width:800px)').matches) setSidebarOpen(false);
+    if (window.matchMedia('(max-width:800px)').matches) setOutlineOpen(false);
+  };
+  const toggleDrafts = () => {
+    if (fullscreen) {
+      setFullscreen(false);
+      setDraftsOpen(true);
+      if (window.matchMedia('(max-width:800px)').matches) setOutlineOpen(false);
+      return;
+    }
+    setDraftsOpen((open) => {
+      const next = !open;
+      if (next && window.matchMedia('(max-width:800px)').matches)
+        setOutlineOpen(false);
+      return next;
+    });
+  };
+  const toggleOutline = () => {
+    if (fullscreen) {
+      setFullscreen(false);
+      setOutlineOpen(true);
+      if (window.matchMedia('(max-width:800px)').matches) setDraftsOpen(false);
+      return;
+    }
+    setOutlineOpen((open) => {
+      const next = !open;
+      if (next && window.matchMedia('(max-width:800px)').matches)
+        setDraftsOpen(false);
+      return next;
+    });
   };
   const toggleFullscreen = () => {
     if (!fullscreen)
@@ -1276,10 +1314,12 @@ export default function App() {
       </div>
     );
   return (
-    <div
-      className={`app ${fullscreen ? 'fullscreen' : ''} ${preview ? 'has-preview' : ''} ${sidebarOpen && !fullscreen ? 'has-document-sidebar' : ''}`}
-    >
-      <header className="app-header">
+    <div className={fullscreen ? 'app fullscreen' : 'app'}>
+      <header
+        className="app-header"
+        aria-hidden={preview || undefined}
+        inert={preview || undefined}
+      >
         <div className="brand">
           <img
             className="brand-mark"
@@ -1366,42 +1406,26 @@ export default function App() {
           >
             <Save size={17} />
           </button>
-          <button
-            className="primary copy-main"
-            aria-label={copying ? '复制中…' : '复制到公众号'}
-            onClick={requestCopy}
-            disabled={copying}
-          >
-            {copying ? (
-              <Loader2 size={16} className="spin" />
-            ) : (
-              <Copy size={16} />
-            )}
-            <span>{copying ? '复制中…' : '复制到公众号'}</span>
-          </button>
         </nav>
       </header>
-      <main className="workspace">
-        <section className={`writing-pane ${preview ? 'mobile-hidden' : ''}`}>
+      <main
+        className="workspace"
+        aria-hidden={preview || undefined}
+        inert={preview || undefined}
+      >
+        <section className="writing-pane">
           <div className="pane-tabs">
             <div className="editor-mode-switches">
               <button
-                className="sidebar-launch"
-                aria-label={
-                  sidebarOpen && !fullscreen ? '折叠侧栏' : '展开侧栏'
-                }
-                title={sidebarOpen && !fullscreen ? '折叠侧栏' : '展开侧栏'}
-                aria-expanded={sidebarOpen && !fullscreen}
-                aria-controls="document-sidebar"
+                className="sidebar-launch drafts-launch"
+                aria-label={draftsOpen && !fullscreen ? '折叠草稿' : '展开草稿'}
+                title={draftsOpen && !fullscreen ? '折叠草稿' : '展开草稿'}
+                aria-expanded={draftsOpen && !fullscreen}
+                aria-controls="drafts-sidebar"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  if (fullscreen) {
-                    setFullscreen(false);
-                    setSidebarOpen(true);
-                  } else setSidebarOpen((open) => !open);
-                }}
+                onClick={toggleDrafts}
               >
-                {sidebarOpen && !fullscreen ? (
+                {draftsOpen && !fullscreen ? (
                   <PanelLeftClose size={19} />
                 ) : (
                   <PanelLeftOpen size={19} />
@@ -1454,47 +1478,68 @@ export default function App() {
                 </span>
               </button>
               <button
-                className="preview-trigger"
-                title={preview ? '关闭预览' : '公众号预览'}
-                onClick={() => setPreview((p) => !p)}
+                className={`preview-trigger ${preview ? 'active' : ''}`}
+                title="公众号预览"
+                aria-haspopup="dialog"
+                aria-expanded={preview}
+                onClick={() => {
+                  setMenu(false);
+                  setContext(null);
+                  setPreview(true);
+                }}
               >
-                <PanelRight size={17} />
-                <span>{preview ? '关闭预览' : '公众号预览'}</span>
+                <Eye size={17} />
+                <span>公众号预览</span>
+              </button>
+              <button
+                className="sidebar-launch outline-launch"
+                aria-label={
+                  outlineOpen && !fullscreen ? '折叠大纲' : '展开大纲'
+                }
+                title={outlineOpen && !fullscreen ? '折叠大纲' : '展开大纲'}
+                aria-expanded={outlineOpen && !fullscreen}
+                aria-controls="outline-sidebar"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleOutline}
+              >
+                {outlineOpen && !fullscreen ? (
+                  <PanelRightClose size={19} />
+                ) : (
+                  <PanelRightOpen size={19} />
+                )}
               </button>
             </div>
           </div>
           <div className="writing-body">
-            {sidebarOpen && !fullscreen && (
-              <>
-                <button
-                  className="document-sidebar-backdrop"
-                  aria-label="关闭侧栏"
-                  onClick={() => setSidebarOpen(false)}
-                />
-                <DocumentSidebar
-                  tab={sidebarTab}
-                  onTab={setSidebarTab}
-                  searching={sidebarSearch}
-                  onSearchToggle={() => setSidebarSearch((v) => !v)}
-                  query={sidebarTab === 'drafts' ? query : outlineQuery}
-                  onQuery={sidebarTab === 'drafts' ? setQuery : setOutlineQuery}
-                  drafts={shownDrafts}
-                  total={drafts.length}
-                  activeId={activeDraft.current?.id}
-                  busy={switching || processing}
-                  onCreate={createDraft}
-                  onSelect={selectDraft}
-                  onRename={(d) => {
-                    setRenameTitle(d.title);
-                    setModal({ type: 'rename', draft: d });
-                  }}
-                  onDelete={deleteDraft}
-                  onReorder={reorderDraft}
-                  headings={headingList}
-                  activeHeading={activeHeading}
-                  onHeading={jump}
-                />
-              </>
+            {(draftsOpen || outlineOpen) && !fullscreen && (
+              <button
+                className="document-sidebar-backdrop"
+                aria-label="关闭侧栏"
+                onClick={() => {
+                  setDraftsOpen(false);
+                  setOutlineOpen(false);
+                }}
+              />
+            )}
+            {draftsOpen && !fullscreen && (
+              <DraftsSidebar
+                searching={draftsSearch}
+                onSearchToggle={() => setDraftsSearch((v) => !v)}
+                query={query}
+                onQuery={setQuery}
+                drafts={shownDrafts}
+                total={drafts.length}
+                activeId={activeDraft.current?.id}
+                busy={switching || processing}
+                onCreate={createDraft}
+                onSelect={selectDraft}
+                onRename={(d) => {
+                  setRenameTitle(d.title);
+                  setModal({ type: 'rename', draft: d });
+                }}
+                onDelete={deleteDraft}
+                onReorder={reorderDraft}
+              />
             )}
             <div className="writing-content">
               <Toolbar
@@ -1504,6 +1549,72 @@ export default function App() {
                 source={mode === 'source'}
                 onCopySource={copySource}
               />
+              {menu && (
+                <div className="floating-menu more-menu">
+                  <button
+                    onClick={() => {
+                      void saveNow(true).catch(() => {});
+                      setMenu(false);
+                    }}
+                  >
+                    <Save size={16} />
+                    保存本地草稿
+                  </button>
+                  <button
+                    onClick={() => {
+                      copySource();
+                      setMenu(false);
+                    }}
+                  >
+                    <FileText size={16} />
+                    复制 Markdown 源码
+                  </button>
+                  <button
+                    onClick={() => {
+                      openDownloads();
+                      setMenu(false);
+                    }}
+                  >
+                    <ImagePlus size={16} />
+                    下载本地图片
+                  </button>
+                  <button
+                    disabled={readOnly}
+                    onClick={() =>
+                      askReplace(
+                        '替换为示例文章',
+                        '这会替换当前正文和结构，取消保持当前草稿。',
+                        () => replaceArticle(SAMPLE),
+                      )
+                    }
+                  >
+                    <RotateCcw size={16} />
+                    替换为示例文章
+                  </button>
+                  <button
+                    disabled={readOnly}
+                    onClick={() =>
+                      askReplace(
+                        '清空草稿',
+                        '正文会清空。建议先导出 Markdown，本地图片资源仍会保留。',
+                        () => replaceArticle(''),
+                      )
+                    }
+                  >
+                    <Trash2 size={16} />
+                    清空草稿
+                  </button>
+                  <button
+                    onClick={() => {
+                      setModal({ type: 'help' });
+                      setMenu(false);
+                    }}
+                  >
+                    <HelpCircle size={16} />
+                    使用说明与快捷键
+                  </button>
+                </div>
+              )}
               <div className="writing-surface">
                 <div className="context-overlay">
                   {mode === 'wysiwyg' && !readOnly && inTable && (
@@ -1631,42 +1742,31 @@ export default function App() {
                     />
                   )}
                 </div>
+                {!outlineOpen && !fullscreen && (
+                  <OutlineMinimap
+                    headings={headingList}
+                    activeHeading={activeHeading}
+                    onHeading={jump}
+                  />
+                )}
               </div>
             </div>
+            {outlineOpen && !fullscreen && (
+              <OutlineSidebar
+                headings={headingList}
+                activeHeading={activeHeading}
+                onHeading={jump}
+                onClose={() => setOutlineOpen(false)}
+              />
+            )}
           </div>
         </section>
-        {preview && (
-          <aside className="preview-pane">
-            <div className="preview-header">
-              <h2>公众号预览</h2>
-              <span>{preparing ? '准备排版…' : '与复制使用同一排版'}</span>
-              <button
-                aria-label="关闭预览"
-                title="关闭预览"
-                onClick={() => setPreview(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="preview-scroll">
-              <SettingsPanel settings={settings} onChange={changeSettings} />
-              <div className="preview-explanation">
-                手机阅读宽度 · 图片与图形迁移前需确认
-              </div>
-              {renderError ? (
-                <p className="output-error">{renderError}</p>
-              ) : (
-                <ArticlePreview
-                  output={output}
-                  preparing={preparing}
-                  onMedia={setMedia}
-                />
-              )}
-            </div>
-          </aside>
-        )}
       </main>
-      <footer className="app-footer">
+      <footer
+        className="app-footer"
+        aria-hidden={preview || undefined}
+        inert={preview || undefined}
+      >
         <span>
           字数：{words.toLocaleString()}
           <i />
@@ -1702,72 +1802,6 @@ export default function App() {
           <HelpCircle size={15} />
         </button>
       </footer>
-      {menu && (
-        <div className="floating-menu more-menu">
-          <button
-            onClick={() => {
-              void saveNow(true).catch(() => {});
-              setMenu(false);
-            }}
-          >
-            <Save size={16} />
-            保存本地草稿
-          </button>
-          <button
-            onClick={() => {
-              copySource();
-              setMenu(false);
-            }}
-          >
-            <FileText size={16} />
-            复制 Markdown 源码
-          </button>
-          <button
-            onClick={() => {
-              openDownloads();
-              setMenu(false);
-            }}
-          >
-            <ImagePlus size={16} />
-            下载本地图片
-          </button>
-          <button
-            disabled={readOnly}
-            onClick={() =>
-              askReplace(
-                '替换为示例文章',
-                '这会替换当前正文和结构，取消保持当前草稿。',
-                () => replaceArticle(SAMPLE),
-              )
-            }
-          >
-            <RotateCcw size={16} />
-            替换为示例文章
-          </button>
-          <button
-            disabled={readOnly}
-            onClick={() =>
-              askReplace(
-                '清空草稿',
-                '正文会清空。建议先导出 Markdown，本地图片资源仍会保留。',
-                () => replaceArticle(''),
-              )
-            }
-          >
-            <Trash2 size={16} />
-            清空草稿
-          </button>
-          <button
-            onClick={() => {
-              setModal({ type: 'help' });
-              setMenu(false);
-            }}
-          >
-            <HelpCircle size={16} />
-            使用说明与快捷键
-          </button>
-        </div>
-      )}
       {context && (
         <div
           ref={contextElement}
@@ -1885,6 +1919,20 @@ export default function App() {
             onClose={closeShareImport}
           />
         </Suspense>
+      )}
+      {preview && (
+        <PreviewDialog
+          settings={settings}
+          onSettingsChange={changeSettings}
+          output={output}
+          preparing={preparing}
+          renderError={renderError}
+          copying={copying}
+          onCopy={requestCopy}
+          onMedia={setMedia}
+          onClose={() => setPreview(false)}
+          obscured={!!modal || !!media}
+        />
       )}
       {modal && (
         <Dialog
@@ -2158,8 +2206,9 @@ export default function App() {
                 </small>
               </div>
               <p>
-                在左侧写作，按需打开公众号预览。复制时仅使用现代 Clipboard
-                API，同时写入 HTML 和纯文本；失败会保留草稿并显示原因。
+                左侧管理草稿，右侧查看大纲，随时弹出公众号预览。复制时仅使用现代
+                Clipboard API，同时写入 HTML
+                和纯文本；失败会保留草稿并显示原因。
               </p>
               <dl>
                 <dt>保存</dt>

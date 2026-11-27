@@ -504,8 +504,6 @@ test('the storage dialog clears images left behind in this visit', async ({
     );
     await storage.storeImage(blob);
   });
-  await page.getByRole('button', { name: '展开侧栏' }).click();
-  await page.getByRole('button', { name: '切换到草稿' }).click();
   await page.getByRole('button', { name: '新建文章' }).click();
   await page.getByRole('button', { name: '查看本地草稿占用' }).click();
   await expect(page.locator('.storage-usage')).toContainText('未引用');

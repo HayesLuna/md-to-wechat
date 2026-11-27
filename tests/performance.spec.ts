@@ -225,6 +225,7 @@ test('export flushes pending input and rich copy refuses an obsolete snapshot', 
       m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()])
     );
   });
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.evaluate(() => {
     (window as any).__richCopyCalls = 0;
     Object.defineProperty(navigator.clipboard, 'write', {
@@ -236,9 +237,12 @@ test('export flushes pending input and rich copy refuses an obsolete snapshot', 
     const e = (window as any).__mojian.editor;
     e.commands.setTextSelection(e.state.doc.content.size - 1);
     e.commands.insertContent('最后输入');
-    (document.querySelector('.copy-main') as HTMLButtonElement).click();
+    (
+      document.querySelector('.preview-copy-button') as HTMLButtonElement
+    ).click();
   });
   expect(await page.evaluate(() => (window as any).__richCopyCalls)).toBe(0);
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   const downloaded = page.waitForEvent('download');
   await page.evaluate(() => {
     const e = (window as any).__mojian.editor;
@@ -444,13 +448,14 @@ test('large articles save without background output and prepare the latest versi
       );
     }),
   ).toBe(false);
-  await page.getByRole('button', { name: '复制到公众号', exact: true }).click();
+  await page.getByRole('button', { name: '公众号预览', exact: true }).click();
   await page.waitForFunction(() => {
     const m = (window as any).__mojian;
     return (
       m.getOutput()?.key === JSON.stringify([m.getMarkdown(), m.getSettings()])
     );
   });
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
   await page.evaluate(
     (text) => (window as any).__mojian.setMarkdown(text + '\n\n最新修改'),
     first,
